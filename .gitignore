@@ -1,0 +1,10 @@
+# OS
+.DS_Store
+
+# 環境変数・秘密情報
+.env
+
+# 実行時生成物(M0で拡充する)
+node_modules/
+saves/
+logs/
