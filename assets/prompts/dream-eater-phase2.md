@@ -4,7 +4,7 @@
 - Kind: boss battle graphic
 - Enemy: 夢喰い(ゆめくい) 第2形態
 - Record created: 2026-07-03
-- Generation mode: Image Gen built-in tool + chroma-key removal
+- Generation mode: Image Gen built-in tool + flat-background removal
 
 ## 外見典拠
 
@@ -85,3 +85,51 @@ Hard constraints: no humanoid face, no eyes, no horns, no wings, no weapons, no 
 - Image Gen出力をフラットな緑クロマキー背景で生成。
 - `remove_chroma_key.py` で背景を透過後、768x768へリサイズし、`assets/enemies/dream-eater-phase2.png` に上書き保存。
 - 最終PNGは768x768 RGBA。透明コーナー、キー色残留なしを確認。
+
+## 2026-07-03 レビュー対応再々生成
+
+人間レビューで、採用済みの試行2が「原型が無さすぎる。第1形態の面影がない」と判断されたため上書き再生成。試行2は縦に対称な祭壇状・放射状の構造へ寄り、第1形態の「うずくまった非対称の歯車の巨躯」というボディプランが消えていた。
+
+今回の狙いは、試行1の「第1形態と似すぎ」と試行2の「第1形態から離れすぎ」の中間。第1形態 `assets/enemies/dream-eater.png` を構図・シルエット・部品配置の直接参照として扱い、同じ三/四半身アングル、同じうずくまった非対称の歯車塊、同じ中央巨大歯車と上部の破断歯車弧を保つ。その土台に対し、差分は靄の剥落、裂け目、琥珀光の3点へ限定した。
+
+### 採用プロンプト全文
+
+```text
+Edit the immediately preceding reference image (assets/enemies/dream-eater.png, the smoky phase 1 Dream Eater) into phase 2 while preserving its composition almost exactly.
+
+Use case: precise-object-edit / stylized-concept
+Asset type: boss battle cutout for The Dreaming Engine, square PNG after chroma-key removal
+Primary request: keep the same monster, same body plan, same three-quarter angle, same hunched crouching asymmetrical silhouette, and same major gear placements as the reference image. Treat the reference as a locked underdrawing: do not redesign the body, do not make it upright, do not center it into a symbol. Only escalate the existing phase 1 by removing mist, opening cracks, and increasing amber furnace light.
+
+Must preserve from the reference image:
+- Overall outline: wide, low, hunched, crouched, irregular mass, leaning slightly left-to-right, not vertical.
+- Large broken gear ring behind the body: remains near upper center-left, same approximate size and arc orientation.
+- Main cracked circular gear core: remains near the visual center, slightly above midline, same approximate size and angle.
+- Left-lower bulky gearwork and right-lower gear cluster: remain in the same approximate positions.
+- Asymmetry and piled mechanical weight: keep it like a crouched heap of gears wrapped in torn dream matter.
+
+Phase 2 changes only:
+1. Mist peeled away: reduce the blue-grey mist to ragged remnants and edge wisps. The previous mist silhouette should still be faintly traceable as torn vapor, but most of the body is exposed rusted gearwork and black metal.
+2. Cracks and mouth-like rifts: add one dominant jagged rupture across/through the existing central gear, glowing from within, plus 3 to 5 smaller dry mouth-shaped slits tucked between existing gears. These must be mechanical black hollows, not organic mouths. Avoid many repeated round mouths.
+3. Amber glow escalation: increase muted amber furnace light clearly beyond phase 1, concentrated in the central rupture and a few smaller slits. It should glow like a starving engine, not red fire or flashy magic.
+
+Style/medium: dark fantasy painterly illustration, muted desaturated colors, low contrast, melancholic dreamlike mood, consistent with the reference asset. Tarnished brass, charcoal-black corroded metal, ash grey, sparse blue-grey mist, muted amber glow.
+Materials/textures: dry cracked metal, exposed rusted gear teeth, soot-dark mechanical cavities, torn fog wisps. No wet surfaces.
+
+Composition/framing: match the reference image's apparent bounding box and padding. Full boss visible. Three-quarter view. Irregular crouched non-humanoid gear-body. Avoid symmetry: no vertical split altar, no mirrored arcs, no radial burst, no mandala, no flower aperture, no upright tower.
+
+Lore mood: a machine in pain and starvation, reflexive rampage, mournful rather than evil.
+
+Background for removal: perfectly flat solid #00ff00 chroma-key background. The background must be one uniform color with no shadows, gradients, texture, floor, reflection, lighting variation, or contact shadow. Keep the subject fully separated from the background with crisp edges and generous padding. Do not use #00ff00 anywhere in the subject.
+Text: none.
+Hard constraints: no blood, no gore, no wet organic tissue, no lips, no tongue, no gums, no humanoid face, no eyes, no horns, no wings, no arms, no legs, no claws, no weapons, no armor, no title text, no watermark, no frame, no UI.
+```
+
+### 試行メモ
+
+- 試行1: 第1形態との連続性は強かったが、靄・裂け目・琥珀光の差分が弱く、ラスボス第2形態として大差がないと判断された。
+- 試行2: ラスボス感を強めるため歯車弧と中央大裂け目を展開したが、縦対称の祭壇状シルエットになり、第1形態のうずくまった非対称ボディプランを失った。
+- 試行3(今回): 第1形態を直接の構図参照として扱い、うずくまった三/四半身の巨躯、中央巨大歯車、上部の破断歯車弧、左右下部の歯車塊を保ったまま、靄の剥落・中央大裂け目・小裂け目・琥珀炉光だけを増やした。
+- Image Gen built-in toolで生成。2回目の出力が第1形態の構図に最も近かったため採用。
+- 出力は黒フラット背景だったため、四辺からつながる暗背景のみをローカルでマスク化し、内部の黒い機械空洞を残して透過。768x768へリサイズし、`assets/enemies/dream-eater-phase2.png` に上書き保存。
+- 最終PNGは768x768 RGBA。透明コーナーを確認。
