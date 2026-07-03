@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ENEMY_DISPLAY_NAMES } from "../ids.js";
+import { ENEMY_DISPLAY_NAMES, enemyIdSchema } from "../ids.js";
 import type { EnemyId } from "../ids.js";
 import { createRng, rngFromState } from "../rng.js";
 import type { Rng, RngState } from "../rng.js";
@@ -12,7 +12,7 @@ import type { ItemId } from "./items.js";
 import { SKILLS } from "./skills.js";
 import { skillIdSchema } from "./skills.js";
 import { statsForLevel, xpToNext, MAX_LEVEL } from "./stats.js";
-import { POISON_DURATION, poisonTickDamage, STATUS_DISPLAY_NAMES } from "./status.js";
+import { POISON_DURATION, poisonTickDamage, STATUS_DISPLAY_NAMES, statusIdSchema, statusStateSchema } from "./status.js";
 import type { StatusId, StatusState } from "./status.js";
 
 // ---------------------------------------------------------------------------
@@ -118,6 +118,77 @@ export interface ResolveTurnResult {
   state: BattleState;
   events: BattleEvent[];
 }
+
+// ---------------------------------------------------------------------------
+// 戦闘イベントの zod スキーマ(server→client の battle-events メッセージ検証用)。
+// 手書きの BattleEvent 型と構造を一致させる(双方向の代入可能性をテストで担保)。
+// ---------------------------------------------------------------------------
+
+export const combatantSchema = z.enum(["player", "enemy"]);
+export const battleOutcomeSchema = z.enum(["ongoing", "victory", "defeat", "fled"]);
+export const commandRejectReasonSchema = z.enum([
+  "battle-over",
+  "not-enough-mp",
+  "flee-not-allowed",
+  "unusable-item",
+  "unknown-skill"
+]);
+
+export const battleEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("action"),
+    actor: combatantSchema,
+    actionKind: z.enum(["attack", "skill"]),
+    actionName: z.string(),
+    mpCost: z.number().int().optional(),
+    message: z.string()
+  }),
+  z.object({ type: z.literal("item-used"), itemId: itemIdSchema, itemName: z.string(), message: z.string() }),
+  z.object({
+    type: z.literal("damage"),
+    target: combatantSchema,
+    amount: z.number().int(),
+    remainingHp: z.number().int(),
+    message: z.string()
+  }),
+  z.object({
+    type: z.literal("heal"),
+    target: combatantSchema,
+    hpRestored: z.number().int(),
+    remainingHp: z.number().int(),
+    message: z.string()
+  }),
+  z.object({ type: z.literal("status-inflicted"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
+  z.object({
+    type: z.literal("status-tick"),
+    target: combatantSchema,
+    status: statusIdSchema,
+    amount: z.number().int(),
+    remainingHp: z.number().int(),
+    message: z.string()
+  }),
+  z.object({ type: z.literal("status-cured"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
+  z.object({ type: z.literal("status-expired"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
+  z.object({ type: z.literal("phase-change"), enemyId: enemyIdSchema, phaseIndex: z.number().int(), message: z.string() }),
+  z.object({ type: z.literal("flee"), success: z.boolean(), message: z.string() }),
+  z.object({
+    type: z.literal("victory"),
+    xpGained: z.number().int(),
+    goldGained: z.number().int(),
+    drops: z.array(itemIdSchema),
+    message: z.string()
+  }),
+  z.object({ type: z.literal("level-up"), fromLevel: z.number().int(), toLevel: z.number().int(), message: z.string() }),
+  z.object({ type: z.literal("defeat"), message: z.string() }),
+  z.object({ type: z.literal("command-rejected"), reason: commandRejectReasonSchema, message: z.string() })
+]);
+
+/** 戦闘中の戦闘員(プレイヤー/敵)の表示用状態(スナップショット用) */
+export const battleUnitViewSchema = z.object({
+  hp: z.number().int(),
+  maxHp: z.number().int(),
+  statuses: z.array(statusStateSchema)
+});
 
 // ---------------------------------------------------------------------------
 // ダメージ・逃走・行動順(game-design.md「ターン制戦闘」の式を厳守)

@@ -1,16 +1,18 @@
+import { z } from "zod";
+
+import { positionSchema, samePosition } from "../geometry.js";
 import type { Position } from "../geometry.js";
-import { samePosition } from "../geometry.js";
-import { RESPAWNABLE_ENEMY_IDS } from "../ids.js";
-import type { EnemyId } from "../ids.js";
+import { enemyIdSchema, RESPAWNABLE_ENEMY_IDS } from "../ids.js";
 import { isWalkable } from "../map.js";
 import type { MapDefinition } from "../map.js";
 import type { Rng } from "../rng.js";
 
 /** 敵シンボルの配置(マップ上に置く1体分) */
-export interface EnemySymbolPlacement {
-  position: Position;
-  enemyId: EnemyId;
-}
+export const enemySymbolPlacementSchema = z.object({
+  position: positionSchema,
+  enemyId: enemyIdSchema
+});
+export type EnemySymbolPlacement = z.infer<typeof enemySymbolPlacementSchema>;
 
 /**
  * マップの enemySymbols 設定に従い、敵シンボルの出現数・配置座標・敵種をサンプリングする。
