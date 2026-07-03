@@ -1,6 +1,10 @@
 # OS
 .DS_Store
 
+#Agent
+.codex
+.claude
+
 # 環境変数・秘密情報(.env.local / .env.development 等の派生も含めて無視)
 .env*
 !.env.example
