@@ -1,0 +1,314 @@
+[
+  {
+    "id": "battle-dungeon",
+    "path": "assets/backgrounds/battle-dungeon.png",
+    "kind": "battle-background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/battle-dungeon.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "battle-field",
+    "path": "assets/backgrounds/battle-field.png",
+    "kind": "battle-background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/battle-field.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "chapel-interior",
+    "path": "assets/backgrounds/chapel-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/chapel-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "dungeon",
+    "path": "assets/backgrounds/dungeon.png",
+    "kind": "background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/dungeon.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "ed-1",
+    "path": "assets/backgrounds/ed-1.png",
+    "kind": "ending",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/ed-1.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "ed-2",
+    "path": "assets/backgrounds/ed-2.png",
+    "kind": "ending",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/ed-2.md",
+    "createdAt": "2026-07-03",
+    "note": "プロンプト原文逸失のため画像特徴から復元"
+  },
+  {
+    "id": "field",
+    "path": "assets/backgrounds/field.png",
+    "kind": "background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/field.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "inn-interior",
+    "path": "assets/backgrounds/inn-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/inn-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "op-1",
+    "path": "assets/backgrounds/op-1.png",
+    "kind": "opening",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/op-1.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "op-2",
+    "path": "assets/backgrounds/op-2.png",
+    "kind": "opening",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/op-2.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "shop-interior",
+    "path": "assets/backgrounds/shop-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/shop-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "tavern-interior",
+    "path": "assets/backgrounds/tavern-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/tavern-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "town",
+    "path": "assets/backgrounds/town.png",
+    "kind": "background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/town.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "candle-eater",
+    "path": "assets/enemies/candle-eater.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/candle-eater.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "creaking-doll",
+    "path": "assets/enemies/creaking-doll.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/creaking-doll.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "dream-eater-phase2",
+    "path": "assets/enemies/dream-eater-phase2.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 768,
+      "h": 768
+    },
+    "promptFile": "assets/prompts/dream-eater-phase2.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "dream-eater",
+    "path": "assets/enemies/dream-eater.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 768,
+      "h": 768
+    },
+    "promptFile": "assets/prompts/dream-eater.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "mist-wolf",
+    "path": "assets/enemies/mist-wolf.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/mist-wolf.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-informant",
+    "path": "assets/portraits/npc-informant.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-informant.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-innkeeper",
+    "path": "assets/portraits/npc-innkeeper.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-innkeeper.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-merchant",
+    "path": "assets/portraits/npc-merchant.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-merchant.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-priest",
+    "path": "assets/portraits/npc-priest.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-priest.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "player",
+    "path": "assets/portraits/player.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/player.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "title-background",
+    "path": "assets/title/title-background.png",
+    "kind": "title",
+    "sizePx": {
+      "w": 1672,
+      "h": 941
+    },
+    "promptFile": "assets/prompts/title-background.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "cursor",
+    "path": "assets/ui/cursor.png",
+    "kind": "ui",
+    "sizePx": {
+      "w": 128,
+      "h": 128
+    },
+    "promptFile": "assets/prompts/cursor.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "window-frame",
+    "path": "assets/ui/window-frame.png",
+    "kind": "ui",
+    "sizePx": {
+      "w": 1024,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/window-frame.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  }
+]
