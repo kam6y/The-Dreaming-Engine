@@ -3,11 +3,12 @@ import Phaser from "phaser";
 import { GAME_TITLE } from "@dreaming-engine/shared";
 
 import { initializeRun } from "../game-state.js";
+import { MenuList } from "../ui/menu-list.js";
 
 /**
- * タイトル画面。
- * M1時点では「新規ゲーム」のみ(「つづきから」はM3で追加)。
- * Enter / スペースで探索シーンを開始する。
+ * タイトル画面。「新規ゲーム」と「つづきから」のメニューを持つ。
+ * 「つづきから」はサーバーのセーブ有無で有効化する(M3のサーバー配線で接続。
+ * 配線されるまでは無効表示)。
  * スケールモードRESIZEのため、リサイズ時に中央へ再配置する。
  */
 export class TitleScene extends Phaser.Scene {
@@ -15,7 +16,9 @@ export class TitleScene extends Phaser.Scene {
 
   private subtitleText!: Phaser.GameObjects.Text;
 
-  private startText!: Phaser.GameObjects.Text;
+  private menu!: MenuList;
+
+  private uiLayer!: Phaser.GameObjects.Container;
 
   public constructor() {
     super("title");
@@ -23,6 +26,7 @@ export class TitleScene extends Phaser.Scene {
 
   public create(): void {
     this.cameras.main.setBackgroundColor("#000000");
+    this.uiLayer = this.add.container(0, 0);
 
     this.titleText = this.add
       .text(0, 0, GAME_TITLE, {
@@ -38,31 +42,23 @@ export class TitleScene extends Phaser.Scene {
         fontSize: "20px"
       })
       .setOrigin(0.5);
-    this.startText = this.add
-      .text(0, 0, "▶ 新規ゲーム(Enter)", {
-        color: "#d8c98f",
-        fontFamily: "serif",
-        fontSize: "24px"
-      })
-      .setOrigin(0.5);
 
-    this.layout();
-
-    this.tweens.add({
-      targets: this.startText,
-      alpha: 0.45,
-      duration: 900,
-      yoyo: true,
-      repeat: -1
+    this.menu = new MenuList(this, this.uiLayer, {
+      items: [
+        { id: "new-game", label: "新規ゲーム" },
+        // M3のサーバー配線でセーブ有無に応じて有効化する
+        { id: "continue", label: "つづきから", disabled: true }
+      ],
+      x: 0,
+      y: 0,
+      width: 240,
+      onSelect: (id) => {
+        this.onMenuSelected(id);
+      }
     });
 
-    const startGame = (): void => {
-      initializeRun(this.game);
-      this.scene.start("exploration");
-    };
-
-    this.input.keyboard?.on("keydown-ENTER", startGame);
-    this.input.keyboard?.on("keydown-SPACE", startGame);
+    this.layout();
+    this.menu.activate();
 
     const onResize = (): void => {
       this.layout();
@@ -73,11 +69,24 @@ export class TitleScene extends Phaser.Scene {
     });
   }
 
+  private onMenuSelected(id: string): void {
+    if (id === "new-game") {
+      // 既存セーブがある場合の上書き確認はサーバー配線時に追加する
+      this.startNewGame();
+    }
+  }
+
+  private startNewGame(): void {
+    this.menu.deactivate();
+    initializeRun(this.game);
+    this.scene.start("exploration");
+  }
+
   private layout(): void {
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
-    this.titleText.setPosition(centerX, centerY - 56);
-    this.subtitleText.setPosition(centerX, centerY + 4);
-    this.startText.setPosition(centerX, centerY + 114);
+    this.titleText.setPosition(centerX, centerY - 96);
+    this.subtitleText.setPosition(centerX, centerY - 36);
+    this.menu.setPosition(centerX - 120, centerY + 48);
   }
 }

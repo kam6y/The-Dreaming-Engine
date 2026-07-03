@@ -150,6 +150,11 @@ export class MenuList {
     this.container.destroy(true);
   }
 
+  /** リサイズ時などの再配置用 */
+  public setPosition(x: number, y: number): void {
+    this.container.setPosition(x, y);
+  }
+
   private move(delta: number): void {
     const count = this.options.items.length;
     if (count === 0) {
