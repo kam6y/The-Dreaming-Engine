@@ -6,8 +6,8 @@
 ## 概要
 
 ゲーム実行中に生成AI(Claude Agent SDK)を組み込んだ、日本語のダークファンタジー2D RPG。
-開発は人間が直接コードを書かず、codexの/goal・/loopによる超長時間自律駆動で行う。
-画像アセットは開発時にcodexのImage Genで生成する。
+開発は人間が直接コードを書かず、Claude Codeの/goal・/loopによる超長時間自律駆動で行う。
+画像アセットは開発時にcodex(Image Gen)へ委譲して生成する。
 
 ## 決定事項
 
@@ -20,7 +20,7 @@
 | AIの役割 | NPC自由会話 / クエスト・イベント動的生成 / 情景描写 / GM的世界変化 |
 | AIの権限 | 定義済みツール経由の構造化提案のみ。サーバー側で検証後に適用 |
 | 戦闘 | ターン制コマンド戦闘。ロジックは決定論的コード、AIは演出のみ |
-| 画像 | 開発時にcodex Image Genで生成しコミット。タイルは対象外 |
+| 画像 | 開発時にcodex(Image Gen)へ委譲して生成しコミット。タイルは対象外 |
 | 規模 | 縦切り(街1+ダンジョン1+ボス+セーブ)完成後、/loopで無限拡張 |
 | 言語 | UI・AI応答ともすべて日本語 |
 
@@ -30,7 +30,8 @@ pnpm workspaceモノレポ:
 
 ```
 The-Dreaming-Engine/
-├── AGENTS.md                    # codexが毎セッション読む開発憲法
+├── CLAUDE.md                    # Claude Codeが毎セッション読む開発憲法
+├── AGENTS.md                    # codex向けの注意(画像アセット生成専用)
 ├── docs/
 │   ├── spec/                    # game-design / world-lore / ai-integration / ai-guardrails / asset-pipeline
 │   ├── prompts/                 # goal-vertical-slice.md(/goal用) / loop-expansion.md(/loop用)
@@ -93,7 +94,7 @@ The-Dreaming-Engine/
 
 ## ゲーム仕様(縦切り)
 
-- 世界観: 「壊れかけた夢の機関が生む、まどろみの世界」のダークファンタジー。命名・ロアの正は`docs/spec/world-lore.md`(未記載の細部のみcodexの裁量)
+- 世界観: 「壊れかけた夢の機関が生む、まどろみの世界」のダークファンタジー。命名・ロアの正は`docs/spec/world-lore.md`(未記載の細部のみClaude Codeの裁量)
 - 拠点の街: NPC4人(宿屋の主人=セーブ/宿泊、商人=店、情報屋=サブクエスト起点、謎の司祭=メインクエスト進行)
 - フィールド1 + ダンジョン3層 + ボス「夢喰い」。撃破でエンディング=縦切り完成
 - ターン制戦闘(攻撃/スキル/アイテム/逃走)、シンボルエンカウント、レベル/経験値/ゴールド/インベントリ
@@ -102,7 +103,7 @@ The-Dreaming-Engine/
 
 ## アセットパイプライン
 
-- codex Image Genで生成: タイトル、立ち絵(主人公+NPC4)、敵・ボス、背景、UI装飾
+- codex(Image Gen)への委譲で生成: タイトル、立ち絵(主人公+NPC4)、敵・ボス、背景、UI装飾
 - 統一スタイルガイド(暗め・彩度低め・ダークファンタジー)を仕様化
 - タイルマップは生成画像を使わない(グリッド整合性の問題)。コード生成プレースホルダー→将来CC0素材
 - 生成プロンプトを`assets/prompts/`に保存、`assets/manifest.json`で管理
@@ -120,9 +121,9 @@ The-Dreaming-Engine/
 - `pnpm check`(typecheck+lint+test+build+シークレットスキャン)が品質ゲート。通らない限りコミット禁止
 - 実AI疎通は`pnpm test:ai-live`に分離(明示実行のみ)
 
-## codex運用
+## Claude Code運用
 
-- AGENTS.md: 開発憲法。作業開始時にJOURNAL/ROADMAP必読、終了時に更新義務
+- CLAUDE.md: 開発憲法。作業開始時にJOURNAL/ROADMAP必読、終了時に更新義務
 - ROADMAP.md: M0環境構築→M1マップ移動→M2戦闘→M3セーブ→M4 AI統合→M5アセット→M6縦切り完成
 - /goal用プロンプト: M6完遂までの自己完結型駆動指示
 - /loop用プロンプト: 1イテレーション=タスク1つ選択→実装→検証→コミット→ドキュメント更新。縦切り後はBACKLOGから無限拡張
