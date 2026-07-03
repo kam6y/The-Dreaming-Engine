@@ -6,16 +6,22 @@ import {
   NEW_GAME_START,
   NPC_DISPLAY_NAMES,
   interactionTarget,
+  sampleEnemySymbols,
+  samePosition,
   tileTypeAt,
   transitionAt,
   tryMove,
   type Direction,
+  type EnemyId,
+  type EnemySymbolPlacement,
   type MapDefinition,
   type MapId,
   type Position,
   type TileType
 } from "@dreaming-engine/shared";
 
+import { encountersDisabled, getEncounterRng } from "../game-state.js";
+import type { BattleSceneData } from "./battle-scene.js";
 import { DialogBox } from "../ui/dialog-box.js";
 
 /** タイル1マスのピクセルサイズ(game-design.md「マップ構成」) */
@@ -41,10 +47,23 @@ const OBJECT_COLORS: Record<string, number> = {
   gather: 0x6fa06b
 };
 
+/** 敵シンボルのプレースホルダーカラー(敵種別。グラフィックはM5) */
+const SYMBOL_COLORS: Record<EnemyId, number> = {
+  "mist-wolf": 0x9aa7b8,
+  "candle-eater": 0xc9a25c,
+  "creaking-doll": 0x8a7f8f,
+  "dream-eater": 0x5c2431
+};
+
 interface ExplorationSceneData {
   mapId?: MapId;
   position?: Position;
   facing?: Direction;
+  /**
+   * 敵シンボルの残存状態(戦闘からの復帰時に引き継ぐ)。
+   * 未指定ならマップ入場としてサンプリングし直す(=撃破分のリスポーン)
+   */
+  symbols?: EnemySymbolPlacement[];
 }
 
 /**
@@ -90,12 +109,19 @@ export class ExplorationScene extends Phaser.Scene {
     super("exploration");
   }
 
+  private symbols: EnemySymbolPlacement[] = [];
+
+  private symbolViews: Phaser.GameObjects.GameObject[] = [];
+
+  private pendingSymbols: EnemySymbolPlacement[] | undefined;
+
   public init(data: ExplorationSceneData): void {
     const mapId = data.mapId ?? NEW_GAME_START.mapId;
     this.map = MAPS[mapId];
     this.playerPosition = data.position ?? NEW_GAME_START.position;
     this.facing = data.facing ?? NEW_GAME_START.facing;
     this.moving = false;
+    this.pendingSymbols = data.symbols;
   }
 
   public create(): void {
@@ -104,11 +130,17 @@ export class ExplorationScene extends Phaser.Scene {
     this.worldLayer = this.add.container(0, 0);
     this.uiLayer = this.add.container(0, 0).setDepth(1000);
 
+    // 戦闘復帰時は残存シンボルを引き継ぎ、新規入場時はサンプリング(=リスポーン)
+    this.symbols =
+      this.pendingSymbols ??
+      (encountersDisabled() ? [] : sampleEnemySymbols(this.map, getEncounterRng(this)));
+
     this.drawTiles();
     this.drawTransitions();
     this.drawObjects();
     this.drawNpcs();
     this.drawBoss();
+    this.drawEnemySymbols();
     this.createPlayer();
     this.setupHud();
     this.setupCamera();
@@ -239,6 +271,34 @@ export class ExplorationScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
     );
+  }
+
+  private drawEnemySymbols(): void {
+    this.symbolViews.forEach((view) => {
+      view.destroy();
+    });
+    this.symbolViews = [];
+    for (const symbol of this.symbols) {
+      const { x, y } = this.tileCenter(symbol.position);
+      const diamond = this.add
+        .polygon(
+          x,
+          y,
+          [0, -12, 12, 0, 0, 12, -12, 0],
+          SYMBOL_COLORS[symbol.enemyId]
+        )
+        .setStrokeStyle(2, 0x0b0d12);
+      this.tweens.add({
+        targets: diamond,
+        scale: 1.15,
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut"
+      });
+      this.worldLayer.add(diamond);
+      this.symbolViews.push(diamond);
+    }
   }
 
   private createPlayer(): void {
@@ -382,6 +442,13 @@ export class ExplorationScene extends Phaser.Scene {
       return;
     }
 
+    // 敵シンボルへの接触判定(シンボルはマップデータ外の動的存在のためここで判定)
+    const symbolIndex = this.symbols.findIndex((s) => samePosition(s.position, result.position));
+    if (symbolIndex >= 0) {
+      this.startBattle(symbolIndex);
+      return;
+    }
+
     this.moving = true;
     this.playerPosition = result.position;
 
@@ -396,6 +463,30 @@ export class ExplorationScene extends Phaser.Scene {
         this.syncDomState();
         this.checkTransition();
       }
+    });
+  }
+
+  private startBattle(symbolIndex: number): void {
+    const symbol = this.symbols[symbolIndex];
+    if (symbol === undefined) {
+      return;
+    }
+    this.moving = true; // 遷移中の追加入力を止める
+    const seed = getEncounterRng(this).int(0, 0x7fffffff);
+    const data: BattleSceneData = {
+      enemyId: symbol.enemyId,
+      seed,
+      returnTo: {
+        mapId: this.map.id,
+        position: this.playerPosition,
+        facing: this.facing,
+        symbols: this.symbols,
+        symbolIndex
+      }
+    };
+    this.cameras.main.fadeOut(240, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start("battle", data);
     });
   }
 
@@ -476,9 +567,12 @@ export class ExplorationScene extends Phaser.Scene {
   private syncDomState(): void {
     const game = document.querySelector<HTMLDivElement>("#game");
     if (game !== null) {
+      game.dataset["scene"] = "exploration";
       game.dataset["mapId"] = this.map.id;
       game.dataset["playerX"] = String(this.playerPosition.x);
       game.dataset["playerY"] = String(this.playerPosition.y);
+      game.dataset["symbolCount"] = String(this.symbols.length);
+      delete game.dataset["battleEnemy"];
     }
   }
 }

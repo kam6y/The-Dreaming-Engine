@@ -2,6 +2,8 @@ import Phaser from "phaser";
 
 import { GAME_TITLE } from "@dreaming-engine/shared";
 
+import { initializeRun } from "../game-state.js";
+
 /**
  * タイトル画面。
  * M1時点では「新規ゲーム」のみ(「つづきから」はM3で追加)。
@@ -55,6 +57,7 @@ export class TitleScene extends Phaser.Scene {
     });
 
     const startGame = (): void => {
+      initializeRun(this.game);
       this.scene.start("exploration");
     };
 

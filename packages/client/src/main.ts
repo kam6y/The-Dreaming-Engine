@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import "./style.css";
 
 import { connectToServer } from "./net/connection.js";
+import { BattleScene } from "./scenes/battle-scene.js";
 import { ExplorationScene } from "./scenes/exploration-scene.js";
 import { TitleScene } from "./scenes/title-scene.js";
 
@@ -18,7 +19,7 @@ new Phaser.Game({
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [TitleScene, ExplorationScene]
+  scene: [TitleScene, ExplorationScene, BattleScene]
 });
 
 connectToServer();
