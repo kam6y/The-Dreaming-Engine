@@ -95,5 +95,36 @@
 
 ## ゲームのセットアップ・遊び方
 
-(M0完了時にcodexがセットアップ手順を、M6完了時に遊び方・スクリーンショットを
-このREADMEへ追記する: ROADMAP M0/M6参照)
+### セットアップ
+
+```bash
+pnpm install
+```
+
+ゲーム内AIの認証はM4以降の実AI確認で使う。既定は `.env` の
+`CLAUDE_CODE_OAUTH_TOKEN`、代替は `ANTHROPIC_API_KEY`。両方ある場合はOAuthを優先する。
+開発・E2Eは `AI_MODE=mock` で実AIを呼ばない。
+
+### 開発起動
+
+```bash
+pnpm dev
+pnpm dev:mock
+```
+
+- クライアント: `http://127.0.0.1:5173`
+- サーバー: `http://127.0.0.1:3000`
+- Viteは `127.0.0.1` 限定、`.env*` / `saves/` / `logs/` を配信拒否する
+- サーバーは `127.0.0.1` 限定、HTTP/WSのOrigin許可リストを検証する
+
+### 検証
+
+```bash
+pnpm check
+pnpm test:e2e
+```
+
+`pnpm check` は typecheck、lint、Vitest、build、シークレットスキャンを実行する。
+`pnpm test:e2e` はモックAI前提で、タイトル表示とWebSocket ping/pongを確認する。
+
+M6完了時に遊び方・スクリーンショットを追記する。

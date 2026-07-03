@@ -13,20 +13,20 @@ JOURNALへ「仕様変更提案」として記録する)。
 
 ## M0: 環境構築
 
-- [ ] pnpm workspaceモノレポ(`shared` / `client` / `server`)の雛形
-- [ ] TypeScript strict / ESLint / Vitest / Playwright / `pnpm check` の整備
-- [ ] `pnpm dev` でPhaserの空シーン(黒背景+タイトル文字)がブラウザに表示される
+- [x] pnpm workspaceモノレポ(`shared` / `client` / `server`)の雛形
+- [x] TypeScript strict / ESLint / Vitest / Playwright / `pnpm check` の整備
+- [x] `pnpm dev` でPhaserの空シーン(黒背景+タイトル文字)がブラウザに表示される
       (Vite開発サーバーは`127.0.0.1`限定、`fs.deny`に`.env*`・`saves/`・`logs/`、CORS無効:
       `ai-guardrails.md`第0層)
-- [ ] `pnpm dev:mock` でサーバーとのWebSocket疎通(ping/pong)が確認できる
+- [x] `pnpm dev:mock` でサーバーとのWebSocket疎通(ping/pong)が確認できる
       (サーバーは`127.0.0.1`にのみbindし、Origin許可リスト検証・WS同時1接続を実装:
       `ai-guardrails.md`第0層)
-- [ ] `.env.example` / `.gitignore`(`.env*`(`.env.example`除く) `saves/` `logs/` `node_modules/`)整備
-- [ ] `pnpm check`に簡易シークレットスキャンを組み込む(`sk-ant-`等の実キー形式の
+- [x] `.env.example` / `.gitignore`(`.env*`(`.env.example`除く) `saves/` `logs/` `node_modules/`)整備
+- [x] `pnpm check`に簡易シークレットスキャンを組み込む(`sk-ant-`等の実キー形式の
       grepガード。AGENTS.md「品質ゲート」参照)
-- [ ] `README.md` にセットアップ手順(認証設定含む。既定は`CLAUDE_CODE_OAUTH_TOKEN`、
+- [x] `README.md` にセットアップ手順(認証設定含む。既定は`CLAUDE_CODE_OAUTH_TOKEN`、
       代替は`ANTHROPIC_API_KEY`: `ai-integration.md`)を記載
-- [ ] E2Eに「タイトル文字が表示される」スモークを追加
+- [x] E2Eに「タイトル文字が表示される」スモークを追加
 
 完了条件: 上記すべて+E2Eで「タイトル文字が表示される」スモークが緑。
 

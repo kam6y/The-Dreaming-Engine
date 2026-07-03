@@ -9,7 +9,12 @@
 .env*
 !.env.example
 
-# 実行時生成物(M0で拡充する)
+# 実行時生成物
 node_modules/
+.pnpm-store/
 saves/
 logs/
+dist/
+coverage/
+playwright-report/
+test-results/

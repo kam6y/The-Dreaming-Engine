@@ -32,3 +32,22 @@
 - 検証: ドキュメントのみ。コードはまだ存在しない
 - 既知の問題: なし
 - 次にやること: ROADMAP M0(環境構築)を最初から。pnpm workspaceの雛形作成から始める
+
+## [1] 2026-07-03 M0環境構築
+
+- やったこと:
+  - pnpm workspaceモノレポを作成し、`packages/shared` / `packages/client` / `packages/server` を整備
+  - TypeScript strict、ESLint、Vitest、Playwright、`pnpm check`、シークレットスキャンを追加
+  - Phaserの黒背景タイトル画面と、Fastify + WebSocketのping/pong疎通を実装
+  - Viteを`127.0.0.1`限定・`.env*`/`saves/`/`logs/`配信拒否に設定
+  - サーバーを`127.0.0.1`固定bind、HTTP/WS Origin許可リスト検証、WS同時1接続置換に対応
+  - `.env.example`、`.gitignore`、READMEのセットアップ手順、E2Eタイトルスモークを整備
+- 検証:
+  - `pnpm check` 緑
+  - `pnpm test:e2e` 緑(ローカルlistenが必要なため権限昇格で実行)
+- 裁量で決めたこと:
+  - npm registryで確認した2026-07-03時点のlatest安定版を固定指定した(Vite 8.1.3、Phaser 4.2.0、Fastify 5.9.0、Playwright 1.61.1、TypeScript 6.0.3等)
+  - `tsx`がこの実行環境でIPC pipe権限に失敗するため、serverのdevは`tsc` build後に`node dist/index.js`で起動する方式にした
+  - Vite準備完了よりserver listenが遅れる瞬間に備え、クライアントWSは500ms間隔で再接続する
+- 既知の問題: なし
+- 次にやること: ROADMAP M1(マップと移動)へ進み、まずグリッドベースのタイルマップ描画とプレイヤー移動の純TSデータ定義から始める
