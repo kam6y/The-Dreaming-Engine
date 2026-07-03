@@ -189,7 +189,7 @@
     },
     "promptFile": "assets/prompts/dream-eater-phase2.md",
     "createdAt": "2026-07-03",
-    "note": "背景透過"
+    "note": "背景透過。レビュー対応再生成: 展開シルエット・中央大裂け目・琥珀発光強化"
   },
   {
     "id": "dream-eater",
@@ -297,7 +297,7 @@
     },
     "promptFile": "assets/prompts/cursor.md",
     "createdAt": "2026-07-03",
-    "note": "背景透過"
+    "note": "背景透過。レビュー対応再生成: 先端を左上、垂直から約20度傾いた通常カーソル向きに修正"
   },
   {
     "id": "window-frame",
