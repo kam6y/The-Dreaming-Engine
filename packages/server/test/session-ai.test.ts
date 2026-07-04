@@ -321,6 +321,8 @@ describe("give_item の日次上限(GameSession 経由の書き戻しループ)"
       }
     });
     await session.handle({ type: "new-game" });
+    // 司祭は arrival だとスクリプトの明かしを返す(AI 会話にならない)。rift-revealed 以降で AI 会話
+    mustState(session).mainQuestStage = "rift-revealed";
     mustState(session).npcs.priest.affinity = 60; // give_item 解禁(会話開始時点の閾値50以上)
     const before = countOf(mustState(session).inventory, "potion-small");
 
@@ -347,6 +349,8 @@ describe("adjust_affinity の会話内上限(会話内カウンタループ)", (
   it("同一会話で adjust ×2 まで通り、3回目は拒否(好感度が動かない)", async () => {
     const { session } = makeAiSession({ dreamMaster: () => new AdjustingDreamMaster() });
     await session.handle({ type: "new-game" });
+    // 司祭は rift-revealed 以降で AI 会話になる(arrival はスクリプトの明かし)
+    mustState(session).mainQuestStage = "rift-revealed";
     await talkTo(session, "priest"); // 挨拶(調整なし)
     expect(mustState(session).npcs.priest.affinity).toBe(30);
 
@@ -500,6 +504,7 @@ describe("セーブ往復とマスク", () => {
     const fakeToken = "sk-" + "ant-" + "api03-" + "aA0-_".repeat(20);
     const { session, store } = makeAiSession();
     await session.handle({ type: "new-game" });
+    mustState(session).mainQuestStage = "rift-revealed"; // 司祭を AI 会話モードへ(arrival はスクリプト)
     await talkTo(session, "priest");
     advanceClock(session, 3001);
     await session.handle({ type: "conversation-send", text: `僕の鍵は${fakeToken}だ` });
@@ -512,5 +517,34 @@ describe("セーブ往復とマスク", () => {
     const stored = saved?.npcs.priest.memory.recentExchanges[0]?.player;
     expect(stored).toBeDefined();
     expect(stored).not.toContain(fakeToken);
+  });
+});
+
+// ===========================================================================
+// メインクエスト・司祭(gatekeeper 注入時もスクリプト進行が AI 会話に優先する)
+// ===========================================================================
+
+describe("メインクエスト・司祭(スクリプトと AI 会話の併存)", () => {
+  it("司祭(arrival)は gatekeeper 注入時もスクリプトで rift-revealed へ進める(AI 会話を開かない)", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    const msgs = await talkTo(session, "priest");
+    expect(mustState(session).mainQuestStage).toBe("rift-revealed");
+    // AI 会話 overlay は開かず、スクリプトの dialog 列で明かす(進行は AI 非依存)
+    expect(mustView(session).interaction).toBeUndefined();
+    const dialogs = msgs.filter((m) => m.type === "dialog");
+    expect(dialogs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("司祭(rift-revealed 以降)は AI 会話 overlay を開く", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "priest"); // arrival → rift-revealed(スクリプト)
+    await talkTo(session, "priest"); // 2回目 → AI 会話
+    const view = mustView(session);
+    expect(view.interaction?.kind).toBe("conversation");
+    if (view.interaction?.kind === "conversation") {
+      expect(view.interaction.npcId).toBe("priest");
+    }
   });
 });

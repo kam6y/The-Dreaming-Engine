@@ -12,6 +12,7 @@ import {
   addItem,
   advanceDay,
   applyPartyWipe,
+  bossAt,
   buyPriceOf,
   countOf,
   createBattle,
@@ -42,6 +43,7 @@ import {
   type BattleCommand,
   type BattleEvent,
   type BattleState,
+  type BossMarker,
   type ClientMessage,
   type ConversationAction,
   type Direction,
@@ -109,11 +111,31 @@ export interface GameSessionDeps {
 
 type Mode = "exploration" | "battle";
 
-/** gatekeeper 未注入時(AI 無効)の会話対応 NPC の定型ダイアログ(M3 互換フォールバック) */
-const PLACEHOLDER_NPC_LINES: Record<"informant" | "priest", string> = {
-  informant: "「……いい話、あるにはあるんだけどね。それはもう少し、夢が深まってからかな」",
-  priest: "「機関は、まだ祈りを聞いています。……あなたのことも、きっと」"
-};
+/** gatekeeper 未注入時(AI 無効)の情報屋の定型ダイアログ(M3 互換フォールバック) */
+const PLACEHOLDER_INFORMANT_LINE =
+  "「……いい話、あるにはあるんだけどね。それはもう少し、夢が深まってからかな」";
+
+/**
+ * 司祭フィオルによるメインクエストの明かし(AI 非依存のスクリプト。game-design.md 74 行:
+ * 進行に必須の会話は選択肢=決定論で進める)。arrival で一度だけ提示し rift-revealed へ進める。
+ * 文面は world-lore.md 3.5(フィオル)/ 1.2(夢喰い)の典拠に沿う。
+ */
+const PRIEST_REVEAL_LINES: readonly string[] = [
+  "「よく、この灯守堂まで来られました。……あなたの夢には、どこか継ぎ目の匂いがする」",
+  "「夢の綻びの源は、裂け目のいちばん奥――『夢喰い』と呼ばれるものに根があります」",
+  "「あれは飢えた機関の歯車の成れの果て。悲しむべきは敵ではなく、飢えそのもの。……それでも、止めねばならないのです」"
+];
+
+/** rift-revealed 以降に司祭へ話しかけた時の短い激励(gatekeeper 未注入時のスクリプト) */
+const PRIEST_ENCOURAGE_LINE =
+  "「裂け目の奥へ。……どうか、無事で。祈ることしかできぬ身が、それでも祈っています」";
+
+/** ボス戦ゲート未達(arrival)でボスへ近づいた時のスクリプト(司祭へ誘導) */
+const BOSS_GATE_LINE =
+  "重い唸りのような静寂が満ちている。……まだ、近づくには早い。まず、灯守堂の司祭に会うべきだ。";
+
+/** 撃破後にボスの在った場所へ近づいた時のスクリプト(再戦不可) */
+const BOSS_DEFEATED_LINE = "裂け目の奥は、もう静かだ。飢えは終わり、ただ青灰の凪だけが残っている。";
 
 export class GameSession {
   private readonly saveStore: SaveStore;
@@ -224,6 +246,8 @@ export class GameSession {
         return this.conversationEnd();
       case "quest-request":
         return this.questRequest();
+      case "acknowledge-ending":
+        return this.acknowledgeEnding();
     }
   }
 
@@ -327,6 +351,10 @@ export class GameSession {
       return [this.snapshotMsg()];
     }
 
+    // ボスマーカーへの踏み込み = ゲート付きボス戦(占有マスなので通常移動はしない)
+    const boss = bossAt(map, target);
+    if (boss !== null) return this.approachBoss(boss);
+
     const result = tryMove(map, state.location.position, direction);
     if (result.moved) {
       state.location.position = result.position;
@@ -352,6 +380,39 @@ export class GameSession {
     this.battleSymbolIndex = symbolIndex;
     this.mode = "battle";
     this.activeInteraction = null;
+  }
+
+  /**
+   * ボスマーカーへの接触/interact 時のゲート処理(接触=move も interact も同一経路):
+   * - 撃破済み(dream-eater-defeated 以降): 非アクティブ。スクリプト dialog で戻す(再戦不可)
+   * - arrival(司祭未面会): ゲートで戻す(スクリプト dialog。司祭へ誘導)
+   * - rift-revealed: ボス戦(isBoss)を開始する
+   */
+  private approachBoss(boss: BossMarker): ServerMessage[] {
+    // approachBoss は move からも呼ばれる。クライアントの移動ロック(awaiting)は snapshot/error
+    // でのみ解除されるため、ゲート/撃破済みでも snapshot を必ず先に返す(dialog のみだと移動が固まる)。
+    if (this.isBossDefeated()) return [this.snapshotMsg(), this.dialogMsg(null, BOSS_DEFEATED_LINE)];
+    if (this.requireState().mainQuestStage === "arrival") {
+      return [this.snapshotMsg(), this.dialogMsg(null, BOSS_GATE_LINE)];
+    }
+    this.beginBossBattle(boss.enemyId);
+    return [this.snapshotMsg()];
+  }
+
+  /** ボス戦を開始する(シンボル由来ではないので battleSymbolIndex は null。isBoss は敵定義由来) */
+  private beginBossBattle(enemyId: EnemyId): void {
+    const state = this.requireState();
+    const seed = this.rng.int(0, 0x7fffffff);
+    this.battle = createBattle(state.player, enemyId, seed);
+    this.battleSymbolIndex = null;
+    this.mode = "battle";
+    this.activeInteraction = null;
+  }
+
+  /** ボス撃破済みか(dream-eater-defeated 以降。ボスマーカーの非アクティブ判定に使う) */
+  private isBossDefeated(): boolean {
+    const stage = this.requireState().mainQuestStage;
+    return stage === "dream-eater-defeated" || stage === "epilogue";
   }
 
   // =========================================================================
@@ -403,6 +464,15 @@ export class GameSession {
         }
         // 戦果描写: 初見(未描写)のみ AI ナレーション・既見は定型(いずれも ai-utterance narrate)
         dialogs.push(...(await this.narrateBattle(enemyId)));
+        // ボス撃破: メインクエストを dream-eater-defeated へ進めてセーブに永続化する。
+        // 以後ボスマーカーは非アクティブ(再戦不可)。リロード(continue)後もこの段階が保たれる。
+        // クライアント(M6-B)はこのスナップショット(mode:exploration・dungeon-3・
+        // mainQuestStage:dream-eater-defeated)を検出してエンディングへ直行する。
+        if (battle.isBoss && !this.isBossDefeated()) {
+          this.state = { ...this.requireState(), mainQuestStage: "dream-eater-defeated" };
+          this.accruePlaytime();
+          await this.saveStore.save(this.requireState());
+        }
         return dialogs;
       }
       case "defeat": {
@@ -470,8 +540,8 @@ export class GameSession {
     }
     if (target.kind === "npc") return this.interactNpc(target.npc.id);
     if (target.kind === "object") return this.interactObject(target.object);
-    // boss(M6でメインクエストと配線)
-    return [this.dialogMsg(null, "重い唸りのような静寂が満ちている。……近づくには、まだ力が足りない。")];
+    // boss: メインクエスト段階でゲートし、rift-revealed のみボス戦へ
+    return this.approachBoss(target.boss);
   }
 
   private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
@@ -500,16 +570,39 @@ export class GameSession {
           this.dialogMsg(NPC_DISPLAY_NAMES.innkeeper, "「おや、疲れた顔だね。今夜は泊まっておいき。腹が減ってちゃ悪夢も見れやしないよ」")
         ];
       }
-      case "informant":
-      case "priest": {
-        // 会話対応 NPC(情報屋カイ・司祭フィオル)。gatekeeper 注入時は AI 会話を開始する。
-        // 未注入(M3 互換)なら定型ダイアログにフォールバックする。
+      case "informant": {
+        // 情報屋カイ。gatekeeper 注入時は AI 会話、未注入(M3 互換)なら定型ダイアログ。
         if (this.gatekeeper === null) {
-          return [this.dialogMsg(NPC_DISPLAY_NAMES[npcId], PLACEHOLDER_NPC_LINES[npcId])];
+          return [this.dialogMsg(NPC_DISPLAY_NAMES.informant, PLACEHOLDER_INFORMANT_LINE)];
         }
-        return this.openConversation(npcId);
+        return this.openConversation("informant");
       }
+      case "priest":
+        // 司祭フィオル(メインクエスト進行役)。arrival はスクリプトの明かしで rift-revealed へ。
+        return this.interactPriest();
     }
+  }
+
+  /**
+   * 司祭フィオルへの interact。メインクエスト進行の要:
+   * - arrival: スクリプトの明かし(AI 非依存の dialog 列)を返し mainQuestStage を rift-revealed へ進める(冪等)
+   * - rift-revealed 以降: AI 会話(gatekeeper 注入時)/ 未注入なら短い激励スクリプト
+   * 進行に必須の会話は AI 生成に依存させない(game-design.md「メインクエスト」)。
+   */
+  private async interactPriest(): Promise<ServerMessage[]> {
+    const state = this.requireState();
+    if (state.mainQuestStage === "arrival") {
+      // 決定論の進行。スナップショットで新段階(rift-revealed)を先に伝え、明かしの dialog 列を続ける
+      this.state = { ...state, mainQuestStage: "rift-revealed" };
+      return [
+        this.snapshotMsg(),
+        ...PRIEST_REVEAL_LINES.map((line) => this.dialogMsg(NPC_DISPLAY_NAMES.priest, line))
+      ];
+    }
+    if (this.gatekeeper === null) {
+      return [this.dialogMsg(NPC_DISPLAY_NAMES.priest, PRIEST_ENCOURAGE_LINE)];
+    }
+    return this.openConversation("priest");
   }
 
   // =========================================================================
@@ -655,6 +748,24 @@ export class GameSession {
     this.advanceQuestSeqIfProposed();
     this.activeInteraction = this.buildConversationInteraction(npcId);
     return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
+  }
+
+  /**
+   * エンディング視聴の確認(クライアントがエンディング演出を見せ終えた合図)。
+   * dream-eater-defeated → epilogue へ進めてセーブに永続化する。それ以外の段階では冪等に無視する。
+   * プレイヤーは動かさない(段階を進めて保存するだけ。M6-B のエンディング契約の締め)。
+   */
+  private async acknowledgeEnding(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (state.mainQuestStage !== "dream-eater-defeated") {
+      return [this.snapshotMsg()];
+    }
+    this.state = { ...state, mainQuestStage: "epilogue" };
+    this.accruePlaytime();
+    await this.saveStore.save(this.requireState());
+    return [this.snapshotMsg()];
   }
 
   private interactObject(object: MapObject): ServerMessage[] {

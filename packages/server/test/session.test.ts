@@ -608,18 +608,181 @@ describe("調べる・話す", () => {
     expect(dialogsOf(msgs)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.innkeeper);
   });
 
-  it("情報屋・司祭はダイアログのみ(M3 では interaction を開かない)", async () => {
+  it("情報屋は gatekeeper 未注入なら定型ダイアログのみ(interaction を開かない)", async () => {
     const informant = await townSession({ x: 4, y: 9 }, "down"); // 情報屋 (4,10)
     const msgs1 = await informant.session.handle({ type: "interact" });
     expect(msgs1).toHaveLength(1);
     expect(dialogsOf(msgs1)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.informant);
     expect(mustView(informant.session).interaction).toBeUndefined();
-
-    const priest = await townSession({ x: 16, y: 9 }, "down"); // 司祭 (16,10)
-    const msgs2 = await priest.session.handle({ type: "interact" });
-    expect(msgs2).toHaveLength(1);
-    expect(dialogsOf(msgs2)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.priest);
   });
+});
+
+// ===========================================================================
+// メインクエスト進行(司祭スクリプト・ボス戦トリガー・撃破遷移・エンディング確認)
+// ===========================================================================
+
+describe("メインクエスト進行(司祭・ボス・エンディング)", () => {
+  /** 街の司祭フィオルの正面 (16,9) 向き down に立つ(gatekeeper 未注入セッション) */
+  async function priestSession(): Promise<SessionContext> {
+    const ctx = createSession();
+    await ctx.session.handle({ type: "new-game" });
+    mustState(ctx.session).location = { mapId: "town", position: { x: 16, y: 9 }, facing: "down" };
+    return ctx;
+  }
+
+  /** dungeon-3 のボス正面 (11,12) 向き down に立つセッション(段階・レベルを注入 or 完成状態を注入) */
+  async function bossSession(opts?: {
+    stage?: GameState["mainQuestStage"];
+    level?: number;
+    state?: GameState;
+  }): Promise<SessionContext> {
+    const ctx = createSession(); // noSymbols 既定 true → ボス以外の敵は湧かない
+    let state: GameState;
+    if (opts?.state !== undefined) {
+      state = opts.state;
+    } else {
+      state = createNewGameState();
+      state.location = { mapId: "dungeon-3", position: { x: 11, y: 12 }, facing: "down" };
+      state.mainQuestStage = opts?.stage ?? "rift-revealed";
+      const level = opts?.level ?? 10;
+      const stats = statsForLevel(level);
+      state.player = { level, xp: 0, hp: stats.maxHP, mp: stats.maxMP, gold: 50 };
+    }
+    ctx.store.loadResult = { ok: true, state };
+    await ctx.session.handle({ type: "continue" });
+    return ctx;
+  }
+
+  /** ボス戦を攻撃で決着まで進め、勝利を確認して最後のメッセージ列を返す(Lv10 前提) */
+  async function fightBossToVictory(session: GameSession): Promise<ServerMessage[]> {
+    let last: ServerMessage[] = [];
+    let rounds = 0;
+    while (mustView(session).mode === "battle") {
+      last = await session.handle({ type: "battle-command", command: { kind: "attack" } });
+      rounds += 1;
+      if (rounds > 40) throw new Error("ボス戦が終わらない(想定外)");
+    }
+    const events = battleEventsOf(last);
+    if (!events.events.some((e) => e.type === "victory")) {
+      throw new Error("ボス戦に勝てなかった(Lv10 前提が崩れている)");
+    }
+    return last;
+  }
+
+  it("司祭(arrival)は明かしのスクリプトで rift-revealed へ進む(AI 非依存)", async () => {
+    const { session } = await priestSession();
+    expect(mustState(session).mainQuestStage).toBe("arrival");
+    const msgs = await session.handle({ type: "interact" });
+    // スナップショット(新段階)+ 司祭の明かし dialog 列
+    expect(firstSnapshot(msgs).mainQuestStage).toBe("rift-revealed");
+    const dialogs = dialogsOf(msgs);
+    expect(dialogs.length).toBeGreaterThanOrEqual(2);
+    expect(dialogs.every((d) => d.speaker === NPC_DISPLAY_NAMES.priest)).toBe(true);
+    expect(dialogs.some((d) => d.body.includes("夢喰い"))).toBe(true);
+    expect(mustState(session).mainQuestStage).toBe("rift-revealed");
+    // スクリプト進行のため AI 会話 overlay は開かない
+    expect(mustView(session).interaction).toBeUndefined();
+  });
+
+  it("司祭(rift-revealed 以降・gatekeeper 未注入)は激励のみで段階を進めない(冪等)", async () => {
+    const { session } = await priestSession();
+    await session.handle({ type: "interact" }); // arrival → rift-revealed
+    const msgs = await session.handle({ type: "interact" }); // 2回目
+    expect(msgs).toHaveLength(1);
+    expect(dialogsOf(msgs)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.priest);
+    expect(mustState(session).mainQuestStage).toBe("rift-revealed"); // 進まない
+  });
+
+  it("ボスゲート: arrival では接触/踏み込みでも戦闘にならずスクリプトで戻す", async () => {
+    const { session } = await bossSession({ stage: "arrival" });
+    const msgs = await session.handle({ type: "interact" });
+    const gate = dialogsOf(msgs);
+    expect(gate).toHaveLength(1);
+    expect(gate[0]?.body).toContain("司祭");
+    expect(firstSnapshot(msgs).mode).toBe("exploration"); // snapshot は必ず返る(移動ロック解除)
+    expect(mustView(session).mode).toBe("exploration");
+    // move で踏み込んでも同様(ボスマスは占有=通常移動しない・位置は据え置き)
+    const moved = await session.handle({ type: "move", direction: "down" });
+    expect(dialogsOf(moved)).toHaveLength(1);
+    expect(firstSnapshot(moved).mode).toBe("exploration");
+    expect(mustView(session).mode).toBe("exploration");
+    expect(mustState(session).location.position).toEqual({ x: 11, y: 12 });
+  });
+
+  it("rift-revealed では接触/踏み込みでボス戦(isBoss)が始まる", async () => {
+    const viaInteract = await bossSession({ stage: "rift-revealed" });
+    const snap1 = firstSnapshot(await viaInteract.session.handle({ type: "interact" }));
+    expect(snap1.mode).toBe("battle");
+    expect(snap1.battle?.enemyId).toBe("dream-eater");
+    expect(snap1.battle?.isBoss).toBe(true);
+
+    const viaMove = await bossSession({ stage: "rift-revealed" });
+    const snap2 = firstSnapshot(await viaMove.session.handle({ type: "move", direction: "down" }));
+    expect(snap2.mode).toBe("battle");
+    expect(snap2.battle?.isBoss).toBe(true);
+  });
+
+  it("ボス撃破で dream-eater-defeated へ進みセーブに永続、以後は再戦不可", async () => {
+    const { session, store } = await bossSession({ stage: "rift-revealed", level: 10 });
+    await session.handle({ type: "interact" }); // ボス戦開始
+    const last = await fightBossToVictory(session);
+    const finalSnap = firstSnapshot(last);
+    // 契約: mode:exploration・location=dungeon-3・mainQuestStage=dream-eater-defeated
+    expect(finalSnap.mode).toBe("exploration");
+    expect(finalSnap.location.mapId).toBe("dungeon-3");
+    expect(finalSnap.mainQuestStage).toBe("dream-eater-defeated");
+    expect(mustState(session).mainQuestStage).toBe("dream-eater-defeated");
+    // セーブに永続
+    expect(store.saved.length).toBeGreaterThanOrEqual(1);
+    expect(store.saved[store.saved.length - 1]?.mainQuestStage).toBe("dream-eater-defeated");
+    // 再接触では戦闘にならない(非アクティブ)
+    const again = await session.handle({ type: "interact" });
+    expect(dialogsOf(again)).toHaveLength(1);
+    expect(dialogsOf(again)[0]?.body).toContain("静か");
+    expect(firstSnapshot(again).mode).toBe("exploration");
+    expect(mustView(session).mode).toBe("exploration");
+  });
+
+  it("リロード(save→load)後もボスは非アクティブ(段階が保持される)", async () => {
+    const { session, store } = await bossSession({ stage: "rift-revealed", level: 10 });
+    await session.handle({ type: "interact" });
+    await fightBossToVictory(session);
+    const saved = store.saved[store.saved.length - 1];
+    if (saved === undefined) throw new Error("セーブが記録されていない");
+    // 別セッションでロード(リロード相当)
+    const reload = await bossSession({ state: structuredClone(saved) });
+    expect(mustState(reload.session).mainQuestStage).toBe("dream-eater-defeated");
+    const msgs = await reload.session.handle({ type: "interact" });
+    expect(dialogsOf(msgs)).toHaveLength(1); // 撃破後は非アクティブ(戦闘にならない)
+    expect(firstSnapshot(msgs).mode).toBe("exploration");
+    expect(mustView(reload.session).mode).toBe("exploration");
+  });
+
+  it("acknowledge-ending は dream-eater-defeated を epilogue へ進めてセーブする", async () => {
+    const { session, store } = await bossSession({ state: dreamEaterDefeatedState() });
+    const savedBefore = store.saved.length;
+    const view = firstSnapshot(await session.handle({ type: "acknowledge-ending" }));
+    expect(view.mainQuestStage).toBe("epilogue");
+    expect(mustState(session).mainQuestStage).toBe("epilogue");
+    expect(store.saved.length).toBe(savedBefore + 1);
+    expect(store.saved[store.saved.length - 1]?.mainQuestStage).toBe("epilogue");
+  });
+
+  it("acknowledge-ending はそれ以外の段階では冪等(段階もセーブも変えない)", async () => {
+    const { session, store } = createSession();
+    await session.handle({ type: "new-game" }); // arrival
+    const view = firstSnapshot(await session.handle({ type: "acknowledge-ending" }));
+    expect(view.mainQuestStage).toBe("arrival");
+    expect(store.saved).toHaveLength(0);
+  });
+
+  /** dungeon-3・撃破済み(dream-eater-defeated)状態を組む(acknowledge-ending 用) */
+  function dreamEaterDefeatedState(): GameState {
+    const state = createNewGameState();
+    state.location = { mapId: "dungeon-3", position: { x: 11, y: 12 }, facing: "down" };
+    state.mainQuestStage = "dream-eater-defeated";
+    return state;
+  }
 });
 
 // ===========================================================================

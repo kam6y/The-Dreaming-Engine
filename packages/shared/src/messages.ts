@@ -269,6 +269,13 @@ export const clientConversationEndMessageSchema = z.object({ type: z.literal("co
 /** 情報屋への「仕事はある?」(サブクエスト生成の要求) */
 export const clientQuestRequestMessageSchema = z.object({ type: z.literal("quest-request") });
 
+/**
+ * エンディング視聴の確認(クライアントがエンディング演出を見せ終えた合図)。
+ * サーバーは dream-eater-defeated 段階のときのみ epilogue へ進めてセーブに永続化する
+ * (それ以外の段階では冪等に無視)。M6-B のボス撃破→エンディング契約の締めに使う。
+ */
+export const clientAcknowledgeEndingMessageSchema = z.object({ type: z.literal("acknowledge-ending") });
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
   clientPingMessageSchema,
   clientNewGameMessageSchema,
@@ -284,7 +291,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   clientConversationSendMessageSchema,
   clientConversationChooseMessageSchema,
   clientConversationEndMessageSchema,
-  clientQuestRequestMessageSchema
+  clientQuestRequestMessageSchema,
+  clientAcknowledgeEndingMessageSchema
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
