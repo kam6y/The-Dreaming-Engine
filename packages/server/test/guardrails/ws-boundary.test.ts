@@ -85,7 +85,7 @@ describe("第0層 境界の壁: WS 同時1接続 / Origin 検証(統合)", () =>
     return socket;
   }
 
-  it("許可 Origin の新規接続を受理する際、既存接続を切断して同時1本に保つ", async () => {
+  it("[ATK-L0-ws-single-replace] 許可 Origin の新規接続を受理する際、既存接続を切断して同時1本に保つ", async () => {
     const first = connect(ALLOWED_ORIGIN);
     await waitEvent(first, "open");
 
@@ -99,7 +99,7 @@ describe("第0層 境界の壁: WS 同時1接続 / Origin 検証(統合)", () =>
     expect(second.readyState).toBe(WebSocket.OPEN);
   });
 
-  it("許可リスト外 Origin は 403 で拒否され、既存の正規接続を切断しない", async () => {
+  it("[ATK-L0-ws-reject-preserves] 許可リスト外 Origin は 403 で拒否され、既存の正規接続を切断しない", async () => {
     // 既存の正規 WS 接続を1本張っておく
     const legit = connect(ALLOWED_ORIGIN);
     await waitEvent(legit, "open");
