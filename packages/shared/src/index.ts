@@ -9,3 +9,4 @@ export * from "./inventory.js";
 export * from "./shop.js";
 export * from "./loot.js";
 export * from "./game-state.js";
+export * from "./ai/index.js";

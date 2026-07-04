@@ -1,0 +1,25 @@
+{
+  "models": {
+    "haiku": "claude-haiku-4-5",
+    "sonnet": "claude-sonnet-5"
+  },
+  "limits": {
+    "conversation": { "maxTurns": 4, "maxOutputTokens": 1000 },
+    "gm": { "maxTurns": 8, "maxOutputTokens": 2000 }
+  },
+  "timeouts": {
+    "conversation": { "firstTokenSeconds": 15, "totalSeconds": 45 },
+    "questGeneration": { "firstTokenSeconds": 30, "totalSeconds": 90 },
+    "dream": { "firstTokenSeconds": 30, "totalSeconds": 90 },
+    "battleResult": { "firstTokenSeconds": 10, "totalSeconds": 30 },
+    "summary": { "firstTokenSeconds": 15, "totalSeconds": 45 }
+  },
+  "cooldowns": {
+    "conversationStartSeconds": 10,
+    "dreamSeconds": 60,
+    "questGenerationSeconds": 30
+  },
+  "conversationSendRateSeconds": 3,
+  "sessionCallLimit": 200,
+  "playerInputMaxLength": 200
+}
