@@ -320,6 +320,10 @@ export class ExplorationScene extends Phaser.Scene {
       }
       return;
     }
+    // conversation(会話): 会話オーバーレイは M4-F で実装する。現状は探索シーンでは無視する
+    if (interaction.kind === "conversation") {
+      return;
+    }
     // shop: オーバーレイを開く(開いている間は snapshot 毎に refresh される)
     if (this.shopOverlay === null) {
       this.closeInventoryOverlay();

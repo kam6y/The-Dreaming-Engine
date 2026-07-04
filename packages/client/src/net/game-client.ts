@@ -1,6 +1,7 @@
 import {
   serverMessageSchema,
   type ClientMessage,
+  type NpcId,
   type ServerMessage,
   type SnapshotView
 } from "@dreaming-engine/shared";
@@ -52,6 +53,16 @@ export interface ServerErrorEvent {
 }
 
 /**
+ * 検証済み AI 発話/ナレーションのペイロード(疑似ストリーミング表示用)。
+ * channel=speak は NPC 発話(npcId 付き)、narrate は情景・夢・戦果(npcId 省略)。
+ */
+export interface AiUtteranceEvent {
+  readonly channel: "speak" | "narrate";
+  readonly npcId?: NpcId;
+  readonly text: string;
+}
+
+/**
  * battle-events の events 型はスキーマから直接導出する。
  * (exactOptionalPropertyTypes 下で、パース結果と手書き型の省略プロパティ差異を避けるため)
  */
@@ -80,6 +91,8 @@ export interface GameClientEventMap {
   dialog: DialogEvent;
   /** 1ターン分の戦闘イベント列 */
   "battle-events": BattleEventsPayload;
+  /** 検証済み AI 発話/ナレーション(疑似ストリーミング表示) */
+  "ai-utterance": AiUtteranceEvent;
   /** サーバーからの明示エラー */
   "server-error": ServerErrorEvent;
 }
@@ -123,6 +136,7 @@ export class GameClient {
     snapshot: new Set(),
     dialog: new Set(),
     "battle-events": new Set(),
+    "ai-utterance": new Set(),
     "server-error": new Set()
   };
 
@@ -248,6 +262,14 @@ export class GameClient {
         break;
       case "battle-events":
         this.emit("battle-events", message.events);
+        break;
+      case "ai-utterance":
+        this.emit(
+          "ai-utterance",
+          message.npcId === undefined
+            ? { channel: message.channel, text: message.text }
+            : { channel: message.channel, npcId: message.npcId, text: message.text }
+        );
         break;
       case "error":
         this.emit(

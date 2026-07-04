@@ -157,6 +157,12 @@ export class GameSession {
         return this.shopSell(message.itemId, message.quantity);
       case "rest":
         return this.rest();
+      case "conversation-send":
+      case "conversation-choose":
+      case "conversation-end":
+      case "quest-request":
+        // 会話フローの配線は M4-E コミット2 で実装する(コミット1 では未配線のスタブ)
+        return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
     }
   }
 
@@ -614,7 +620,8 @@ export class GameSession {
       inventoryCapacity: INVENTORY_CAPACITY,
       inventoryUsed: usedSpace(state.inventory),
       symbols: this.symbols.map((s) => ({ position: { ...s.position }, enemyId: s.enemyId })),
-      resolvedObjectIds: this.resolvedObjectIdsForCurrentMap()
+      resolvedObjectIds: this.resolvedObjectIdsForCurrentMap(),
+      subQuests: this.buildSubQuestViews()
     };
 
     return {
@@ -645,6 +652,25 @@ export class GameSession {
         statuses: battle.enemy.statuses.map((s) => ({ ...s }))
       }
     };
+  }
+
+  /** 受注中サブクエストの表示情報(クエストジャーナル)。target は type 別の表示名で解決する */
+  private buildSubQuestViews(): SnapshotView["subQuests"] {
+    const state = this.requireState();
+    return state.subQuests.map((q) => ({
+      id: q.id,
+      type: q.type,
+      targetName: q.type === "hunt" ? ENEMY_DISPLAY_NAMES[q.targetId] : ITEMS[q.targetId].name,
+      progress: q.progress,
+      count: q.count,
+      rewardGold: q.rewardGold,
+      ...(q.rewardItemId !== undefined
+        ? { rewardItem: { itemId: q.rewardItemId, name: ITEMS[q.rewardItemId].name } }
+        : {}),
+      title: q.title,
+      description: q.description,
+      status: q.status
+    }));
   }
 
   /** 現マップで解決/消費済みのオブジェクト id(開封済み宝箱 + 今回訪問の採取済み) */

@@ -5,8 +5,11 @@ import {
   HUNT_TARGET_IDS,
   ITEMS,
   NPC_DISPLAY_NAMES,
+  STREET_EVENTS,
   type ConversationExchange,
-  type NpcId
+  type NpcId,
+  type SubQuest,
+  type WorldState
 } from "@dreaming-engine/shared";
 
 import { neutralizeTags } from "../input-wall.js";
@@ -70,39 +73,88 @@ function formatQuestTargets(): string {
   return `討伐対象(hunt): ${hunt}\n納品対象(fetch): ${fetch}`;
 }
 
+/** 受注中サブクエストの一覧(<quest_journal>。文脈提示・重複依頼の回避に使う) */
+function formatSubQuests(quests: readonly SubQuest[]): string {
+  const lines = quests.map((q) => {
+    const target = q.type === "hunt" ? ENEMY_DISPLAY_NAMES[q.targetId] : ITEMS[q.targetId].name;
+    return `・[${q.type}] ${neutralizeTags(q.title)}(対象:${target} ${q.progress}/${q.count} 状態:${q.status})`;
+  });
+  return lines.join("\n");
+}
+
+/** 現在の世界状態(<world_state>。翌朝の変化を決める基準として提示) */
+function formatWorldState(world: WorldState): string {
+  const streets =
+    world.activeStreetEvents.length > 0
+      ? world.activeStreetEvents.map((id) => STREET_EVENTS[id].name).join("、")
+      : "なし";
+  const dungeon = `1層${world.dungeonSymbolCounts[1]}・2層${world.dungeonSymbolCounts[2]}・3層${world.dungeonSymbolCounts[3]}`;
+  return `天候: ${world.weather}\n当日の街頭演出: ${streets}\nダンジョン各層の敵勢力: ${dungeon}`;
+}
+
 /** DreamMasterContext からユーザーメッセージ本文を組み立てる */
 function buildUserPrompt(context: DreamMasterContext): string {
   switch (context.flow) {
     case "conversation": {
       const name = NPC_DISPLAY_NAMES[context.partnerNpcId];
-      return [
+      const topic = context.topic ?? DEFAULT_NPC_TOPICS[context.partnerNpcId];
+      const affinityLine =
+        context.affinity !== undefined ? `\n旅人への好感度: ${context.affinity}(0-100)` : "";
+      const parts = [
         tag(
           "npc_state",
-          `あなたは今、${name}として旅人と向き合っている。\n人物: ${NPC_PERSONA[context.partnerNpcId]}\n今日の話題: ${neutralizeTags(DEFAULT_NPC_TOPICS[context.partnerNpcId])}`
-        ),
+          `あなたは今、${name}として旅人と向き合っている。\n人物: ${NPC_PERSONA[context.partnerNpcId]}\n今日の話題: ${neutralizeTags(topic)}${affinityLine}`
+        )
+      ];
+      if (context.memorySummary !== undefined && context.memorySummary.trim().length > 0) {
+        parts.push(tag("memory", neutralizeTags(context.memorySummary)));
+      }
+      if (context.activeSubQuests !== undefined && context.activeSubQuests.length > 0) {
+        parts.push(tag("quest_journal", formatSubQuests(context.activeSubQuests)));
+      }
+      parts.push(
         tag("player_utterance", neutralizeTags(context.playerUtterance)),
         tag("task", `${name}として、旅人の声に応えなさい。応答は必ず speak ツールで行うこと。`)
-      ].join("\n");
+      );
+      return parts.join("\n");
     }
     case "questGeneration": {
       const name = NPC_DISPLAY_NAMES[context.partnerNpcId];
-      return [
-        tag("npc_state", `あなたは情報屋 ${name} として霧笛亭にいる。\n人物: ${NPC_PERSONA[context.partnerNpcId]}`),
-        tag("quest_targets", formatQuestTargets()),
+      const topicLine =
+        context.topic !== undefined ? `\n今日の話題: ${neutralizeTags(context.topic)}` : "";
+      const parts = [
+        tag(
+          "npc_state",
+          `あなたは情報屋 ${name} として霧笛亭にいる。\n人物: ${NPC_PERSONA[context.partnerNpcId]}${topicLine}`
+        ),
+        tag("quest_targets", formatQuestTargets())
+      ];
+      if (context.activeSubQuests !== undefined && context.activeSubQuests.length > 0) {
+        parts.push(tag("quest_journal", formatSubQuests(context.activeSubQuests)));
+      }
+      parts.push(
         tag(
           "task",
-          "情報屋として語りつつ、依頼を1件だけ propose_quest で提案しなさい。対象は上の候補に限る。語りは speak ツールで行うこと。"
+          "情報屋として語りつつ、依頼を1件だけ propose_quest で提案しなさい。対象は上の候補に限り、受注中の依頼と重複させないこと。語りは speak ツールで行うこと。"
         )
-      ].join("\n");
+      );
+      return parts.join("\n");
     }
     case "dream": {
-      return [
-        tag("recent_play", neutralizeTags(context.recentPlay)),
+      const parts = [tag("recent_play", neutralizeTags(context.recentPlay))];
+      if (context.world !== undefined) {
+        parts.push(tag("world_state", formatWorldState(context.world)));
+      }
+      if (context.activeSubQuests !== undefined && context.activeSubQuests.length > 0) {
+        parts.push(tag("quest_journal", formatSubQuests(context.activeSubQuests)));
+      }
+      parts.push(
         tag(
           "task",
           "旅人が見る夢を90-200字で narrate し、翌朝の世界の変化を trigger_world_event で最大3件まで起こしなさい。変化は上のプレイ内容を反映させること。"
         )
-      ].join("\n");
+      );
+      return parts.join("\n");
     }
     case "battleResult": {
       return [

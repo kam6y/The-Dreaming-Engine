@@ -8,7 +8,8 @@ import {
   SUB_QUEST_MAX_ACTIVE,
   type ConversationExchange,
   type EnemyId,
-  type NpcId
+  type NpcId,
+  type WorldState
 } from "@dreaming-engine/shared";
 
 import type { AuditLog } from "../audit-log.js";
@@ -66,23 +67,31 @@ export interface OpenConversationInput {
   /** 会話開始時点のNPC好感度(GameState 由来。セッションがスナップショットする) */
   readonly affinityAtOpen: number;
   readonly persistent: PersistentStateContext;
+  /** 充実コンテキスト(M4-E が GameState から供給。Live prompt が使う。任意) */
+  readonly topic?: string;
+  readonly memorySummary?: string;
 }
 
 export interface SendConversationInput {
   readonly npcId: NpcId;
   readonly utterance: string;
   readonly persistent: PersistentStateContext;
+  readonly topic?: string;
+  readonly memorySummary?: string;
 }
 
 export interface GenerateQuestInput {
   /** 通常は情報屋カイ */
   readonly npcId: NpcId;
   readonly persistent: PersistentStateContext;
+  readonly topic?: string;
 }
 
 export interface DreamSceneInput {
   readonly persistent: PersistentStateContext;
   readonly recentPlay: string;
+  /** 現在の世界状態(翌朝の変化の基準として Live prompt に提示。任意) */
+  readonly world?: WorldState;
 }
 
 export interface BattleResultInput {
@@ -189,7 +198,15 @@ export class AiFlowGatekeeper {
     return this.runGuardedTurn({
       flow: "conversation",
       npcId: input.npcId,
-      dmContext: { flow: "conversation", partnerNpcId: input.npcId, playerUtterance: "" },
+      dmContext: {
+        flow: "conversation",
+        partnerNpcId: input.npcId,
+        playerUtterance: "",
+        affinity: input.affinityAtOpen,
+        activeSubQuests: input.persistent.subQuests,
+        ...(input.topic !== undefined ? { topic: input.topic } : {}),
+        ...(input.memorySummary !== undefined ? { memorySummary: input.memorySummary } : {})
+      },
       persistent: input.persistent,
       session,
       playerInput: null
@@ -230,7 +247,15 @@ export class AiFlowGatekeeper {
     return this.runGuardedTurn({
       flow: "conversation",
       npcId: input.npcId,
-      dmContext: { flow: "conversation", partnerNpcId: input.npcId, playerUtterance: input.utterance },
+      dmContext: {
+        flow: "conversation",
+        partnerNpcId: input.npcId,
+        playerUtterance: input.utterance,
+        affinity: input.persistent.affinityByNpc[input.npcId],
+        activeSubQuests: input.persistent.subQuests,
+        ...(input.topic !== undefined ? { topic: input.topic } : {}),
+        ...(input.memorySummary !== undefined ? { memorySummary: input.memorySummary } : {})
+      },
       persistent: input.persistent,
       session,
       playerInput: input.utterance
@@ -267,7 +292,12 @@ export class AiFlowGatekeeper {
     return this.runGuardedTurn({
       flow: "questGeneration",
       npcId: input.npcId,
-      dmContext: { flow: "questGeneration", partnerNpcId: input.npcId },
+      dmContext: {
+        flow: "questGeneration",
+        partnerNpcId: input.npcId,
+        activeSubQuests: input.persistent.subQuests,
+        ...(input.topic !== undefined ? { topic: input.topic } : {})
+      },
       persistent: input.persistent,
       session,
       playerInput: null
@@ -294,7 +324,12 @@ export class AiFlowGatekeeper {
     return this.runGuardedTurn({
       flow: "dream",
       npcId: null,
-      dmContext: { flow: "dream", recentPlay: input.recentPlay },
+      dmContext: {
+        flow: "dream",
+        recentPlay: input.recentPlay,
+        activeSubQuests: input.persistent.subQuests,
+        ...(input.world !== undefined ? { world: input.world } : {})
+      },
       persistent: input.persistent,
       session: null,
       playerInput: null

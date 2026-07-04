@@ -1,4 +1,4 @@
-import type { ConversationExchange, EnemyId, NpcId } from "@dreaming-engine/shared";
+import type { ConversationExchange, EnemyId, NpcId, SubQuest, WorldState } from "@dreaming-engine/shared";
 
 import type { AiMode } from "../mode.js";
 import type { ToolFlow, ToolName } from "../tool-validation/types.js";
@@ -38,13 +38,27 @@ export interface RawToolCall {
 // 呼び出しコンテキスト(フロー別・判別可能ユニオン)
 // ---------------------------------------------------------------------------
 
-/** NPC会話(conversation): 話しかけ・自由入力送信への応答 */
+/**
+ * NPC会話(conversation): 話しかけ・自由入力送信への応答。
+ *
+ * 充実フィールド(`affinity`/`topic`/`memorySummary`/`activeSubQuests`)は M4-E が GameState
+ * スナップショットから供給する完全コンテキスト。**Mock は無視**(決定論を維持)、Live の `prompt.ts`
+ * がタグ注入に使う。すべて任意(未供給でも従前どおり動く=前方互換)。
+ */
 export interface ConversationContext {
   readonly flow: "conversation";
   /** 会話相手(adjust_affinity の npcId・speak の口調に使う) */
   readonly partnerNpcId: NpcId;
   /** 直近のプレイヤー自由入力(Mock は内容非依存。M4-D がプロンプト整形に使う) */
   readonly playerUtterance: string;
+  /** 会話相手の現在好感度(0..100)。speak の親密度に反映 */
+  readonly affinity?: number;
+  /** 会話相手の「今日の話題」(npc_rumor で置換され得る現行値) */
+  readonly topic?: string;
+  /** 会話記憶の要約(累積。空文字/未供給なら要約なし) */
+  readonly memorySummary?: string;
+  /** 受注中サブクエスト(会話の文脈に使う) */
+  readonly activeSubQuests?: readonly SubQuest[];
 }
 
 /** サブクエスト生成(questGeneration): 情報屋への「仕事はある?」 */
@@ -52,6 +66,10 @@ export interface QuestGenerationContext {
   readonly flow: "questGeneration";
   /** 会話相手(通常は情報屋カイ) */
   readonly partnerNpcId: NpcId;
+  /** 会話相手の「今日の話題」(任意) */
+  readonly topic?: string;
+  /** 受注中サブクエスト(重複依頼を避けるため提示。任意) */
+  readonly activeSubQuests?: readonly SubQuest[];
 }
 
 /** 夢シーン(dream): 宿屋の宿泊 */
@@ -59,6 +77,10 @@ export interface DreamContext {
   readonly flow: "dream";
   /** 当日の行動サマリ(Mock は内容非依存。M4-D が <recent_play> に使う) */
   readonly recentPlay: string;
+  /** 現在の世界状態(天候・当日 street_event・各層シンボル数)。翌朝の変化の基準として提示(任意) */
+  readonly world?: WorldState;
+  /** 受注中サブクエスト(夢の文脈に使う。任意) */
+  readonly activeSubQuests?: readonly SubQuest[];
 }
 
 /** 戦果描写(battleResult): 初見敵の撃破 */

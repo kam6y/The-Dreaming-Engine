@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { giftableItemIdSchema } from "./ai/giftable.js";
 import {
   battleCommandSchema,
   battleEventSchema,
@@ -12,6 +13,7 @@ import { statusStateSchema } from "./combat/status.js";
 import { gameLocationSchema } from "./game-state.js";
 import { directionSchema } from "./geometry.js";
 import { enemyIdSchema, npcIdSchema } from "./ids.js";
+import { subQuestStatusSchema } from "./quests.js";
 
 export const GAME_TITLE = "The Dreaming Engine";
 
@@ -66,9 +68,35 @@ export const viewBattleSchema = z.object({
 export type ViewBattle = z.infer<typeof viewBattleSchema>;
 
 /**
+ * 会話でプレイヤーが取りうるアクション(会話 UI が options として表示する)。
+ * - send        : 自由入力の送信(conversation-send)
+ * - accept       : 提案中サブクエストの受諾(conversation-choose choice=accept)
+ * - decline      : 提案中サブクエストの辞退(conversation-choose choice=decline)
+ * - end          : 会話の終了(conversation-end。要約フローへ)
+ * - quest-request: 情報屋への「仕事はある?」(quest-request)
+ */
+export const conversationActionSchema = z.enum(["send", "accept", "decline", "end", "quest-request"]);
+export type ConversationAction = z.infer<typeof conversationActionSchema>;
+
+/** 報酬アイテム表示(id + 表示名)。give_item/propose_quest の贈答ホワイトリスト内 */
+export const rewardItemViewSchema = z.object({ itemId: giftableItemIdSchema, name: z.string() });
+export type RewardItemView = z.infer<typeof rewardItemViewSchema>;
+
+/** 提案中サブクエストの表示情報(受諾前。会話 overlay に提示する) */
+export const pendingProposalViewSchema = z.object({
+  type: z.enum(["hunt", "fetch"]),
+  title: z.string(),
+  description: z.string(),
+  count: z.number().int(),
+  rewardGold: z.number().int(),
+  rewardItem: rewardItemViewSchema.optional()
+});
+export type PendingProposalView = z.infer<typeof pendingProposalViewSchema>;
+
+/**
  * 有効な対話(interact で開く UI のシグナル)。
- * `interact`(商人/宿屋の主人)で設定し、`move` 等で解除する。クライアントはこの有無で
- * 店/宿の overlay を開く。買う/売る/泊まるの各操作はこれが該当種別のときのみ有効。
+ * `interact`(商人=shop / 宿屋の主人=inn / 情報屋・司祭=conversation)で設定し、`move` 等で解除する。
+ * クライアントはこの種別で店/宿/会話の overlay を切り替える。各操作は該当種別のときのみ有効。
  */
 export const activeInteractionSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -84,9 +112,36 @@ export const activeInteractionSchema = z.discriminatedUnion("kind", [
     npcId: npcIdSchema,
     npcName: z.string(),
     costGold: z.number().int()
+  }),
+  z.object({
+    kind: z.literal("conversation"),
+    npcId: npcIdSchema,
+    npcName: z.string(),
+    /** 現在取りうるアクション(状態依存。提案中なら accept/decline を含む) */
+    options: z.array(conversationActionSchema),
+    /** 提案中サブクエスト(あれば)。無ければ省略 */
+    pendingProposal: pendingProposalViewSchema.optional()
   })
 ]);
 export type ActiveInteraction = z.infer<typeof activeInteractionSchema>;
+
+/**
+ * 受注中サブクエストの表示情報(クエストジャーナル用)。SnapshotView.subQuests に含める。
+ * targetName は type 別の表示名(hunt=敵名 / fetch=アイテム名)。
+ */
+export const subQuestViewSchema = z.object({
+  id: z.string(),
+  type: z.enum(["hunt", "fetch"]),
+  targetName: z.string(),
+  progress: z.number().int(),
+  count: z.number().int(),
+  rewardGold: z.number().int(),
+  rewardItem: rewardItemViewSchema.optional(),
+  title: z.string(),
+  description: z.string(),
+  status: subQuestStatusSchema
+});
+export type SubQuestView = z.infer<typeof subQuestViewSchema>;
 
 export const snapshotViewSchema = z.object({
   /** 探索 or 戦闘 */
@@ -111,7 +166,9 @@ export const snapshotViewSchema = z.object({
    * クライアントはこれらのオブジェクトを描画しない。
    */
   resolvedObjectIds: z.array(z.string()),
-  /** 有効な対話(店/宿)。無ければ省略 */
+  /** 受注中サブクエスト(クエストジャーナル)。無くても空配列で常に含める */
+  subQuests: z.array(subQuestViewSchema),
+  /** 有効な対話(店/宿/会話)。無ければ省略 */
   interaction: activeInteractionSchema.optional(),
   /** 戦闘ビュー(mode==="battle" のときのみ) */
   battle: viewBattleSchema.optional()
@@ -177,6 +234,28 @@ export const clientShopSellMessageSchema = z.object({
 
 export const clientRestMessageSchema = z.object({ type: z.literal("rest") });
 
+/**
+ * 会話中の自由入力送信。`text` の sanitize(制御文字除去)と厳密な長さ上限は
+ * **サーバーが強制**する(config playerInputMaxLength)。ここでの上限は粗い DoS ガードのみ
+ * (サーバーが切り詰めるべき長さでもパース段では拒否せず受ける)。
+ */
+export const clientConversationSendMessageSchema = z.object({
+  type: z.literal("conversation-send"),
+  text: z.string().max(4000)
+});
+
+/** 提案中サブクエストの受諾/辞退 */
+export const clientConversationChooseMessageSchema = z.object({
+  type: z.literal("conversation-choose"),
+  choice: z.enum(["accept", "decline"])
+});
+
+/** 会話の終了(要約フローへ)。会話 overlay を閉じる */
+export const clientConversationEndMessageSchema = z.object({ type: z.literal("conversation-end") });
+
+/** 情報屋への「仕事はある?」(サブクエスト生成の要求) */
+export const clientQuestRequestMessageSchema = z.object({ type: z.literal("quest-request") });
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
   clientPingMessageSchema,
   clientNewGameMessageSchema,
@@ -188,7 +267,11 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   clientDiscardItemMessageSchema,
   clientShopBuyMessageSchema,
   clientShopSellMessageSchema,
-  clientRestMessageSchema
+  clientRestMessageSchema,
+  clientConversationSendMessageSchema,
+  clientConversationChooseMessageSchema,
+  clientConversationEndMessageSchema,
+  clientQuestRequestMessageSchema
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -242,6 +325,20 @@ export const serverBattleEventsMessageSchema = z.object({
   events: z.array(battleEventSchema)
 });
 
+/**
+ * 検証済みの AI 発話/ナレーション(探索の dialog キューとは別チャンネル)。
+ * クライアントの TypewriterText がこの**検証済み全文**を疑似ストリーミング表示する
+ * (未検証テキストは送らない: ai-guardrails.md 第4層)。
+ * - channel: speak(NPC 発話)/ narrate(情景・夢・戦果)
+ * - npcId: 発話 NPC(speak 時)。narrate や地の文では省略
+ */
+export const serverAiUtteranceMessageSchema = z.object({
+  type: z.literal("ai-utterance"),
+  channel: z.enum(["speak", "narrate"]),
+  npcId: npcIdSchema.optional(),
+  text: z.string().min(1)
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
   serverStateMessageSchema,
   serverPongMessageSchema,
@@ -249,7 +346,8 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   serverHelloMessageSchema,
   serverSnapshotMessageSchema,
   serverDialogMessageSchema,
-  serverBattleEventsMessageSchema
+  serverBattleEventsMessageSchema,
+  serverAiUtteranceMessageSchema
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

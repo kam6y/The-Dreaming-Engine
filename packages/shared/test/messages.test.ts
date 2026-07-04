@@ -135,7 +135,8 @@ describe("サーバー→クライアント メッセージ(M3)", () => {
       inventoryCapacity: 20,
       inventoryUsed: 2,
       symbols: [{ position: { x: 5, y: 5 }, enemyId: "mist-wolf" }],
-      resolvedObjectIds: []
+      resolvedObjectIds: [],
+      subQuests: []
     };
   }
 
