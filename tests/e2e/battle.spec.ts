@@ -17,11 +17,12 @@ import {
 
 // 戦闘スモーク: エンカウント → 勝利 → 探索復帰(ROADMAP M2 最終項目)。
 //
-// シンボル配置は ?seed=42 で固定される(game-state.ts の initializeRun が
-// createRng(seed) を作り、以後のサンプリングを再現可能にする)。街(town)は
-// 安全地帯で enemySymbols を持たず sampleEnemySymbols が RNG を消費しないため、
-// フィールド(field)入場時のサンプリングが最初の乱数消費になる。そこでこの spec は
-// クライアントと同じ createRng(42) → sampleEnemySymbols(fieldMap) を再現し、
+// シンボル配置は ?seed=42 で固定される(?seed=N は new-game メッセージの
+// options.seed としてサーバーへ渡り、サーバーが createRng(seed) を作って以後の
+// サンプリングを再現可能にする)。街(town)は安全地帯で enemySymbols を持たず
+// sampleEnemySymbols が RNG を消費しないため、フィールド(field)入場時の
+// サンプリングが最初の乱数消費になる。そこでこの spec はサーバーと同じ
+// createRng(42) → sampleEnemySymbols(fieldMap) を再現し、
 // シンボル座標をハードコードせずに接触経路を導出する(seed=42 では (9,5) と (1,10))。
 //
 // 探索/戦闘の状態は #game 要素の data 属性へ同期される
