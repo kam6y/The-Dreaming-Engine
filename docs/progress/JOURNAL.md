@@ -180,3 +180,48 @@
 - 次にやること: ROADMAP M3(インベントリ・店・セーブ)。インベントリ/店ロジック(純TS)を
   subagentへ委譲し、店・インベントリUI・タイトル「つづきから」はオーケストレーターが実装。
   セーブはサーバー正本(GameState移行)+`saves/`原子的書き込み。ラン状態のサーバー移行を含む
+
+## [8] 2026-07-04 M3完了: インベントリ・店・セーブ(サーバー正本移行の完成)
+
+- やったこと:
+  - 中断からの回収: 前セッションのM3先行コミット3件(513d86e サーバー正本化 /
+    83a9a45 タイトルメニュー化 / a9f527e GameClientネット層)がJOURNAL未記載のまま
+    残っていた(作業ツリーはクリーン)。内容を確認して本エントリで記録し、続きから再開
+  - client(オーケストレーター実装): サーバー正本への全面移行。main.tsをGameClientへ
+    差し替え、タイトル(helloで「つづきから」有効化・上書き確認・new-game/continue送信)、
+    探索(move/interact送信+snapshot駆動描画・宿のConfirmDialogからrest=セーブ)、
+    戦闘(battle-command送信+battle-eventsの逐次表示)。旧クライアントRunStateを撤去
+  - client(オーケストレーター実装): ShopOverlay(買う/売る/やめる・所持金/所持数表示・
+    拒否メッセージの通知行)、InventoryOverlay(Escで開閉・使う/すてる・上限表示・
+    クエスト品別枠)、MenuListのカーソル維持(initialIndex/currentIndex)、
+    日本語折返し(useAdvancedWrap)、タイトルuiLayerの深度修正
+  - E2E(subagent実装): save-load.spec(新規→宿泊セーブ→リロード→つづきから→復元検証+
+    セーブファイルの隔離ディレクトリへの実在確認)、webServerへのSAVE_DIR注入
+    (test-results/e2e-saves 絶対パス)、globalSetupでの実行開始時クリーンアップ
+  - ブラウザ実操作で全フロー検証: 購入(30G→10G)・金不足拒否・売却(+10G)・HP満タン時の
+    使用拒否・破棄・宿泊セーブ(day2/10G)・リロード→つづきから完全復元・新規ゲーム上書き確認
+- 検証: `pnpm check` 緑(ユニット195件)。`pnpm test:e2e` 緑(4件・約1.3分、
+  subagent側でも2回連続緑)。ブラウザ実操作(上記)
+- 裁量で決めたこと:
+  - 店の売買・アイテム使用/破棄は1個ずつ(数量指定UIなし。M3の最小実装)
+  - Escは「もちもの」オーバーレイの開閉に割当(仕様「Esc=メニュー」の最小実装)
+  - dialogメッセージはグローバルキューで管理し探索シーンが順次表示
+    (戦闘中に届く全滅・戦利品あふれの文言も探索復帰後に表示される)
+  - E2E用DOM data属性に day/gold/level/hp を追加(セーブ/ロード検証用)
+  - ゲーム内から「タイトルへ戻る」手段は未実装のため、セーブ/ロードE2Eはページ
+    リロードでタイトルへ戻る(タイトル復帰メニューはM6のエンディング導線で検討)
+  - E2EのSAVE_DIRは`test-results/e2e-saves`(gitignore済み領域・絶対パスで注入)
+- 既知の問題:
+  - PhaserのKeyboardPluginはキー入力をフレーム単位で処理するため、同一フレームに
+    2キーが入る速度(例: ArrowDown→Enterを無遅延送出)ではメニューのカーソル移動が
+    決定に反映されない。人間の操作速度では実害なし。E2Eはキー間に250ms挟んで回避
+  - E2Eスイートは直列・アルファベット順+globalSetup1回/実行に依存。save-loadより
+    後ろにソートされる「新規ゲーム前提」のspecを追加すると上書き確認で詰まる
+    (追加時はセーブ削除を先頭に入れること)
+  - 前セッションの残存devサーバー(古いdistの:3000)をPlaywrightがreuseし、E2Eが
+    誤って赤になった。残存プロセスを停止して解決。E2Eが不可解に赤いときは
+    ポート3000/5173の残存プロセスを疑うこと
+- 次にやること: ROADMAP M4(AI統合・DreamMaster)。着手前に`@anthropic-ai/claude-agent-sdk`の
+  最新ドキュメントを必ず確認する。`ai-integration.md`と`ai-guardrails.md`を精読し、
+  ツール検証層(純TS+ユニットテスト)・DreamMaster/MockDreamMasterをsubagentへ委譲、
+  会話UI(自由入力+選択肢・疑似ストリーミング)とクエストジャーナルUIはオーケストレーターが実装
