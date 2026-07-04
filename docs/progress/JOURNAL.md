@@ -517,3 +517,33 @@
   M0-M6全マイルストーン完了。以降は BACKLOG.md に従い /loop で拡張する
 - 次にやること: 縦切りは完成。拡張フェーズ(/loop + BACKLOG.md)。着手時はBACKLOG上位項目
   (装備システム・新エリア・第2章等)から。人間確認待ち項目(実プレイ・test:ai-live)の消化は人間
+
+## [17] 2026-07-04 バグ修正: 調べる/会話後の移動不能(awaiting固着)
+
+- やったこと:
+  - 症状(ユーザーの実プレイ報告): 人物に話しかけたり何かを調べたりした後、**たまに矢印キーが
+    利かず移動不能**になる
+  - 根本原因(systematic-debugging + 実測で特定): 探索シーンの移動ロック `awaiting` は
+    「応答(snapshot / dialog / error)待ち」の契約(exploration-scene.ts の定義コメント)だが、
+    シーンは dialog を購読しておらず **snapshot / error でしか解除していなかった**。サーバーの
+    interact 応答には snapshot を伴わず **dialog のみ**を返す経路(立て札・空振り=正面に何も無い・
+    空箱・満杯で拾えない等)があり、その後 `awaiting` が true 固着 → 以後 move を送れず移動不能。
+    dialog-only の操作でだけ固着するため「たまに」に見える(開発者は同種をボス経路だけ
+    `approachBoss` で回避済みだったが他 interact 経路を見落としていた)
+  - 修正(client 1点): 探索シーンが `client.on("dialog", …)` で `awaiting` を解除
+    (exploration-scene.ts)。実プレイは gatekeeper 常時注入で NPC 会話は全経路 snapshot 応答
+    (dialog-only にならない)ため、この単一修正で「調べた後」も「話した後(万一の dialog-only)」も
+    全クラスを1点で解消する
+  - E2E 観測用に `data-dialog`(open/closed)を #game データ属性へ同期(dialog-only 応答は
+    snapshot を伴わず既存の syncDomState では観測できないため)
+  - 回帰 E2E `movement-after-interaction.spec.ts` 2件(調べた後の移動・会話後の移動)を追加
+- 検証: `pnpm check` 緑・`pnpm test:e2e` **10/10**緑(既存8+新規2)。実測で
+  **修正前=y:10固着 / 修正後=y:9移動**を確認。会話4バリエーション(送信→Esc / 立ち去る /
+  入力Escキャンセル / 依頼を尋ねる)すべてで会話後の移動成立を実測し、別バグ疑い(自由入力欄
+  TextInputBox のフォーカス残留で keyboard 無効化)は**不在**と確認(afterSubmit の
+  activeElement=BODY・inputs=0・移動成功)
+- 裁量で決めたこと: `data-dialog` データ属性を追加(既存の E2E 用データ属性同期と同趣旨)。
+  サーバー側は不変更(interact 応答が dialog-only でよい契約を維持。`approachBoss` の
+  snapshot 先行付与は本修正で冗長になるが無害なため据え置き=スコープ拡大回避)
+- 既知の問題: なし
+- 次にやること: 縦切りは完成済み。拡張フェーズ(/loop + BACKLOG.md)。人間確認待ち項目の消化は人間

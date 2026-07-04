@@ -212,6 +212,13 @@ export class ExplorationScene extends Phaser.Scene {
       client.on("snapshot", (view) => {
         this.handleSnapshot(view);
       }),
+      // dialog は snapshot を伴わずに来る応答終端でもある(立て札・空振り・満杯など。
+      // dialog そのものは main.ts がグローバルキューへ積む)。awaiting は snapshot / dialog /
+      // error のいずれかで必ず解除する契約(この変数の定義コメント参照)。dialog-only 応答で
+      // awaiting が解除されないと以後 move が送れず「調べた後に移動不能」になるため、ここで解除する
+      client.on("dialog", () => {
+        this.awaiting = false;
+      }),
       client.on("ai-utterance", (utterance) => {
         this.handleAiUtterance(utterance);
       }),
@@ -267,6 +274,7 @@ export class ExplorationScene extends Phaser.Scene {
         const next = dequeueDialog();
         if (next !== undefined) {
           this.dialog.open(next.speaker, next.body);
+          this.syncDomState(); // data-dialog=open を反映(snapshot を伴わない開閉のため)
         }
       }
     }
@@ -542,6 +550,7 @@ export class ExplorationScene extends Phaser.Scene {
     }
     if (this.dialog.isOpen) {
       this.dialog.close();
+      this.syncDomState(); // data-dialog=closed を反映
       return;
     }
     // 会話中の Esc は会話を終える(自由入力中は入力欄側が Esc を処理する)
@@ -944,6 +953,7 @@ export class ExplorationScene extends Phaser.Scene {
     }
     if (this.dialog.isOpen) {
       this.dialog.close();
+      this.syncDomState(); // data-dialog=closed を反映
       return;
     }
     if (
@@ -1005,6 +1015,9 @@ export class ExplorationScene extends Phaser.Scene {
     // E2E 用: 現在の対話種別(shop/inn/conversation/none)と受注中クエスト数
     game.dataset["interaction"] = view.interaction?.kind ?? "none";
     game.dataset["questCount"] = String(view.subQuests.length);
+    // E2E 用: 地の文/NPC ダイアログの開閉(dialog-only 応答は snapshot を伴わないため
+    // これで開閉を観測して移動可否の回帰を決定論的にテストする)
+    game.dataset["dialog"] = this.dialog.isOpen ? "open" : "closed";
     delete game.dataset["battleEnemy"];
   }
 }
