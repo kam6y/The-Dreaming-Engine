@@ -6,6 +6,7 @@ import {
   NPC_DISPLAY_NAMES,
   samePosition,
   tileTypeAt,
+  type ActiveInteraction,
   type Direction,
   type EnemyId,
   type ItemId,
@@ -15,9 +16,12 @@ import {
   type TileType
 } from "@dreaming-engine/shared";
 
+import type { AiUtteranceEvent } from "../net/game-client.js";
+
 import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
 import { getGameClient, type GameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { ConversationOverlay } from "../ui/conversation-overlay.js";
 import { DialogBox } from "../ui/dialog-box.js";
 import { InventoryOverlay } from "../ui/inventory-overlay.js";
 import { ShopOverlay } from "../ui/shop-overlay.js";
@@ -52,6 +56,8 @@ const SYMBOL_COLORS: Record<EnemyId, number> = {
   "creaking-doll": 0x8a7f8f,
   "dream-eater": 0x5c2431
 };
+
+type ConversationInteraction = Extract<ActiveInteraction, { kind: "conversation" }>;
 
 /**
  * 探索シーン(見下ろしグリッド移動)。サーバー正本のスナップショット駆動:
@@ -107,6 +113,16 @@ export class ExplorationScene extends Phaser.Scene {
   /** もちものオーバーレイ(Escで開閉) */
   private inventoryOverlay: InventoryOverlay | null = null;
 
+  /** 会話オーバーレイ(interaction===conversation の間表示) */
+  private conversationOverlay: ConversationOverlay | null = null;
+
+  /**
+   * 会話 overlay を開く前に届いた ai-utterance(speak)の待避スロット。
+   * サーバーは snapshot→utterance の順で送るため通常は overlay 生成後に届くが、
+   * 到着順に依存しないよう1件だけ待避し、overlay 生成時に流し込む。
+   */
+  private stashedSpeak: string | null = null;
+
   /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
   private objectViews = new Map<string, Phaser.GameObjects.Rectangle[]>();
 
@@ -150,6 +166,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.pendingInn = null;
     this.shopOverlay = null;
     this.inventoryOverlay = null;
+    this.conversationOverlay = null;
+    this.stashedSpeak = null;
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
@@ -177,6 +195,9 @@ export class ExplorationScene extends Phaser.Scene {
       client.on("snapshot", (view) => {
         this.handleSnapshot(view);
       }),
+      client.on("ai-utterance", (utterance) => {
+        this.handleAiUtterance(utterance);
+      }),
       client.on("server-error", (error) => {
         this.handleServerError(error.message);
       })
@@ -188,6 +209,7 @@ export class ExplorationScene extends Phaser.Scene {
       this.unsubscribes = [];
       this.closeShopOverlay();
       this.closeInventoryOverlay();
+      this.closeConversationOverlay();
     });
 
     this.updateHud();
@@ -209,6 +231,8 @@ export class ExplorationScene extends Phaser.Scene {
           this.shopOverlay?.showMessage(next.body);
           this.inventoryOverlay?.showMessage(next.body);
         }
+      } else if (this.conversationOverlay !== null) {
+        // 会話中はダイアログを保留する(会話 overlay を上書きしない。会話終了後に表示される)
       } else if (!this.dialog.isOpen && this.innConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
@@ -235,7 +259,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.innConfirm !== null ||
       this.pendingInn !== null ||
       this.shopOverlay !== null ||
-      this.inventoryOverlay !== null
+      this.inventoryOverlay !== null ||
+      this.conversationOverlay !== null
     ) {
       // ダイアログ・オーバーレイ中に押した移動キーが、閉じた直後の「幽霊移動」に
       // ならないよう破棄する
@@ -303,25 +328,38 @@ export class ExplorationScene extends Phaser.Scene {
       this.inventoryOverlay.showMessage(message);
       return;
     }
+    if (this.conversationOverlay !== null) {
+      this.conversationOverlay.showMessage(message);
+      return;
+    }
     enqueueDialog({ speaker: null, body: message });
   }
 
-  /** 対話(店/宿)の開始・終了を snapshot の interaction から反映する */
+  /** 対話(店/宿/会話)の開始・終了を snapshot の interaction から反映する */
   private updateInteraction(view: SnapshotView): void {
     const interaction = view.interaction;
     if (interaction === undefined) {
       this.pendingInn = null;
       this.closeShopOverlay();
+      this.closeConversationOverlay();
       return;
     }
+    // conversation(会話): overlay を開き、以後 snapshot 毎に refresh する
+    if (interaction.kind === "conversation") {
+      this.closeShopOverlay();
+      if (this.conversationOverlay === null) {
+        this.openConversationOverlay(view, interaction);
+      } else {
+        this.conversationOverlay.refresh(view);
+      }
+      return;
+    }
+    // 以降は shop / inn。会話 overlay が残っていれば閉じる
+    this.closeConversationOverlay();
     if (interaction.kind === "inn") {
       if (this.innConfirm === null && this.pendingInn === null) {
         this.pendingInn = { npcName: interaction.npcName, costGold: interaction.costGold };
       }
-      return;
-    }
-    // conversation(会話): 会話オーバーレイは M4-F で実装する。現状は探索シーンでは無視する
-    if (interaction.kind === "conversation") {
       return;
     }
     // shop: オーバーレイを開く(開いている間は snapshot 毎に refresh される)
@@ -354,6 +392,60 @@ export class ExplorationScene extends Phaser.Scene {
     this.inventoryOverlay = null;
   }
 
+  /** 会話 overlay を開く(interaction===conversation を受けたとき) */
+  private openConversationOverlay(view: SnapshotView, interaction: ConversationInteraction): void {
+    this.closeInventoryOverlay();
+    this.conversationOverlay = new ConversationOverlay(this, this.uiLayer, {
+      interaction,
+      snapshot: view,
+      onSend: (text) => {
+        this.client.send({ type: "conversation-send", text });
+      },
+      onChoose: (choice) => {
+        this.client.send({ type: "conversation-choose", choice });
+      },
+      onQuestRequest: () => {
+        this.client.send({ type: "quest-request" });
+      },
+      onEnd: () => {
+        this.closeConversationOverlay();
+        this.client.send({ type: "conversation-end" });
+      }
+    });
+    // overlay 生成前に届いていた挨拶(stash)があれば流し込む
+    if (this.stashedSpeak !== null) {
+      const text = this.stashedSpeak;
+      this.stashedSpeak = null;
+      this.conversationOverlay.playUtterance(text);
+    }
+  }
+
+  private closeConversationOverlay(): void {
+    // サーバー側の interaction は conversation-end / 次の move・interact で解除される
+    this.conversationOverlay?.destroy();
+    this.conversationOverlay = null;
+    this.stashedSpeak = null;
+  }
+
+  /**
+   * 検証済み AI 発話/ナレーション(ai-utterance)を受ける。
+   * - speak: 会話 overlay へ(未生成なら stash して生成時に流し込む)
+   * - narrate: 夢/戦果の情景。夢シーン演出は M4-F 後半で overlay 化する。
+   *   現状は地の文ダイアログとして表示する(取りこぼさない)
+   */
+  private handleAiUtterance(utterance: AiUtteranceEvent): void {
+    if (utterance.channel === "speak") {
+      if (this.conversationOverlay !== null) {
+        this.conversationOverlay.playUtterance(utterance.text);
+      } else {
+        this.stashedSpeak = utterance.text;
+      }
+      return;
+    }
+    // narrate(夢): 暫定でダイアログ表示(夢 overlay は後続コミットで導入)
+    enqueueDialog({ speaker: null, body: utterance.text });
+  }
+
   /** Esc: もちものオーバーレイの開閉(各オーバーレイ表示中は自身のEscが処理する) */
   private handleEscape(): void {
     if (this.transitioning || this.moving || this.awaiting) {
@@ -361,6 +453,12 @@ export class ExplorationScene extends Phaser.Scene {
     }
     if (this.dialog.isOpen) {
       this.dialog.close();
+      return;
+    }
+    // 会話中の Esc は会話を終える(自由入力中は入力欄側が Esc を処理する)
+    if (this.conversationOverlay !== null) {
+      this.closeConversationOverlay();
+      this.client.send({ type: "conversation-end" });
       return;
     }
     if (
@@ -740,7 +838,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.innConfirm !== null ||
       this.pendingInn !== null ||
       this.shopOverlay !== null ||
-      this.inventoryOverlay !== null
+      this.inventoryOverlay !== null ||
+      this.conversationOverlay !== null
     ) {
       // 各オーバーレイ側(MenuList)が入力を処理する
       return;

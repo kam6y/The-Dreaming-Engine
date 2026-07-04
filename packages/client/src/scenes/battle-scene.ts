@@ -55,6 +55,14 @@ export class BattleScene extends Phaser.Scene {
   /** イベント列をすべて表示し終えたときの遷移処理 */
   private afterMessages: (() => void) | null = null;
 
+  /**
+   * 戦果ナレーション(初見敵・ボスのみ届く ai-utterance narrate)の待避スロット。
+   * サーバーは victory の burst で battle-events → snapshot(exploration)→ narrate の順に送るため、
+   * snapshot での即時遷移はせず、勝利メッセージ送り完了時にこれがあれば最後に1枚表示してから終了する
+   * (再戦の雑魚には narrate が来ないので、待たずに終了する)。
+   */
+  private pendingNarrate: string | null = null;
+
   /** イベント表示中のMP表示値(action イベントの mpCost を反映する) */
   private currentMp = 0;
 
@@ -99,6 +107,7 @@ export class BattleScene extends Phaser.Scene {
     this.awaiting = false;
     this.eventQueue = [];
     this.afterMessages = null;
+    this.pendingNarrate = null;
     this.subMenu = null;
     this.currentMp = this.view.player.mp;
 
@@ -120,6 +129,12 @@ export class BattleScene extends Phaser.Scene {
         this.latestSnapshot = view;
         if (view.battle !== undefined) {
           this.view = view.battle;
+        }
+      }),
+      client.on("ai-utterance", (utterance) => {
+        // 戦果ナレーション(narrate)のみ待避。会話(speak)は探索シーンの担当
+        if (utterance.channel === "narrate") {
+          this.pendingNarrate = utterance.text;
         }
       }),
       client.on("server-error", (error) => {
@@ -378,6 +393,17 @@ export class BattleScene extends Phaser.Scene {
 
   private openCommandMenu(): void {
     if (this.latestSnapshot.mode !== "battle") {
+      // 戦果ナレーション(初見敵・ボスのみ)があれば最後に1枚見せてから探索へ戻る。
+      // 無ければ(再戦の雑魚)待たずに終了する
+      if (this.pendingNarrate !== null) {
+        const narrate = this.pendingNarrate;
+        this.pendingNarrate = null;
+        this.showMessage(narrate);
+        this.afterMessages = () => {
+          this.finishBattle();
+        };
+        return;
+      }
       this.finishBattle();
       return;
     }
