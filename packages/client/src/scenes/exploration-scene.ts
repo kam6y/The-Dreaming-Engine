@@ -23,7 +23,9 @@ import { getGameClient, type GameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { ConversationOverlay } from "../ui/conversation-overlay.js";
 import { DialogBox } from "../ui/dialog-box.js";
+import { DreamOverlay } from "../ui/dream-overlay.js";
 import { InventoryOverlay } from "../ui/inventory-overlay.js";
+import { QuestJournalOverlay } from "../ui/quest-journal-overlay.js";
 import { ShopOverlay } from "../ui/shop-overlay.js";
 
 /** タイル1マスのピクセルサイズ(game-design.md「マップ構成」) */
@@ -123,6 +125,18 @@ export class ExplorationScene extends Phaser.Scene {
    */
   private stashedSpeak: string | null = null;
 
+  /** 夢シーン演出のオーバーレイ(宿泊後・表示中) */
+  private dreamOverlay: DreamOverlay | null = null;
+
+  /**
+   * 夢の情景(ai-utterance narrate)の待避スロット。宿屋のおやすみダイアログを
+   * 表示し終えてから夢 overlay を開く(pendingInn と同じ「先行ダイアログ待ち」)。
+   */
+  private pendingDream: string | null = null;
+
+  /** クエストジャーナル(Qで開閉) */
+  private questJournal: QuestJournalOverlay | null = null;
+
   /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
   private objectViews = new Map<string, Phaser.GameObjects.Rectangle[]>();
 
@@ -168,6 +182,9 @@ export class ExplorationScene extends Phaser.Scene {
     this.inventoryOverlay = null;
     this.conversationOverlay = null;
     this.stashedSpeak = null;
+    this.dreamOverlay = null;
+    this.pendingDream = null;
+    this.questJournal = null;
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
@@ -210,6 +227,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.closeShopOverlay();
       this.closeInventoryOverlay();
       this.closeConversationOverlay();
+      this.closeDreamOverlay();
+      this.closeQuestJournal();
     });
 
     this.updateHud();
@@ -231,8 +250,12 @@ export class ExplorationScene extends Phaser.Scene {
           this.shopOverlay?.showMessage(next.body);
           this.inventoryOverlay?.showMessage(next.body);
         }
-      } else if (this.conversationOverlay !== null) {
-        // 会話中はダイアログを保留する(会話 overlay を上書きしない。会話終了後に表示される)
+      } else if (
+        this.conversationOverlay !== null ||
+        this.dreamOverlay !== null ||
+        this.questJournal !== null
+      ) {
+        // 会話・夢・ジャーナル中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
       } else if (!this.dialog.isOpen && this.innConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
@@ -251,6 +274,22 @@ export class ExplorationScene extends Phaser.Scene {
       this.openInnConfirm(this.pendingInn);
     }
 
+    // 夢シーンは宿屋のおやすみダイアログをすべて表示し終えてから開く(先行ダイアログ待ち)
+    if (
+      this.pendingDream !== null &&
+      !this.dialog.isOpen &&
+      !hasPendingDialog() &&
+      this.dreamOverlay === null &&
+      this.conversationOverlay === null &&
+      this.shopOverlay === null &&
+      this.inventoryOverlay === null &&
+      this.questJournal === null
+    ) {
+      const text = this.pendingDream;
+      this.pendingDream = null;
+      this.openDreamOverlay(text);
+    }
+
     if (this.moving || this.awaiting) {
       return;
     }
@@ -260,7 +299,9 @@ export class ExplorationScene extends Phaser.Scene {
       this.pendingInn !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
-      this.conversationOverlay !== null
+      this.conversationOverlay !== null ||
+      this.dreamOverlay !== null ||
+      this.questJournal !== null
     ) {
       // ダイアログ・オーバーレイ中に押した移動キーが、閉じた直後の「幽霊移動」に
       // ならないよう破棄する
@@ -427,11 +468,52 @@ export class ExplorationScene extends Phaser.Scene {
     this.stashedSpeak = null;
   }
 
+  /** 夢シーン overlay を開く(宿泊後・先行ダイアログ表示後に update から呼ぶ) */
+  private openDreamOverlay(text: string): void {
+    this.dreamOverlay = new DreamOverlay(this, this.uiLayer, {
+      text,
+      onWake: () => {
+        this.closeDreamOverlay();
+      }
+    });
+  }
+
+  private closeDreamOverlay(): void {
+    this.dreamOverlay?.destroy();
+    this.dreamOverlay = null;
+  }
+
+  /** クエストジャーナルを開く(Q。他の overlay/ダイアログが無いときのみ) */
+  private openQuestJournal(): void {
+    if (
+      this.transitioning ||
+      this.moving ||
+      this.awaiting ||
+      this.dialog.isOpen ||
+      this.innConfirm !== null ||
+      this.pendingInn !== null ||
+      this.shopOverlay !== null ||
+      this.inventoryOverlay !== null ||
+      this.conversationOverlay !== null ||
+      this.dreamOverlay !== null ||
+      this.questJournal !== null
+    ) {
+      return;
+    }
+    this.questJournal = new QuestJournalOverlay(this, this.uiLayer, { snapshot: this.snapshot });
+  }
+
+  private closeQuestJournal(): void {
+    this.questJournal?.destroy();
+    this.questJournal = null;
+  }
+
   /**
    * 検証済み AI 発話/ナレーション(ai-utterance)を受ける。
    * - speak: 会話 overlay へ(未生成なら stash して生成時に流し込む)
-   * - narrate: 夢/戦果の情景。夢シーン演出は M4-F 後半で overlay 化する。
-   *   現状は地の文ダイアログとして表示する(取りこぼさない)
+   * - narrate: 探索で届く narrate は宿泊後の夢の情景。宿屋のおやすみダイアログを
+   *   表示し終えてから夢 overlay を開くため、ここでは stash するだけにする
+   *   (戦果 narrate は戦闘シーン側が担当するのでここには来ない)
    */
   private handleAiUtterance(utterance: AiUtteranceEvent): void {
     if (utterance.channel === "speak") {
@@ -442,8 +524,8 @@ export class ExplorationScene extends Phaser.Scene {
       }
       return;
     }
-    // narrate(夢): 暫定でダイアログ表示(夢 overlay は後続コミットで導入)
-    enqueueDialog({ speaker: null, body: utterance.text });
+    // narrate(夢): 先行ダイアログの後に開くため待避する(update で開く)
+    this.pendingDream = utterance.text;
   }
 
   /** Esc: もちものオーバーレイの開閉(各オーバーレイ表示中は自身のEscが処理する) */
@@ -459,6 +541,15 @@ export class ExplorationScene extends Phaser.Scene {
     if (this.conversationOverlay !== null) {
       this.closeConversationOverlay();
       this.client.send({ type: "conversation-end" });
+      return;
+    }
+    // クエストジャーナルは Esc で閉じる
+    if (this.questJournal !== null) {
+      this.closeQuestJournal();
+      return;
+    }
+    // 夢はスペースで目覚める(Esc は無視する)
+    if (this.dreamOverlay !== null) {
       return;
     }
     if (
@@ -796,6 +887,14 @@ export class ExplorationScene extends Phaser.Scene {
     keyboard.on("keydown-ESC", () => {
       this.handleEscape();
     });
+    // Q: クエストジャーナルの開閉(受注中サブクエスト一覧)
+    keyboard.on("keydown-Q", () => {
+      if (this.questJournal !== null) {
+        this.closeQuestJournal();
+      } else {
+        this.openQuestJournal();
+      }
+    });
 
     // ポーリング(長押し)に加えてkeydownでも1歩を予約する。
     // 短いタップがフレーム間に落ちてisDownで拾えなくても確実に1歩動く
@@ -839,9 +938,11 @@ export class ExplorationScene extends Phaser.Scene {
       this.pendingInn !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
-      this.conversationOverlay !== null
+      this.conversationOverlay !== null ||
+      this.dreamOverlay !== null ||
+      this.questJournal !== null
     ) {
-      // 各オーバーレイ側(MenuList)が入力を処理する
+      // 各オーバーレイ側(MenuList・夢の目覚まし)が入力を処理する
       return;
     }
     if (this.awaiting) {
