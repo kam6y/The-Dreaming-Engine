@@ -160,6 +160,11 @@ export class ConversationOverlay {
     this.awaiting = false;
     this.hintText.setText("");
     this.utterance.play(text);
+    // 応答が届いたのでアクションメニューを組み直す(受諾/辞退の可否が変わり得る。
+    // 直前の snapshot refresh で this.interaction は更新済み)
+    if (this.input === null) {
+      this.rebuildMenu();
+    }
   }
 
   /** interaction / snapshot 更新の反映(options・提案の変化) */

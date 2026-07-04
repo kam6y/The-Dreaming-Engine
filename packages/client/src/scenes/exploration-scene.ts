@@ -250,12 +250,19 @@ export class ExplorationScene extends Phaser.Scene {
           this.shopOverlay?.showMessage(next.body);
           this.inventoryOverlay?.showMessage(next.body);
         }
-      } else if (
-        this.conversationOverlay !== null ||
-        this.dreamOverlay !== null ||
-        this.questJournal !== null
-      ) {
-        // 会話・夢・ジャーナル中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
+      } else if (this.conversationOverlay !== null) {
+        // 会話中に届く NPC 台詞(受諾/辞退の確認など、サーバーが dialog で送る定型)は
+        // 会話 overlay の発話として流す。地の文(speaker=null)は下部の通知行へ
+        const next = dequeueDialog();
+        if (next !== undefined) {
+          if (next.speaker !== null) {
+            this.conversationOverlay.playUtterance(next.body);
+          } else {
+            this.conversationOverlay.showMessage(next.body);
+          }
+        }
+      } else if (this.dreamOverlay !== null || this.questJournal !== null) {
+        // 夢・ジャーナル中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
       } else if (!this.dialog.isOpen && this.innConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
