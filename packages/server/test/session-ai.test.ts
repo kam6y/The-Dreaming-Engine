@@ -1,0 +1,516 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import {
+  BATTLE_RESULT_FALLBACK_TEXT,
+  DREAM_FALLBACK_TEXT,
+  countOf,
+  createNewGameState,
+  samePosition,
+  type Direction,
+  type GameState,
+  type NpcId,
+  type Position,
+  type ServerMessage,
+  type SnapshotView,
+  type SubQuest
+} from "@dreaming-engine/shared";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { AuditLog } from "../src/ai/audit-log.js";
+import { loadAiConfig, type AiConfig, type DeepPartial } from "../src/ai/config.js";
+import { MockDreamMaster } from "../src/ai/dream-master/index.js";
+import type {
+  DreamMaster,
+  DreamMasterContext,
+  DreamMasterResult,
+  RawToolCall
+} from "../src/ai/dream-master/index.js";
+import { AiFlowGatekeeper, AiTurnExecutor } from "../src/ai/flow-control/index.js";
+import { RateLimiter } from "../src/ai/rate-limit.js";
+import { FileSaveStore, type LoadResult, type SaveStore } from "../src/game/save.js";
+import { GameSession } from "../src/game/session.js";
+
+/**
+ * GameState レベルの統合テスト(MockDreamMaster 系で組んだ gatekeeper を注入)。
+ *
+ * ここが M4-E の「バグの巣」= カウンタ書き戻しループの実証帯:
+ * 検証層単体では検証層が手でカウンタを設定するため上限テストが通ってしまう。閉ループは
+ * GameSession→applyStateChangeEffect→GameState.aiDaily の往復でのみ証明される。
+ */
+
+const META = { mode: "mock" as const, model: "claude-haiku-4-5" };
+
+/** 注入クロックを進める補助(makeAiSession が session ごとに登録する) */
+const advanceRegistry = new WeakMap<GameSession, (ms: number) => void>();
+function advanceClock(session: GameSession, ms: number): void {
+  const fn = advanceRegistry.get(session);
+  if (fn === undefined) throw new Error("advance が登録されていない");
+  fn(ms);
+}
+
+function okResult(
+  ctx: DreamMasterContext,
+  toolCalls: RawToolCall[],
+  text: string | null = null
+): DreamMasterResult {
+  return { ok: true, flow: ctx.flow, toolCalls, text, meta: META };
+}
+
+/** 送信(自由入力あり)時のみ give_item を出す会話 DreamMaster(日次上限ループの検証用) */
+class GivingDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation") {
+      const calls: RawToolCall[] = [{ toolName: "speak", rawInput: { text: "「よい旅を、旅人さん」" } }];
+      if (ctx.playerUtterance.length > 0) {
+        calls.push({ toolName: "give_item", rawInput: { itemId: "potion-small", quantity: 1, reason: "旅の労い" } });
+      }
+      return Promise.resolve(okResult(ctx, calls));
+    }
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [], "旅人と司祭は穏やかに語り合った。"));
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "静かな夜が更けていく。" } }]));
+  }
+}
+
+/** 送信時のみ adjust_affinity(+2)を出す会話 DreamMaster(会話内上限ループの検証用) */
+class AdjustingDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation") {
+      const calls: RawToolCall[] = [{ toolName: "speak", rawInput: { text: "「……ふむ、なるほど」" } }];
+      if (ctx.playerUtterance.length > 0) {
+        calls.push({
+          toolName: "adjust_affinity",
+          rawInput: { npcId: ctx.partnerNpcId, delta: 2, reason: "打ち解けたため" }
+        });
+      }
+      return Promise.resolve(okResult(ctx, calls));
+    }
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [], "旅人と語り合った。"));
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+}
+
+/** run() 呼び出しをフロー別に数える薄いラッパ(初見/既見の AI 呼び出し有無の検証用) */
+class CountingDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public readonly calls: Record<string, number> = {};
+  public constructor(private readonly inner: DreamMaster) {}
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    this.calls[ctx.flow] = (this.calls[ctx.flow] ?? 0) + 1;
+    return this.inner.run(ctx);
+  }
+}
+
+class FakeSaveStore implements SaveStore {
+  public saved: GameState[] = [];
+  public loadResult: LoadResult = { ok: false, reason: "missing" };
+  public async exists(): Promise<boolean> {
+    return this.loadResult.ok;
+  }
+  public async load(): Promise<LoadResult> {
+    return this.loadResult;
+  }
+  public async save(state: GameState): Promise<void> {
+    this.saved.push(structuredClone(state));
+  }
+}
+
+const tmpDirs: string[] = [];
+afterEach(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+  tmpDirs.length = 0;
+});
+
+interface AiSession {
+  session: GameSession;
+  store: FakeSaveStore;
+  dreamMaster: DreamMaster;
+  advance: (ms: number) => void;
+}
+
+function makeAiSession(opts?: {
+  dreamMaster?: (config: AiConfig) => DreamMaster;
+  configOverrides?: DeepPartial<AiConfig>;
+  seed?: number;
+  noSymbols?: boolean;
+}): AiSession {
+  let now = 0;
+  const clock = (): number => now;
+  const config = loadAiConfig({ sessionCallLimit: 1000, ...opts?.configOverrides });
+  const dir = mkdtempSync(path.join(tmpdir(), "de-audit-"));
+  tmpDirs.push(dir);
+  const auditLog = new AuditLog({ dir, now: () => new Date(now) });
+  const dreamMaster = opts?.dreamMaster ? opts.dreamMaster(config) : new MockDreamMaster(config);
+  const executor = new AiTurnExecutor({ dreamMaster, config });
+  const gatekeeper = new AiFlowGatekeeper({
+    executor,
+    config,
+    rateLimiter: new RateLimiter(clock),
+    auditLog,
+    now: clock
+  });
+  const store = new FakeSaveStore();
+  const session = new GameSession({
+    saveStore: store,
+    clock,
+    seed: opts?.seed ?? 1,
+    noSymbols: opts?.noSymbols ?? true,
+    gatekeeper,
+    playerInputMaxLength: config.playerInputMaxLength,
+    maskEnv: {} as NodeJS.ProcessEnv
+  });
+  const advance = (ms: number): void => {
+    now += ms;
+  };
+  advanceRegistry.set(session, advance);
+  return { session, store, dreamMaster, advance };
+}
+
+const NPC_APPROACH: Record<NpcId, { pos: Position; facing: Direction }> = {
+  innkeeper: { pos: { x: 4, y: 5 }, facing: "up" },
+  merchant: { pos: { x: 16, y: 5 }, facing: "up" },
+  informant: { pos: { x: 4, y: 9 }, facing: "down" },
+  priest: { pos: { x: 16, y: 9 }, facing: "down" }
+};
+
+function mustState(session: GameSession): GameState {
+  const state = session.getState();
+  if (state === null) throw new Error("GameState が null");
+  return state;
+}
+
+function mustView(session: GameSession): SnapshotView {
+  const view = session.getView();
+  if (view === null) throw new Error("SnapshotView が null");
+  return view;
+}
+
+/** 街の対象 NPC の正面へテレポートして話しかける */
+async function talkTo(session: GameSession, npcId: NpcId): Promise<ServerMessage[]> {
+  const approach = NPC_APPROACH[npcId];
+  mustState(session).location = { mapId: "town", position: { ...approach.pos }, facing: approach.facing };
+  return session.handle({ type: "interact" });
+}
+
+function narrations(msgs: ServerMessage[]): string[] {
+  return msgs
+    .filter((m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance")
+    .filter((m) => m.channel === "narrate")
+    .map((m) => m.text);
+}
+
+function fieldState(mutate?: (s: GameState) => void): GameState {
+  const s = createNewGameState();
+  s.location = { mapId: "field", position: { x: 11, y: 8 }, facing: "down" };
+  mutate?.(s);
+  return s;
+}
+
+/** 現マップの先頭シンボルへ踏み込んで戦闘を開始する(session.test の手法を踏襲) */
+async function engageBattle(session: GameSession): Promise<void> {
+  const view = mustView(session);
+  const symbol = view.symbols[0];
+  if (symbol === undefined) throw new Error("敵シンボルが居ない");
+  const candidates: { stand: Position; dir: Direction }[] = [
+    { stand: { x: symbol.position.x, y: symbol.position.y + 1 }, dir: "up" },
+    { stand: { x: symbol.position.x, y: symbol.position.y - 1 }, dir: "down" },
+    { stand: { x: symbol.position.x - 1, y: symbol.position.y }, dir: "right" },
+    { stand: { x: symbol.position.x + 1, y: symbol.position.y }, dir: "left" }
+  ];
+  const others = view.symbols.slice(1).map((s) => s.position);
+  const spot = candidates.find((c) => !others.some((p) => samePosition(p, c.stand)));
+  if (spot === undefined) throw new Error("立ち位置がない");
+  mustState(session).location.position = { ...spot.stand };
+  await session.handle({ type: "move", direction: spot.dir });
+  if (mustView(session).mode !== "battle") throw new Error("戦闘が開始しなかった");
+}
+
+/** 攻撃で決着まで戦う。最後のメッセージ列を返す */
+async function fightToEnd(session: GameSession): Promise<ServerMessage[]> {
+  let last: ServerMessage[] = [];
+  let rounds = 0;
+  while (mustView(session).mode === "battle") {
+    last = await session.handle({ type: "battle-command", command: { kind: "attack" } });
+    rounds += 1;
+    if (rounds > 12) throw new Error("戦闘が終わらない(想定外)");
+  }
+  return last;
+}
+
+function activeHunt(id: string, count: number): SubQuest {
+  return {
+    type: "hunt",
+    targetId: "mist-wolf",
+    id,
+    count,
+    progress: 0,
+    rewardGold: 20,
+    title: "霧狼狩り",
+    description: "忘れ野の霧狼を討つ。",
+    status: "active"
+  };
+}
+
+// ===========================================================================
+// 会話: 開始→送信→提案→受諾/辞退/未受諾終了
+// ===========================================================================
+
+describe("会話フロー(提案の受諾・辞退・破棄)", () => {
+  it("情報屋で提案生成→受諾で subQuests へ、pendingProposal クリア・発行カウンタ増加", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+
+    const afterReq = await session.handle({ type: "quest-request" });
+    const reqView = mustView(session);
+    if (reqView.interaction?.kind !== "conversation") throw new Error("会話 interaction がない");
+    expect(reqView.interaction.pendingProposal).toBeDefined();
+    expect(reqView.interaction.pendingProposal?.type).toBe("hunt");
+    expect(reqView.interaction.pendingProposal?.count).toBe(3);
+    expect(reqView.interaction.options).toContain("accept");
+    expect(reqView.interaction.options).toContain("decline");
+    expect(afterReq.some((m) => m.type === "ai-utterance")).toBe(true);
+    // 提案の発行で日次カウンタが閉じている(書き戻しループ)
+    expect(mustState(session).aiDaily.proposeQuestCount).toBe(1);
+
+    await session.handle({ type: "conversation-choose", choice: "accept" });
+    const st = mustState(session);
+    expect(st.subQuests).toHaveLength(1);
+    expect(st.subQuests[0]?.status).toBe("active");
+    expect(st.subQuests[0]?.type).toBe("hunt");
+    const acceptedView = mustView(session);
+    expect(acceptedView.interaction?.kind === "conversation" && acceptedView.interaction.pendingProposal).toBeUndefined();
+    expect(acceptedView.subQuests).toHaveLength(1); // クエストジャーナルに反映
+  });
+
+  it("辞退で提案は破棄され subQuests は増えない", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+    await session.handle({ type: "quest-request" });
+    await session.handle({ type: "conversation-choose", choice: "decline" });
+    expect(mustState(session).subQuests).toHaveLength(0);
+    const view = mustView(session);
+    expect(view.interaction?.kind === "conversation" && view.interaction.pendingProposal).toBeUndefined();
+  });
+
+  it("未受諾のまま会話終了すると提案は破棄される", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+    await session.handle({ type: "quest-request" });
+    await session.handle({ type: "conversation-end" });
+    expect(mustState(session).subQuests).toHaveLength(0);
+    expect(mustView(session).interaction).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// カウンタ書き戻しループ(GameSession 経由での実証)
+// ===========================================================================
+
+describe("give_item の日次上限(GameSession 経由の書き戻しループ)", () => {
+  it("同一ゲーム内日に give_item ×3 まで通り、4回目は拒否される", async () => {
+    const { session } = makeAiSession({
+      dreamMaster: () => new GivingDreamMaster(),
+      configOverrides: {
+        cooldowns: { conversationStartSeconds: 0, dreamSeconds: 0, questGenerationSeconds: 0 }
+      }
+    });
+    await session.handle({ type: "new-game" });
+    mustState(session).npcs.priest.affinity = 60; // give_item 解禁(会話開始時点の閾値50以上)
+    const before = countOf(mustState(session).inventory, "potion-small");
+
+    // 会話ごとに1回 give(会話内上限1)。送信レート(3秒)を跨ぐためクロックを進める
+    for (let i = 1; i <= 3; i += 1) {
+      await talkTo(session, "priest");
+      advanceClock(session, 3001);
+      await session.handle({ type: "conversation-send", text: `贈り物をくれ${i}` });
+      await session.handle({ type: "conversation-end" });
+    }
+    expect(mustState(session).aiDaily.giveItemCount).toBe(3);
+    expect(countOf(mustState(session).inventory, "potion-small")).toBe(before + 3);
+
+    // 4回目: 拒否(speak は返るが give は却下 → インベントリ・カウンタ不変)
+    await talkTo(session, "priest");
+    advanceClock(session, 3001);
+    await session.handle({ type: "conversation-send", text: "もうひとつくれ" });
+    expect(mustState(session).aiDaily.giveItemCount).toBe(3);
+    expect(countOf(mustState(session).inventory, "potion-small")).toBe(before + 3);
+  });
+});
+
+describe("adjust_affinity の会話内上限(会話内カウンタループ)", () => {
+  it("同一会話で adjust ×2 まで通り、3回目は拒否(好感度が動かない)", async () => {
+    const { session } = makeAiSession({ dreamMaster: () => new AdjustingDreamMaster() });
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "priest"); // 挨拶(調整なし)
+    expect(mustState(session).npcs.priest.affinity).toBe(30);
+
+    advanceClock(session, 3001);
+    await session.handle({ type: "conversation-send", text: "一つめ" });
+    expect(mustState(session).npcs.priest.affinity).toBe(32);
+
+    advanceClock(session, 3001);
+    await session.handle({ type: "conversation-send", text: "二つめ" });
+    expect(mustState(session).npcs.priest.affinity).toBe(34);
+
+    advanceClock(session, 3001);
+    await session.handle({ type: "conversation-send", text: "三つめ" });
+    // 3回目の adjust は会話内上限(2)で却下 → 好感度は動かない
+    expect(mustState(session).npcs.priest.affinity).toBe(34);
+    expect(mustState(session).aiDaily.affinityDeltaByNpc.priest).toBe(4);
+  });
+});
+
+// ===========================================================================
+// 宿泊 → 夢(順序・失敗時のセーブ成立・クールダウン)
+// ===========================================================================
+
+describe("宿泊と夢シーン", () => {
+  it("夢が失敗(悪意モードで表示系0件)してもセーブは成立し日付は進む(世界変化なし)", async () => {
+    const { session, store } = makeAiSession({
+      dreamMaster: (config) => new MockDreamMaster(config, { malicious: true })
+    });
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "innkeeper");
+    const msgs = await session.handle({ type: "rest" });
+
+    expect(mustState(session).day).toBe(2); // 日送りは必ず成立
+    expect(store.saved).toHaveLength(1);
+    expect(store.saved[0]?.day).toBe(2);
+    expect(mustState(session).world.weather).toBe("clear"); // 悪意 narrate は却下=世界変化なし
+    // 夢のナレーションは定型フォールバックで返る
+    expect(narrations(msgs)).toContain(DREAM_FALLBACK_TEXT);
+  });
+
+  it("正常な夢は世界変化(weather:fog)を適用する", async () => {
+    const { session, store } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "innkeeper");
+    const msgs = await session.handle({ type: "rest" });
+    expect(mustState(session).world.weather).toBe("fog");
+    expect(store.saved[0]?.world.weather).toBe("fog");
+    expect(narrations(msgs).some((t) => t !== DREAM_FALLBACK_TEXT)).toBe(true);
+  });
+
+  it("夢クールダウン中は宿泊処理は通常・夢は定型・世界変化なし", async () => {
+    const { session, store } = makeAiSession(); // dreamSeconds=60(既定)
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "innkeeper");
+    await session.handle({ type: "rest" }); // 1泊目: 夢実行 → fog
+    expect(mustState(session).world.weather).toBe("fog");
+
+    // クロックを進めずに再度宿泊 → 夢クールダウン中
+    await talkTo(session, "innkeeper");
+    const msgs2 = await session.handle({ type: "rest" });
+    expect(mustState(session).day).toBe(3); // 宿泊処理は通常(日送り)
+    expect(store.saved).toHaveLength(2); // セーブも通常
+    expect(narrations(msgs2)).toContain(DREAM_FALLBACK_TEXT); // 夢は定型
+    expect(mustState(session).world.weather).toBe("fog"); // 世界変化なし(1泊目の値のまま)
+  });
+});
+
+// ===========================================================================
+// 戦闘勝利: 戦果描写(初見/既見)と hunt 進行
+// ===========================================================================
+
+describe("戦闘勝利の戦果描写と hunt 進行", () => {
+  it("初見敵は narrate(AI 1回)+ narratedEnemies 記録、hunt 進行も反映", async () => {
+    const { session, store, dreamMaster } = makeAiSession({
+      dreamMaster: (config) => new CountingDreamMaster(new MockDreamMaster(config)),
+      noSymbols: false
+    });
+    store.loadResult = {
+      ok: true,
+      state: fieldState((s) => {
+        s.subQuests = [activeHunt("pq-9", 2)];
+      })
+    };
+    await session.handle({ type: "continue" });
+    await engageBattle(session);
+    const msgs = await fightToEnd(session);
+
+    const counting = dreamMaster as CountingDreamMaster;
+    expect(counting.calls.battleResult).toBe(1); // 初見のみ AI
+    expect(mustState(session).narratedEnemies).toContain("mist-wolf");
+    expect(narrations(msgs).some((t) => t.includes("霧狼"))).toBe(true);
+    // hunt 進行(受注中 hunt の対象討伐カウント)
+    expect(mustState(session).subQuests[0]?.progress).toBe(1);
+    expect(mustState(session).subQuests[0]?.status).toBe("active");
+  });
+
+  it("既見敵は定型でAIを呼ばない", async () => {
+    const { session, store, dreamMaster } = makeAiSession({
+      dreamMaster: (config) => new CountingDreamMaster(new MockDreamMaster(config)),
+      noSymbols: false
+    });
+    store.loadResult = {
+      ok: true,
+      state: fieldState((s) => {
+        s.narratedEnemies = ["mist-wolf"];
+      })
+    };
+    await session.handle({ type: "continue" });
+    await engageBattle(session);
+    const msgs = await fightToEnd(session);
+
+    const counting = dreamMaster as CountingDreamMaster;
+    expect(counting.calls.battleResult ?? 0).toBe(0); // AI を呼ばない
+    expect(narrations(msgs)).toContain(BATTLE_RESULT_FALLBACK_TEXT); // 定型
+  });
+});
+
+// ===========================================================================
+// セーブ往復(拡張 GameState)+ 会話履歴のマスク済み保存
+// ===========================================================================
+
+describe("セーブ往復とマスク", () => {
+  it("拡張 GameState(npcs/subQuests/world/narratedEnemies/aiDaily)がセーブ→ロードで保持される", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "de-save-"));
+    tmpDirs.push(dir);
+    const store = new FileSaveStore(dir);
+
+    const state = createNewGameState();
+    state.npcs.priest.affinity = 72;
+    state.npcs.priest.memory = {
+      summary: "旅人と司祭は幾度も言葉を交わした。",
+      recentExchanges: [{ player: "この街のことを教えて", npc: "「灯は揺れている」" }]
+    };
+    state.subQuests = [activeHunt("pq-3", 2)];
+    state.world = { weather: "fog", activeStreetEvents: ["black-cat"], dungeonSymbolCounts: { 1: 5, 2: 4, 3: 3 } };
+    state.narratedEnemies = ["mist-wolf", "candle-eater"];
+    state.aiDaily = {
+      giveItemCount: 2,
+      proposeQuestCount: 1,
+      rewardItemProposalCount: 1,
+      affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 3, priest: 5 }
+    };
+
+    await store.save(state);
+    const loaded = await store.load();
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(loaded.state).toEqual(state);
+  });
+
+  it("会話履歴のプレイヤー入力はマスクして永続化される(トークン様文字列が平文で残らない)", async () => {
+    const fakeToken = "sk-" + "ant-" + "api03-" + "aA0-_".repeat(20);
+    const { session, store } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "priest");
+    advanceClock(session, 3001);
+    await session.handle({ type: "conversation-send", text: `僕の鍵は${fakeToken}だ` });
+    // 会話を閉じずに宿へ移り(記憶は要約されず保持される)、宿泊でセーブする
+    await talkTo(session, "innkeeper");
+    await session.handle({ type: "rest" });
+
+    const saved = store.saved[0];
+    expect(saved).toBeDefined();
+    const stored = saved?.npcs.priest.memory.recentExchanges[0]?.player;
+    expect(stored).toBeDefined();
+    expect(stored).not.toContain(fakeToken);
+  });
+});

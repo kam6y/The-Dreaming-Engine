@@ -3,6 +3,12 @@ import { clientMessageSchema, type ServerMessage } from "@dreaming-engine/shared
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import type { WebSocket } from "ws";
 
+import { AuditLog } from "./ai/audit-log.js";
+import { loadAiConfig } from "./ai/config.js";
+import { createDreamMaster } from "./ai/dream-master/index.js";
+import { AiFlowGatekeeper, AiTurnExecutor } from "./ai/flow-control/index.js";
+import { resolveAiMode } from "./ai/mode.js";
+import { RateLimiter } from "./ai/rate-limit.js";
 import { GameSession } from "./game/session.js";
 import { FileSaveStore, resolveSaveDir } from "./game/save.js";
 import { DEFAULT_ALLOWED_ORIGINS, isAllowedOrigin } from "./origin.js";
@@ -21,16 +27,35 @@ function rejectForbiddenOrigin(reply: FastifyReply): void {
   reply.code(403).send({ error: "forbidden_origin" });
 }
 
-/** 環境変数から既定のゲームセッションを組む(GAME_SEED / GAME_NO_SYMBOLS / SAVE_DIR) */
+/**
+ * 環境変数から既定のゲームセッションを組む(GAME_SEED / GAME_NO_SYMBOLS / SAVE_DIR / AI_MODE)。
+ * AI は resolveAiMode(env)→createDreamMaster→AiTurnExecutor→AiFlowGatekeeper の順で組む。
+ * mock 経路では実 AI・認証解決は一切発生しない(AI_MODE 未設定・不正値は mock フェイルセーフ)。
+ */
 export function createDefaultSession(env: NodeJS.ProcessEnv): GameSession {
   const saveStore = new FileSaveStore(resolveSaveDir(env));
   const seedRaw = env.GAME_SEED;
   const seed = seedRaw !== undefined && Number.isFinite(Number(seedRaw)) ? Number(seedRaw) : undefined;
   const noSymbols = env.GAME_NO_SYMBOLS === "1";
+
+  const aiConfig = loadAiConfig();
+  const clock = (): number => Date.now();
+  const dreamMaster = createDreamMaster(resolveAiMode(env), aiConfig);
+  const executor = new AiTurnExecutor({ dreamMaster, config: aiConfig });
+  const gatekeeper = new AiFlowGatekeeper({
+    executor,
+    config: aiConfig,
+    rateLimiter: new RateLimiter(clock),
+    auditLog: new AuditLog(),
+    now: clock
+  });
+
   return new GameSession({
     saveStore,
     ...(seed !== undefined ? { seed } : {}),
-    noSymbols
+    noSymbols,
+    gatekeeper,
+    playerInputMaxLength: aiConfig.playerInputMaxLength
   });
 }
 

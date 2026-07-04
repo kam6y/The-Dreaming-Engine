@@ -1,4 +1,5 @@
 import {
+  DREAM_FALLBACK_TEXT,
   ENEMY_DISPLAY_NAMES,
   GAME_TITLE,
   INN_COST,
@@ -7,7 +8,9 @@ import {
   MAPS,
   NPC_DISPLAY_NAMES,
   TOWN_WAKE_POINT,
+  acceptProposal,
   addItem,
+  advanceDay,
   applyPartyWipe,
   buyPriceOf,
   countOf,
@@ -15,11 +18,14 @@ import {
   createNewGameState,
   createRng,
   freeSpace,
+  hasNarratedEnemy,
   interactionTarget,
   isInShopStock,
   lootForChest,
   lootForGather,
   neighbor,
+  recordHuntKill,
+  recordNarratedEnemy,
   removeItem,
   resolveTurn,
   sampleEnemySymbols,
@@ -37,20 +43,31 @@ import {
   type BattleEvent,
   type BattleState,
   type ClientMessage,
+  type ConversationAction,
   type Direction,
+  type EnemyId,
   type EnemySymbolPlacement,
   type GameState,
   type ItemId,
   type LootEntry,
   type MapObject,
   type NpcId,
+  type NpcMemory,
+  type PendingProposalView,
   type Rng,
   type ServerMessage,
   type SnapshotView,
+  type SubQuest,
   type ViewBattle,
   type ViewItemStack
 } from "@dreaming-engine/shared";
 
+import type { AiFlowGatekeeper } from "../ai/flow-control/index.js";
+import type { StateChangeEffect } from "../ai/flow-control/turn-executor.js";
+import type { PersistentStateContext } from "../ai/tool-validation/types.js";
+import { DEFAULT_PLAYER_INPUT_MAX_LENGTH, sanitizePlayerInput } from "../ai/input-wall.js";
+import { applyStateChangeEffect } from "./ai-effects.js";
+import { appendMaskedExchange, maskSummaryForStorage } from "./conversation-memory.js";
 import type { SaveStore } from "./save.js";
 
 /**
@@ -71,9 +88,25 @@ export interface GameSessionDeps {
   seed?: number;
   /** 敵シンボルを無効化するか(GAME_NO_SYMBOLS)。new-game の options.noSymbols で上書き可 */
   noSymbols?: boolean;
+  /**
+   * AIフロー制御ゲートキーパー(会話/夢/戦果/クエスト生成の配線)。
+   * 未指定なら AI 機能は無効化され、会話対応 NPC は定型ダイアログ・宿泊は夢シーンなしで進む
+   * (M3 互換のフォールバック)。createDefaultSession は resolveAiMode→createDreamMaster→gatekeeper を組む。
+   */
+  gatekeeper?: AiFlowGatekeeper;
+  /** 自由入力の最大文字数(config playerInputMaxLength)。既定 200 */
+  playerInputMaxLength?: number;
+  /** 機密マスクの env(既定 process.env)。テストで注入可能 */
+  maskEnv?: NodeJS.ProcessEnv;
 }
 
 type Mode = "exploration" | "battle";
+
+/** gatekeeper 未注入時(AI 無効)の会話対応 NPC の定型ダイアログ(M3 互換フォールバック) */
+const PLACEHOLDER_NPC_LINES: Record<"informant" | "priest", string> = {
+  informant: "「……いい話、あるにはあるんだけどね。それはもう少し、夢が深まってからかな」",
+  priest: "「機関は、まだ祈りを聞いています。……あなたのことも、きっと」"
+};
 
 export class GameSession {
   private readonly saveStore: SaveStore;
@@ -111,6 +144,18 @@ export class GameSession {
   /** プレイ時間の計測起点(ミリ秒)。state.playtimeSeconds を基点に加算する */
   private activeSince: number;
 
+  /** AIフロー制御(未注入なら null=AI 機能無効) */
+  private readonly gatekeeper: AiFlowGatekeeper | null;
+
+  /** 自由入力の最大長(会話 sanitize に使う) */
+  private readonly playerInputMaxLength: number;
+
+  /** 機密マスクの env(会話履歴の永続化前マスクに使う) */
+  private readonly maskEnv: NodeJS.ProcessEnv;
+
+  /** 提案サブクエストの id 採番カウンタ(プロセス内で単調増加。ロード時に既存 id を跨いで補正) */
+  private aiQuestSeq = 0;
+
   public constructor(deps: GameSessionDeps) {
     this.saveStore = deps.saveStore;
     this.clock = deps.clock ?? Date.now;
@@ -119,6 +164,9 @@ export class GameSession {
     this.noSymbols = this.defaultNoSymbols;
     this.rng = createRng(this.defaultSeed ?? 0);
     this.activeSince = this.clock();
+    this.gatekeeper = deps.gatekeeper ?? null;
+    this.playerInputMaxLength = deps.playerInputMaxLength ?? DEFAULT_PLAYER_INPUT_MAX_LENGTH;
+    this.maskEnv = deps.maskEnv ?? process.env;
   }
 
   // =========================================================================
@@ -158,11 +206,13 @@ export class GameSession {
       case "rest":
         return this.rest();
       case "conversation-send":
+        return this.conversationSend(message.text);
       case "conversation-choose":
+        return this.conversationChoose(message.choice);
       case "conversation-end":
+        return this.conversationEnd();
       case "quest-request":
-        // 会話フローの配線は M4-E コミット2 で実装する(コミット1 では未配線のスタブ)
-        return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+        return this.questRequest();
     }
   }
 
@@ -175,6 +225,7 @@ export class GameSession {
     this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
     this.rng = createRng(seed);
     this.state = createNewGameState();
+    this.syncQuestSeq();
     this.resetRuntime();
     this.activeSince = this.clock();
     this.enterCurrentMap();
@@ -191,6 +242,7 @@ export class GameSession {
       return this.errorMsgs("save-corrupted", "記録が霧に滲んでいる……新しく始めるほかないようだ。");
     }
     this.state = result.state;
+    this.syncQuestSeq();
     this.noSymbols = this.defaultNoSymbols;
     this.rng = createRng(this.defaultSeed ?? (this.clock() >>> 0));
     this.resetRuntime();
@@ -228,7 +280,7 @@ export class GameSession {
     const state = this.requireState();
 
     state.location.facing = direction;
-    this.activeInteraction = null; // 移動で対話は解除
+    this.clearInteraction(); // 移動で対話は解除(会話中なら要約せず破棄)
 
     const map = MAPS[state.location.mapId];
     const target = neighbor(state.location.position, direction);
@@ -271,7 +323,7 @@ export class GameSession {
   // 戦闘
   // =========================================================================
 
-  private battleCommand(command: BattleCommand): ServerMessage[] {
+  private async battleCommand(command: BattleCommand): Promise<ServerMessage[]> {
     if (this.state === null) return this.errorMsgs("no-active-game", "まだ物語は始まっていない。");
     if (this.mode !== "battle" || this.battle === null) {
       return this.errorMsgs("invalid-mode", "今は戦っていない。");
@@ -279,11 +331,14 @@ export class GameSession {
     const result = resolveTurn(this.battle, command);
     this.battle = result.state;
     // 勝敗を適用してから(状態を確定してから)スナップショットを組む
-    const trailing = this.settleBattleOutcome(result.state, result.events);
+    const trailing = await this.settleBattleOutcome(result.state, result.events);
     return [{ type: "battle-events", events: result.events }, this.snapshotMsg(), ...trailing];
   }
 
-  private settleBattleOutcome(battle: BattleState, events: readonly BattleEvent[]): ServerMessage[] {
+  private async settleBattleOutcome(
+    battle: BattleState,
+    events: readonly BattleEvent[]
+  ): Promise<ServerMessage[]> {
     const state = this.requireState();
     const dialogs: ServerMessage[] = [];
 
@@ -302,24 +357,31 @@ export class GameSession {
           state.inventory = added.inventory;
           if (added.overflow > 0) overflowed = true;
         }
+        // hunt 進行: 受注中 hunt サブクエストの対象討伐をカウント
+        const enemyId = battle.enemy.enemyId;
+        state.subQuests = recordHuntKill(state.subQuests, enemyId);
         // 撃破したシンボルを除去(再入場でリスポーン)
         if (this.battleSymbolIndex !== null) this.symbols.splice(this.battleSymbolIndex, 1);
         this.endBattle();
         if (overflowed) {
           dialogs.push(this.dialogMsg(null, "戦利品は手に余り、いくらかは夢に溶けて消えた。(持ちきれなかった)"));
         }
+        // 戦果描写: 初見(未描写)のみ AI ナレーション・既見は定型(いずれも ai-utterance narrate)
+        dialogs.push(...(await this.narrateBattle(enemyId)));
         return dialogs;
       }
       case "defeat": {
         // 全滅: ゴールド半減 + HP/MP全回復 + 日送り。宿屋で目覚める(セーブはしない)
         const wipe = applyPartyWipe(toPlayerProgress(battle.player));
         state.player = wipe.progress;
-        state.day += 1;
         state.location = {
           mapId: TOWN_WAKE_POINT.mapId,
           position: { ...TOWN_WAKE_POINT.position },
           facing: TOWN_WAKE_POINT.facing
         };
+        // 日送り(advanceDay: 日付+1・aiDaily/話題/street_event リセット)+ 縮退解除フック
+        this.state = advanceDay(this.requireState());
+        this.gatekeeper?.onDayAdvanced();
         this.endBattle();
         this.enterCurrentMap();
         const body =
@@ -336,6 +398,19 @@ export class GameSession {
     }
   }
 
+  /** 戦果描写: 初見のみ AI ナレーション、既見は定型(いずれも gatekeeper 経由)。未注入なら何もしない */
+  private async narrateBattle(enemyId: EnemyId): Promise<ServerMessage[]> {
+    if (this.gatekeeper === null) return [];
+    const already = hasNarratedEnemy(this.requireState(), enemyId);
+    const result = await this.gatekeeper.battleResult({
+      enemyId,
+      persistent: this.buildPersistentContext(),
+      alreadyNarrated: already
+    });
+    if (!already) this.state = recordNarratedEnemy(this.requireState(), enemyId);
+    return [this.aiUtteranceMsg("narrate", result.displayText)];
+  }
+
   private endBattle(): void {
     this.battle = null;
     this.battleSymbolIndex = null;
@@ -347,11 +422,11 @@ export class GameSession {
   // 調べる・話す
   // =========================================================================
 
-  private interact(): ServerMessage[] {
+  private async interact(): Promise<ServerMessage[]> {
     const guard = this.requireExploration();
     if (guard) return guard;
     const state = this.requireState();
-    this.activeInteraction = null;
+    this.clearInteraction();
 
     const map = MAPS[state.location.mapId];
     const target = interactionTarget(map, state.location.position, state.location.facing);
@@ -364,7 +439,7 @@ export class GameSession {
     return [this.dialogMsg(null, "重い唸りのような静寂が満ちている。……近づくには、まだ力が足りない。")];
   }
 
-  private interactNpc(npcId: NpcId): ServerMessage[] {
+  private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
     switch (npcId) {
       case "merchant": {
         this.activeInteraction = {
@@ -391,12 +466,160 @@ export class GameSession {
         ];
       }
       case "informant":
-        // サブクエストの受注・報告は M4(DreamMaster)。M3 はプレースホルダー
-        return [this.dialogMsg(NPC_DISPLAY_NAMES.informant, "「……いい話、あるにはあるんだけどね。それはもう少し、夢が深まってからかな」")];
-      case "priest":
-        // メインクエスト進行は M6。M3 はプレースホルダー
-        return [this.dialogMsg(NPC_DISPLAY_NAMES.priest, "「機関は、まだ祈りを聞いています。……あなたのことも、きっと」")];
+      case "priest": {
+        // 会話対応 NPC(情報屋カイ・司祭フィオル)。gatekeeper 注入時は AI 会話を開始する。
+        // 未注入(M3 互換)なら定型ダイアログにフォールバックする。
+        if (this.gatekeeper === null) {
+          return [this.dialogMsg(NPC_DISPLAY_NAMES[npcId], PLACEHOLDER_NPC_LINES[npcId])];
+        }
+        return this.openConversation(npcId);
+      }
     }
+  }
+
+  // =========================================================================
+  // 会話フロー(AI。gatekeeper 注入時のみ)
+  // =========================================================================
+
+  /** NPC へ話しかけて会話を開始する(挨拶=1ターン。クールダウン中は定型挨拶) */
+  private async openConversation(npcId: NpcId): Promise<ServerMessage[]> {
+    const gk = this.requireGatekeeper();
+    const npc = this.requireState().npcs[npcId];
+    const result = await gk.openConversation({
+      npcId,
+      affinityAtOpen: npc.affinity,
+      persistent: this.buildPersistentContext(),
+      ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
+      ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {})
+    });
+    // 挨拶ターンの承認 effect(Mock 通常は +1 好感度)を適用しカウンタを閉じる
+    this.applyApprovedEffects(result.approvedEffects);
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
+  }
+
+  /** 自由入力の送信 → NPC 応答。承認 effect を適用し、往復を(マスクして)会話記憶へ記録する */
+  private async conversationSend(rawText: string): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const gk = this.requireGatekeeper();
+    const npcId = this.activeInteraction.npcId;
+    const utterance = sanitizePlayerInput(rawText, this.playerInputMaxLength);
+    const npc = this.requireState().npcs[npcId];
+    const result = await gk.sendConversation({
+      npcId,
+      utterance,
+      persistent: this.buildPersistentContext(),
+      ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
+      ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {})
+    });
+    // 承認 effect(give_item/adjust_affinity 等)を GameState へ適用(永続カウンタを閉じる)
+    this.applyApprovedEffects(result.approvedEffects);
+    // 実ターン(AI 応答)のみ会話記憶へ往復を記録する。プレイヤー入力はマスクして保存(第5層)
+    if (result.outcome === "ai") {
+      const memory = this.requireState().npcs[npcId].memory;
+      const updated = appendMaskedExchange(memory, { player: utterance, npc: result.displayText }, this.maskEnv);
+      this.setNpcMemory(npcId, updated);
+    }
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
+  }
+
+  /** 提案の受諾/辞退(AI を呼ばないゲーム操作) */
+  private conversationChoose(choice: "accept" | "decline"): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const gk = this.requireGatekeeper();
+    const npcId = this.activeInteraction.npcId;
+    const session = gk.getSession();
+    const proposal = session?.getPendingProposal() ?? null;
+    if (proposal === null) {
+      this.activeInteraction = this.buildConversationInteraction(npcId);
+      return [this.snapshotMsg()];
+    }
+    if (choice === "decline") {
+      session?.clearPendingProposal();
+      this.activeInteraction = this.buildConversationInteraction(npcId);
+      return [
+        this.snapshotMsg(),
+        this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「そうかい。気が向いたら、また声をかけておくれ」")
+      ];
+    }
+    // accept: 受諾して subQuests へ。未受諾提案スロットは常にクリアする
+    const state = this.requireState();
+    const res = acceptProposal(proposal, state.subQuests);
+    session?.clearPendingProposal();
+    if (!res.ok) {
+      this.activeInteraction = this.buildConversationInteraction(npcId);
+      return [
+        this.snapshotMsg(),
+        this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「あんたはもう手一杯のようだね。今の依頼を片付けてから、また来ておくれ」")
+      ];
+    }
+    this.state = { ...state, subQuests: res.quests };
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [
+      this.snapshotMsg(),
+      this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「恩に着るよ。……無理だけはしないようにね」")
+    ];
+  }
+
+  /** 会話終了 → 要約フロー。要約成功時のみ memory を(マスクして)更新し、往復をクリアする */
+  private async conversationEnd(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const gk = this.requireGatekeeper();
+    const npcId = this.activeInteraction.npcId;
+    const memory = this.requireState().npcs[npcId].memory;
+    const result = await gk.summarizeConversation({
+      npcId,
+      persistent: this.buildPersistentContext(),
+      existingSummary: memory.summary,
+      exchanges: memory.recentExchanges
+    });
+    if (result.summaryText !== null) {
+      this.setNpcMemory(npcId, {
+        summary: maskSummaryForStorage(result.summaryText, this.maskEnv),
+        recentExchanges: []
+      });
+    }
+    gk.closeConversation();
+    this.activeInteraction = null;
+    return [this.snapshotMsg()];
+  }
+
+  /** 情報屋への「仕事はある?」→ サブクエスト生成。承認提案は pendingProposal に反映される */
+  private async questRequest(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const npcId = this.activeInteraction.npcId;
+    if (npcId !== "informant") {
+      return this.errorMsgs("no-quests-here", "その相手に頼める仕事はなさそうだ。");
+    }
+    const gk = this.requireGatekeeper();
+    const topic = this.requireState().npcs.informant.topic;
+    const result = await gk.generateQuest({
+      npcId,
+      persistent: this.buildPersistentContext(),
+      ...(topic.length > 0 ? { topic } : {})
+    });
+    // propose_quest の承認で aiDaily の発行数カウンタを閉じる(提案自体はセッションが保持)
+    this.applyApprovedEffects(result.approvedEffects);
+    this.advanceQuestSeqIfProposed();
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
   }
 
   private interactObject(object: MapObject): ServerMessage[] {
@@ -529,7 +752,7 @@ export class GameSession {
 
     // 手順0: 宿泊費の徴収(不足でも拒否しない=無料で泊める)
     const cost = state.player.gold >= INN_COST ? INN_COST : 0;
-    const wasFree = cost === 0; // 宿泊費不足 → 夢シーンは定型文(M4)
+    const wasFree = cost === 0; // 宿泊費不足 → 夢シーンは定型文・世界変化なし(コスト保護)
     state.player.gold -= cost;
 
     // 手順1: HP/MP全回復
@@ -537,21 +760,39 @@ export class GameSession {
     state.player.hp = stats.maxHP;
     state.player.mp = stats.maxMP;
 
-    // 手順2: 日送り(日次カウンタのリセットは M4 で追加)
-    state.day += 1;
+    // 手順2: 日送り(日付+1・aiDaily/話題/street_event リセット)
+    this.state = advanceDay(this.requireState());
+    // 手順2直後: 縮退解除フック(通常縮退のみ解除。セッション上限縮退は残す)
+    this.gatekeeper?.onDayAdvanced();
 
-    // 手順3: 夢シーン(AI呼び出し。M4で挿入。失敗・宿泊費不足=wasFree は定型文フォールバック・世界変化なし)
-    // 手順4: 世界変化(trigger_world_event の承認分)の適用(M4で挿入)
+    // 手順3-4: 夢シーン(AI)+ 世界変化 effect の適用。
+    // AI 失敗(タイムアウト/表示系0件/悪意)・クールダウン・縮退でもフォールバックで進行し、
+    // 世界変化が無いだけでセーブと日送りは必ず成立する。宿泊費不足(wasFree)は AI を呼ばず定型。
+    const dreamMsgs: ServerMessage[] = [];
+    if (this.gatekeeper !== null) {
+      if (wasFree) {
+        dreamMsgs.push(this.aiUtteranceMsg("narrate", DREAM_FALLBACK_TEXT));
+      } else {
+        const result = await this.gatekeeper.dreamScene({
+          persistent: this.buildPersistentContext(),
+          recentPlay: this.buildRecentPlay(),
+          world: this.requireState().world
+        });
+        // 世界変化(dream_world_events)を GameState へ適用(承認分のみ)
+        this.applyApprovedEffects(result.approvedEffects);
+        dreamMsgs.push(this.aiUtteranceMsg("narrate", result.displayText));
+      }
+    }
 
-    // 手順5: セーブ(夢・世界変化を含む状態を保存)。AI失敗時もここは必ず成立する
+    // 手順5: セーブ(夢・世界変化を含む状態を保存)。AI 失敗時もここは必ず成立し日付は進む
     this.accruePlaytime();
-    await this.saveStore.save(state);
+    await this.saveStore.save(this.requireState());
 
     this.activeInteraction = null; // 宿の overlay を閉じる
     const body = wasFree
       ? "「今日はお代はいらないよ。……いい夢を、とは言えないけどね」旅人は泥のように眠り、気づけば朝だった。"
       : "「ゆっくりおやすみ。悪い夢を見たって、朝には湯を沸かしておくからね」旅人は目を閉じ、機関に一日を手渡した。";
-    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES.innkeeper, body)];
+    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES.innkeeper, body), ...dreamMsgs];
   }
 
   // =========================================================================
@@ -584,6 +825,125 @@ export class GameSession {
 
   private errorMsgs(code: string, message: string): ServerMessage[] {
     return [{ type: "error", message, code }];
+  }
+
+  // =========================================================================
+  // AIフロー配線ヘルパー(gatekeeper 注入時)
+  // =========================================================================
+
+  private requireGatekeeper(): AiFlowGatekeeper {
+    if (this.gatekeeper === null) {
+      throw new Error("AIゲートキーパーが注入されていない(会話フローには必須。内部不変条件違反)");
+    }
+    return this.gatekeeper;
+  }
+
+  /** 検証層/フロー制御へ渡す永続スナップショット(GameState 由来。読み取り専用) */
+  private buildPersistentContext(): PersistentStateContext {
+    const state = this.requireState();
+    return {
+      aiDaily: state.aiDaily,
+      affinityByNpc: {
+        innkeeper: state.npcs.innkeeper.affinity,
+        merchant: state.npcs.merchant.affinity,
+        informant: state.npcs.informant.affinity,
+        priest: state.npcs.priest.affinity
+      },
+      inventory: state.inventory,
+      subQuests: state.subQuests,
+      dungeonSymbolCounts: state.world.dungeonSymbolCounts,
+      nextQuestId: this.peekQuestId()
+    };
+  }
+
+  /** 承認済み状態変更 effect を GameState へ適用する(永続カウンタの書き戻しループを閉じる) */
+  private applyApprovedEffects(effects: readonly StateChangeEffect[]): void {
+    if (effects.length === 0) return;
+    let state = this.requireState();
+    for (const effect of effects) state = applyStateChangeEffect(state, effect);
+    this.state = state;
+  }
+
+  /** 1 NPC の会話記憶を差し替える(往復記録・要約更新に使う) */
+  private setNpcMemory(npcId: NpcId, memory: NpcMemory): void {
+    const state = this.requireState();
+    const npcs = { ...state.npcs };
+    npcs[npcId] = { ...npcs[npcId], memory };
+    this.state = { ...state, npcs };
+  }
+
+  /** 会話 ActiveInteraction を組む(pendingProposal と取りうる options を現状から算出) */
+  private buildConversationInteraction(npcId: NpcId): ActiveInteraction {
+    const proposal = this.gatekeeper?.getSession()?.getPendingProposal() ?? null;
+    const options: ConversationAction[] = ["send", "end"];
+    if (npcId === "informant") options.push("quest-request");
+    if (proposal !== null) options.push("accept", "decline");
+    return {
+      kind: "conversation",
+      npcId,
+      npcName: NPC_DISPLAY_NAMES[npcId],
+      options,
+      ...(proposal !== null ? { pendingProposal: this.pendingProposalView(proposal) } : {})
+    };
+  }
+
+  /** 提案中サブクエストの表示情報を組む */
+  private pendingProposalView(quest: SubQuest): PendingProposalView {
+    return {
+      type: quest.type,
+      title: quest.title,
+      description: quest.description,
+      count: quest.count,
+      rewardGold: quest.rewardGold,
+      ...(quest.rewardItemId !== undefined
+        ? { rewardItem: { itemId: quest.rewardItemId, name: ITEMS[quest.rewardItemId].name } }
+        : {})
+    };
+  }
+
+  /** 検証済み AI 発話/ナレーションのメッセージを組む */
+  private aiUtteranceMsg(channel: "speak" | "narrate", text: string, npcId?: NpcId): ServerMessage {
+    return npcId === undefined
+      ? { type: "ai-utterance", channel, text }
+      : { type: "ai-utterance", channel, npcId, text };
+  }
+
+  /** 対話を解除する。会話中なら gatekeeper のセッションも破棄する(要約はしない=歩き去り等) */
+  private clearInteraction(): void {
+    if (this.activeInteraction?.kind === "conversation") {
+      this.gatekeeper?.closeConversation();
+    }
+    this.activeInteraction = null;
+  }
+
+  /** 提案サブクエスト id の次候補(採番は承認確定時に advanceQuestSeqIfProposed で進める) */
+  private peekQuestId(): string {
+    return `pq-${this.aiQuestSeq}`;
+  }
+
+  /** 直近のフローで新規提案が採用されていれば採番カウンタを進める(id 衝突回避) */
+  private advanceQuestSeqIfProposed(): void {
+    const proposal = this.gatekeeper?.getSession()?.getPendingProposal() ?? null;
+    if (proposal !== null && proposal.id === this.peekQuestId()) {
+      this.aiQuestSeq += 1;
+    }
+  }
+
+  /** ロード/新規時に既存 subQuest の pq-<n> id を跨いで採番カウンタを補正する(衝突回避) */
+  private syncQuestSeq(): void {
+    if (this.state === null) return;
+    let max = -1;
+    for (const quest of this.state.subQuests) {
+      const matched = /^pq-(\d+)$/.exec(quest.id);
+      if (matched !== null && matched[1] !== undefined) max = Math.max(max, Number(matched[1]));
+    }
+    this.aiQuestSeq = max + 1;
+  }
+
+  /** 夢シーンの <recent_play> 用の当日サマリ(Live prompt が使う。Mock は内容非依存) */
+  private buildRecentPlay(): string {
+    const state = this.requireState();
+    return `旅人は${Math.max(1, state.day - 1)}日目の探索を終え、灯町の宿で一日を手放した。`;
   }
 
   private buildView(): SnapshotView {
