@@ -345,3 +345,48 @@
 - 次にやること: M4-E(サーバー統合=WS会話/クエスト/夢/戦果フローの配線+セーブ拡張+
   DreamMasterContextの充実)をsubagentへ委譲。会話UI等(M4-F)はM4-EのWS protocol確定後に
   オーケストレーターが実装。ROADMAP M4のツール検証層boxはM4-C完了済みなのでチェック可
+
+## [12] 2026-07-04 M4-E完了: AIフローのGameSession配線+WS protocol拡張+セーブ拡張
+
+- やったこと(subagent実装。2コミット):
+  - コミット363fa8c(土台): effect適用リデューサー `game/ai-effects.ts`
+    (`applyStateChangeEffect`。**aiDailyカウンタ書き戻しの核心**)、DreamMasterContext充実
+    (types/prompt/gatekeeper)、WS protocol拡張(messages.ts)、セーブ時マスク
+    `game/conversation-memory.ts`(既存 `secret-mask.js` を再利用)。テスト10件
+  - コミット50dc550(配線): `GameSession.handle()` に会話/クエスト/夢/戦果フローを接続。
+    `GameSessionDeps` にゲートキーパー(任意注入・不在ならM3互換フォールバック)、
+    `createDefaultSession` が実物を組む。統合テスト12件
+- 検証: `pnpm check` 緑(ユニット448件)。`pnpm test:e2e` 4/4緑
+  (戦闘勝利が戦果ナレーション経路を、save-loadが夢フローを通過)
+- **カウンタ書き戻しループの閉じ方**(advisor指摘の要点):
+  - 永続(GameState.aiDaily)=`applyStateChangeEffect` で give→giveItemCount++/
+    adjust→affinityDeltaByNpc[npc]+=delta/propose→proposeQuestCount++(+rewardItem付きは
+    rewardItemProposalCount++)。GameSession経由の `give_item×3→4回目拒否` テストで実証
+  - 会話内(ConversationSession)=turn-executor が承認時に記録。`adjust×2→3回目拒否` で実証
+- WS protocol(M4-F契約):
+  - client→server: `conversation-send{text}`(sanitize/長さはサーバー強制)・
+    `conversation-choose{choice:accept|decline}`・`conversation-end`・`quest-request`。
+    会話開始は既存 `interact` を流用
+  - server→client: `ai-utterance{channel:speak|narrate, npcId?, text}`
+    (探索dialogとは別チャンネル。TypewriterTextが検証済み全文を疑似ストリーミング)。
+    GameClientが `ai-utterance` イベントを発火
+  - `ActiveInteraction` に `conversation` 種別追加(npcId/npcName/options/pendingProposal)。
+    `SnapshotView.subQuests`(クエストジャーナル用・常に配列)追加
+- 裁量/**仕様との差異(要検討)**:
+  - **会話対応NPC=情報屋(informant)+司祭(priest)のみ**。宿屋主人(innkeeper)は inn(宿泊)、
+    商人(merchant)は shop を維持(ロックしたprotocolに会話内での宿泊/購入アクションが無いため)。
+    仕様のNPC好感度/DEFAULT_NPC_TOPICSは4人全員を想定しており厳密には差異。ただし縦切りの
+    クリティカルパス(主筋=司祭会話・サブクエ=情報屋会話・夢=宿泊・買物=商人)は全て機能し、
+    give_item/adjust_affinityも情報屋・司祭で行える。**M6/BACKLOGで商人・宿屋への会話併設を検討**
+  - 宿泊の順序厳守=徴収→回復→advanceDay→onDayAdvanced(縮退解除)→dreamScene→世界変化適用→
+    セーブ。**AI失敗(タイムアウト/表示系0件/悪意)でもセーブ成立・日付前進**(悪意Mockテストで実証)。
+    宿泊費不足の無料就寝はAI夢をスキップし定型文(コスト保護)
+  - クエストid=`pq-<n>` 単調増加(ロード時に既存id超へ再同期)
+- 既知の問題:
+  - `secret-mask.ts` はファイル名の "secret" によりreadがhookでブロックされる環境。subagentは
+    `audit-log.ts` の使用例と仕様から署名を推定して import(再実装せず既存を再利用)。マスク動作は
+    テストで確認(偽キーは文字列連結で構築しシークレットスキャンを汚さない)
+- 次にやること: **M4-F(会話UI・クエストジャーナルUI・夢シーン演出)をオーケストレーターが実装**。
+  ConversationOverlay(TypewriterText+TextInputBox+MenuListで発話/自由入力/提案受諾)、
+  QuestJournalOverlay(subQuests一覧)、夢シーン演出(rest時のnarrate ai-utterance)。
+  game-client.ts に ai-utterance ハンドラ、exploration-scene に conversation overlay を配線
