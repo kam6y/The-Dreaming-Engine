@@ -996,6 +996,9 @@ export class ExplorationScene extends Phaser.Scene {
     game.dataset["gold"] = String(view.player.gold);
     game.dataset["level"] = String(view.player.level);
     game.dataset["hp"] = String(view.player.hp);
+    // E2E 用: 現在の対話種別(shop/inn/conversation/none)と受注中クエスト数
+    game.dataset["interaction"] = view.interaction?.kind ?? "none";
+    game.dataset["questCount"] = String(view.subQuests.length);
     delete game.dataset["battleEnemy"];
   }
 }
