@@ -17,7 +17,7 @@
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm scan:secrets",
     "test:e2e": "playwright test --config playwright.config.ts",
-    "test:e2e:full": "node scripts/not-yet-implemented.mjs test:e2e:full M6",
+    "test:e2e:full": "playwright test --config playwright.full.config.ts",
     "test:ai-live": "AI_LIVE_TEST=1 AI_MODE=live vitest run --config vitest.ai-live.config.ts"
   },
   "devDependencies": {

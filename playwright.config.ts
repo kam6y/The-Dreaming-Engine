@@ -4,6 +4,10 @@ import { E2E_SAVE_DIR } from "./tests/e2e/e2e-save-dir.js";
 
 export default defineConfig({
   testDir: "tests/e2e",
+  // 通しプレイ E2E(tests/e2e/full 配下)はコミット毎のスモークに含めない。
+  // 専用設定 playwright.full.config.ts で pnpm test:e2e:full として実行する
+  // (ROADMAP M6)。testDir は再帰探索するため full/** を明示除外する。
+  testIgnore: "**/full/**",
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
