@@ -190,3 +190,80 @@ test("seed=42でフィールドの霧狼に接触し、勝利して探索へ復�
   expect(await readAttr(page, "data-map-id")).toBe("field");
   expect(await readAttr(page, "data-symbol-count")).toBe(String(symbols.length - 1)); // "1"
 });
+
+test("初見霧狼の撃破で戦果narrate(ai-utterance)が探索復帰前に届く(M4-G)", async ({ page }) => {
+  test.setTimeout(60_000);
+
+  // WS フレーム傍受: ai-utterance narrate が届いたかを記録する
+  // (戦果ナレーションは canvas 表示のため、WS フレームで機械検証する: ai-integration.md)。
+  let narrateReceived = false;
+  page.on("websocket", (ws) => {
+    ws.on("framereceived", (frame) => {
+      const payload = frame.payload;
+      if (typeof payload !== "string") return;
+      let parsed: { type?: unknown; channel?: unknown };
+      try {
+        parsed = JSON.parse(payload) as { type?: unknown; channel?: unknown };
+      } catch {
+        return; // 非JSONフレームは無視
+      }
+      if (parsed.type === "ai-utterance" && parsed.channel === "narrate") {
+        narrateReceived = true;
+      }
+    });
+  });
+
+  // 敵シンボル配置を seed=42 で再現(battle 到達手順は先頭テストと同一)
+  const rng = createRng(SEED);
+  expect(sampleEnemySymbols(townMap, rng)).toHaveLength(0);
+  const symbols = sampleEnemySymbols(fieldMap, rng);
+  expect(symbols).toHaveLength(2);
+
+  await page.goto(`/?seed=${SEED}`);
+  await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
+  await expect(page.locator("canvas")).toBeVisible();
+  await page.locator("canvas").click();
+
+  await page.keyboard.press("Enter");
+  await expect.poll(() => readAttr(page, "data-map-id"), { timeout: 10_000 }).toBe("town");
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => readAttr(page, "data-player-x"), { timeout: 10_000 }).toBe("11");
+  await page.keyboard.down("ArrowDown");
+  await expect.poll(() => readAttr(page, "data-map-id"), { timeout: 15_000 }).toBe("field");
+  await page.keyboard.up("ArrowDown");
+  await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("exploration");
+
+  const start = await readPlayerPosition(page);
+  const path = pathToNearestSymbol(start, symbols);
+  expect(path, "霧狼への接触経路が見つかること").not.toBeNull();
+  const route = path as Position[];
+  for (let i = 0; i < route.length - 1; i += 1) {
+    const from = route[i] as Position;
+    const to = route[i + 1] as Position;
+    await page.keyboard.press(ARROW_KEY[directionBetween(from, to)]);
+    if (i === route.length - 2) {
+      await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("battle");
+    } else {
+      await expect
+        .poll(() => readPlayerPosition(page).then(posKey), { timeout: 10_000 })
+        .toBe(posKey(to));
+    }
+  }
+  expect(await readAttr(page, "data-battle-enemy")).toBe("mist-wolf");
+
+  // 勝利まで Space 送り。narrate が「戦闘中(探索復帰前)」に届くことを確認する:
+  // ループ先頭で data-scene が battle のうちに narrate 受信していれば探索復帰前の到達となる。
+  let narrateWhileInBattle = false;
+  for (let i = 0; i < 80; i += 1) {
+    const scene = await readAttr(page, "data-scene");
+    if (scene === "exploration") break;
+    if (scene === "battle" && narrateReceived) narrateWhileInBattle = true;
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(150);
+  }
+
+  await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("exploration");
+  // narrate は戦闘勝利のバースト内(探索復帰前=シーンが battle のうち)に届いている
+  expect(narrateReceived).toBe(true);
+  expect(narrateWhileInBattle).toBe(true);
+});
