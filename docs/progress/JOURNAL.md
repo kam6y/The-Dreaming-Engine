@@ -477,3 +477,43 @@
 - 次にやること: M6(縦切り完成)=メインクエスト進行(司祭会話で夢喰いを知る→ダンジョン→
   ボス撃破→エンディング)、オープニング(op-1/2)/エンディング(ed-1/2)演出、バランス調整、
   通しE2E(pnpm test:e2e:full)整備。M6着手前にgame-design.mdのメインクエスト/エンディング節を精読
+
+## [16] 2026-07-04 M6完了=縦切り完成: メインクエスト・オープニング/エンディング・通しプレイE2E
+
+- やったこと(server配線=subagent、UI=オーケストレーター、通しE2E=subagent、README/検証=オーケストレーター):
+  - M6-A(subagent・4259506/53b3401): メインクエスト状態機械。`SnapshotView.mainQuestStage`
+    追加、司祭スクリプト会話(arrival→rift-revealed・AI非依存の3行dialog)、ボス戦トリガー
+    (rift-revealedでゲート・接触で夢喰い戦・撃破でdream-eater-defeated・再戦不可)、
+    テスト加速`startLevel`(mock限定)、`acknowledge-ending`でepilogue確定。テスト14件
+  - M6-B(オーケストレーター・6317f3c/87ac1f6): Cinematic(静止画+ナレーションのスペース送り)、
+    OpeningScene(op-1/2)、EndingScene(ed-1/2+acknowledge-ending送信)。title→新規は
+    オープニング経由(?skipIntro=1で演出スキップ)・つづきからは探索直行、battle→ボス撃破で
+    エンディング直行、ボスマーカーはrift-revealedのみ描画。既存E2E6件のnew-game gotoへ
+    skipIntro付与しスモーク維持
+  - M6-C(subagent・07f117b): 通しプレイE2E `pnpm test:e2e:full`(専用config+testIgnoreで
+    スモークから分離)。新規→オープニング→司祭→ダンジョン1→2→3→夢喰い撃破→エンディング→
+    タイトルを約40秒で自動走破(startLevel=8/noSymbols/skipIntro/seed=42の加速)。2ケース
+  - M6-D(オーケストレーター): README「遊び方」節+スクリーンショット5枚(docs/screenshots/)、
+    バランス確認、BGM判断
+- 検証: `pnpm check` 緑・`pnpm test:e2e` 8/8緑・`pnpm test:e2e:full` 2/2緑。
+  **Playwright screenshotで目視検証**: タイトル(機関の街)・オープニング(旅人到着)・
+  会話(霧笛亭+カイ立ち絵)・ボス戦(夢喰い第1形態+ダンジョン背景)・**形態変化(実戦で
+  50%HP時にphase-changeが発火しdream-eater-phase2へ差替)**・エンディング(ed-1)を確認
+- 裁量で決めたこと:
+  - **BGM/SEは縦切りでは無音**。オープンライセンス音源の導入はBACKLOG(納品にも音源なし)
+  - オープニングは**new-game操作で駆動**(snapshotのstage依存にしない=再接続の再同期で
+    再生されないため。advisor助言)。ボス撃破→エンディングは**battle-scene**で直行
+    (探索経由の一瞬のちらつき/遷移レース回避)
+  - `?skipIntro=1`(演出スキップ)を追加し既存E2Eを維持。通しE2Eは加速フラグで数十秒
+  - バランス: Lv6=累積248XP、敵XP霧狼4/蝋燭9/軋み16・ボス120。約30-40討伐でLv5-6到達可、
+    ボス撃破可・下位レベルは全滅あり(M2実測と整合)。調整不要
+  - オープニング/エンディングのナレーションはworld-lore 3節(旅人・機関・夢喰いの弔い・凪)に準拠
+- 既知の問題: なし
+- 人間確認待ち(縦切り完成の受け入れ): (1)`.env`設定の上で `pnpm dev` の実プレイ通し確認
+  (1-2時間の実感)、(2)`pnpm test:ai-live`(実AI疎通+インジェクション攻撃テストB)の実行。
+  いずれもテスト・手順・加速の整備は完了済み(CLAUDE.md規約によりClaude Codeは実行しない)
+- **★縦切り完成★**: タイトル→新規→オープニング→メインクエスト(司祭→ダンジョン→夢喰い撃破)→
+  エンディング→タイトルが通しでプレイ可能。`pnpm check`+全E2E(スモーク8+通し2)緑。
+  M0-M6全マイルストーン完了。以降は BACKLOG.md に従い /loop で拡張する
+- 次にやること: 縦切りは完成。拡張フェーズ(/loop + BACKLOG.md)。着手時はBACKLOG上位項目
+  (装備システム・新エリア・第2章等)から。人間確認待ち項目(実プレイ・test:ai-live)の消化は人間

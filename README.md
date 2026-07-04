@@ -123,11 +123,33 @@ pnpm dev:mock
 ### 検証
 
 ```bash
-pnpm check
-pnpm test:e2e
+pnpm check         # typecheck / lint / Vitest / build / シークレットスキャン
+pnpm test:e2e      # E2Eスモーク(会話・クエスト受注・夢・戦闘。モックAI・数分)
+pnpm test:e2e:full # 通しプレイ(新規→司祭→ダンジョン→夢喰い撃破→エンディング。モックAI+加速)
 ```
 
-`pnpm check` は typecheck、lint、Vitest、build、シークレットスキャンを実行する。
-`pnpm test:e2e` はモックAI前提で、タイトル表示とWebSocket ping/pongを確認する。
+`pnpm test:e2e:full` はテスト加速(`?startLevel`・`?noSymbols`・`?skipIntro`)で通しを
+数十秒に収める(人間プレイの1-2時間は走らせない)。コミット毎のスモークには含めない。
 
-M6完了時に遊び方・スクリーンショットを追記する。
+### 遊び方(縦切り)
+
+`pnpm dev:mock` で起動し `http://127.0.0.1:5173` を開く(モックAIなので実AIを消費しない)。
+
+- **操作**: 移動=矢印/WASD、調べる・話す・決定=スペース/Enter、もちもの・戻る=Esc、
+  クエストジャーナル=Q。会話の自由入力は「話しかける」からIME対応のテキスト欄で送る
+- **メインクエスト**: タイトル→新規ゲーム→オープニング→街「灯町」。教会の司祭フィオルに
+  話すと、夢の綻びの原因が悪夢の裂け目最深部の「夢喰い」だと判る。裂け目を1層→3層と下り、
+  夢喰い(2形態)を撃破するとエンディング→タイトル
+- **街の施設**: 宿屋オルガに泊まると全回復+セーブ+夢シーン(翌朝の世界変化)、酒場の
+  情報屋カイからサブクエスト受注(クエストジャーナルQで確認・放棄)、渡り物屋レンドで売買
+- **AI要素(実AI時)**: NPCとの自由会話、サブクエストの動的生成、宿泊時の夢による世界変化を
+  多層防御(ai-guardrails)の内側で生成AIが担う。開発・E2EはモックAIで決定論的に動く
+
+### スクリーンショット
+
+| | |
+|---|---|
+| ![タイトル](docs/screenshots/title.png) | ![オープニング](docs/screenshots/opening.png) |
+| ![会話(情報屋カイ・霧笛亭)](docs/screenshots/conversation.png) | ![ボス「夢喰い」](docs/screenshots/boss.png) |
+
+![エンディング](docs/screenshots/ending.png)
