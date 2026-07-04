@@ -5,7 +5,9 @@ import "./style.css";
 import { enqueueDialog } from "./dialog-queue.js";
 import { GameClient, setGameClient } from "./net/game-client.js";
 import { BattleScene } from "./scenes/battle-scene.js";
+import { EndingScene } from "./scenes/ending-scene.js";
 import { ExplorationScene } from "./scenes/exploration-scene.js";
+import { OpeningScene } from "./scenes/opening-scene.js";
 import { PreloadScene } from "./scenes/preload-scene.js";
 import { TitleScene } from "./scenes/title-scene.js";
 
@@ -39,5 +41,5 @@ new Phaser.Game({
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [PreloadScene, TitleScene, ExplorationScene, BattleScene]
+  scene: [PreloadScene, TitleScene, OpeningScene, ExplorationScene, BattleScene, EndingScene]
 });
