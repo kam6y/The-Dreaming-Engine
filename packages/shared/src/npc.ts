@@ -27,6 +27,9 @@ export const GIVE_ITEM_AFFINITY_THRESHOLD = 50;
 /** 未要約の直近往復の保持上限(ai-integration.md「会話セッション管理」) */
 export const MAX_UNSUMMARIZED_EXCHANGES = 10;
 
+/** 会話要約の長さ上限(200字。出力壁 checkDisplayText の maxLength に使う: ai-integration.md「会話セッション管理」124) */
+export const SUMMARY_MAX_LENGTH = 200;
+
 /** 好感度を 0-100 にクランプする */
 export function clampAffinity(value: number): number {
   return Math.min(AFFINITY_MAX, Math.max(AFFINITY_MIN, value));
