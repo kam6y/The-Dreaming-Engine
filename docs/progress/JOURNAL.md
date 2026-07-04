@@ -390,3 +390,41 @@
   ConversationOverlay(TypewriterText+TextInputBox+MenuListで発話/自由入力/提案受諾)、
   QuestJournalOverlay(subQuests一覧)、夢シーン演出(rest時のnarrate ai-utterance)。
   game-client.ts に ai-utterance ハンドラ、exploration-scene に conversation overlay を配線
+
+## [13] 2026-07-04 M4-F完了: 会話UI・クエストジャーナル・夢シーン演出(オーケストレーター実装+ブラウザ検証)
+
+- やったこと(オーケストレーターが実装。3コミット):
+  - 17797d3: ConversationOverlay(情報屋・司祭。NPC発話をTypewriter疑似ストリーミング・
+    自由入力=TextInputBox・提案の受諾/辞退・仕事依頼・立ち去る)。exploration-sceneに
+    ai-utterance購読・conversation interactionでoverlay開閉・**speakのstash(到着順非依存)**・
+    全ガード条件にconversationOverlay追加。battle-sceneは戦果narrateをバッファし勝利メッセージ
+    送り完了時に表示してから探索復帰(snapshotで遷移せず・再戦雑魚はnarrate待ちしない)
+  - a0b6ead: DreamOverlay(宿泊後の夢を暗幕+TypewriterTextで演出。おやすみダイアログ後に
+    開き、スペースで目覚めて翌朝へ。narrateをstashし先行ダイアログ待ちで開く)。
+    QuestJournalOverlay(受注中subQuests一覧。Qで開閉・Escで閉じる)
+  - 09965dd: ブラウザ検証で発見した会話UIの2バグ修正(下記)
+- 検証: `pnpm check` 緑(ユニット448件)・`pnpm test:e2e` 4/4緑。**Playwrightでブラウザ実操作
+  検証**: 新規→情報屋に話しかけ(挨拶Typewriter)→自由入力送信→応答→仕事依頼→提案→受諾確認
+  「恩に着るよ」がoverlay内表示→クエストジャーナルQに「霧狼の間引き 0/3」表示→宿屋で宿泊
+  (10G徴収・HP全回復・2日目)→おやすみ→夢シーン演出(「霧が濃い…あなたの名を呼んだ気がした」)
+  →目を覚まして探索復帰、を通しで確認
+- 裁量で決めたこと:
+  - AIテキストの表示面: 会話=ConversationOverlay内Typewriter、夢=DreamOverlay(全画面暗幕+
+    Typewriter)、戦果=戦闘メッセージ窓に平テキスト。会話・夢はTypewriter疑似ストリーミング、
+    戦果は戦闘UIの平テキスト様式に合わせた(いずれも検証済み全文・プレーンテキスト=第4層準拠)
+  - utteranceタイミング機構(advisor指摘): シーンごとに1スロットstashし、overlay生成前に
+    届いたspeakを流し込む(サーバーはsnapshot→utterance順だが到着順に非依存化)。夢narrateも
+    stashして宿屋のおやすみダイアログ表示後にupdate()で開く(pendingInnと同じ先行ダイアログ待ち)
+  - クエストジャーナルはQで開閉・Escで閉じる読み取り専用テキストパネル。会話overlayのガードは
+    shopOverlay参照箇所すべてに一対一で追加(movement/dialog-queue/interact/escape/shutdown)
+- 既知の問題/ブラウザ検証で発見・修正した2バグ(09965dd):
+  1. 提案応答後にアクションメニューが消える: `setAwaiting`がメニュー破棄→応答到着時の`refresh`は
+     `awaiting`中で再構築スキップ→受諾/辞退が出ない。`playUtterance`で応答到着時に再構築して解決
+  2. 受諾/辞退の確認台詞(サーバーは定型を`dialog`で送る)が会話中は保留され会話後に浮いて
+     クエストジャーナル(Q)をブロック。会話中のNPC台詞(speaker非null)は会話overlayの発話として
+     流す(保留しない)よう修正。dream/journal中のダイアログは従来どおり保留
+  - **戦果narrate(narrate表示)はブラウザ手動未検証**(戦闘E2Eは緑=narrate追加で戦闘フローは壊れない
+    ことを確認済み)。M4-GのE2Eスモークで「初見戦闘勝利時にnarrateが戦闘中に表示される」を機械検証する
+- 次にやること: M4-G(攻撃テストA=マニフェスト照合メタテスト+ゲーム内AIから組み込みツールが
+  呼べないことの機械検証+悪意Mock応答の検証層却下+E2Eスモーク3種=会話/クエスト受注/夢シーン、
+  戦果narrate表示のアサーション含む)をsubagentへ委譲
