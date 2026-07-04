@@ -428,3 +428,52 @@
 - 次にやること: M4-G(攻撃テストA=マニフェスト照合メタテスト+ゲーム内AIから組み込みツールが
   呼べないことの機械検証+悪意Mock応答の検証層却下+E2Eスモーク3種=会話/クエスト受注/夢シーン、
   戦果narrate表示のアサーション含む)をsubagentへ委譲
+
+## [14] 2026-07-04 M4完了: 攻撃テストA(テストIDマニフェスト照合含む)+E2Eスモーク3種
+
+- やったこと(subagent実装。M4-Gを2ディスパッチに分割):
+  - M4-G(cee766a/fd0e6de): 攻撃テストA(`server/test/guardrails/`)=ツール許可マニフェスト照合・
+    canUseToolデフォルト拒否・悪意Mock全却下・入出力壁・Origin/WS単一接続。E2Eスモーク3種
+    (会話/クエスト受注/夢シーン)+戦果narrateのWSフレーム傍受アサート
+  - M4-G-2(844efa4): M4完了条件(guardrails.md 315行)の欠落=**テストID版マニフェスト照合
+    メタテスト**を整備。各攻撃テストに安定`[ATK-...]`ID付与(47件)、必須IDマニフェスト、
+    guardrails/*.test.tsをソース走査してアクティブID集合と照合するメタテスト
+    (削除・skip・.only・未ラベルを検出。1件skipで実際に落ちることを確認済み)
+- 検証: `pnpm check` 緑(ユニット502件・42ファイル)。`pnpm test:e2e` 8/8緑
+  (既存4+会話/クエスト/夢/戦果narrate)
+- 裁量/既知の問題:
+  - M4-Gのブラウザ検証で会話UIの2バグを発見・修正済み(JOURNAL[13])。E2Eスモークが
+    会話/クエスト/夢フローを自動回帰で担保
+  - Origin不許可テストは `app.inject`(in-process)で実施(実WSアップグレードの403は
+    HTTP接続追跡から外れた socket が `app.close()` をハングさせるため)
+  - **secret-mask.ts / scan-secrets.mjs はファイル名の "secret" によりRead権限で読めない**環境
+    (subagentは使用例から署名推定)。M5で私が触れたシークレットスキャンの件は下記[15]
+- **M4マイルストーン完了**。ROADMAP M4全項目チェック。攻撃テストB(実AI)と `test:ai-live` の
+  実行は人間確認待ち(テスト・手順は整備済み: JOURNAL[11][14])
+
+## [15] 2026-07-04 M5(大部分)完了: アセット検収+組み込み(タイトル/戦闘/会話に実画像)
+
+- 前提: **人間がアセットを先行納品**(assets/ に PNG26点+manifest.json+prompts26)。
+  M5はcodex委譲ではなく検収→組み込みから開始(asset-pipeline.md 91行の想定どおり)
+- やったこと(オーケストレーター実装。コミット e13a113):
+  - **検収**: manifest↔ファイル整合(26=26)・PNG署名・宣言sizePxと実寸一致・prompt実在・
+    id一意を機械検証。タイトル/司祭立ち絵/霧狼/戦場背景を目視で世界観適合も確認
+  - PreloadScene(`manifest.json`駆動で全画像をidロード。欠落は各シーンが`textures.exists`で
+    プレースホルダー退避)。main.tsの先頭シーンに登録
+  - アセット配信: **Viteプラグイン**で `/assets/*` を dev配信(当初symlinkにしたが
+    `scan-secrets.mjs`がEISDIRでクラッシュしたためプラグインへ切替。dist未使用なのでbuildコピー無し)
+  - タイトル背景(機関の街+暗幕)、戦闘(敵グラフィック透過+場所別背景battle-field/dungeon、
+    形態変化でdream-eater-phase2差替)、会話(NPC立ち絵+屋内背景=情報屋:霧笛亭/司祭:灯守堂)
+  - `fitCover`/`fitContain`ヘルパーでスロット毎スケール(サイズ差吸収)
+- 検証: `pnpm check` 緑(502件)。`pnpm test:e2e` 8/8緑。**Playwright test runner内でscreenshot
+  撮影→Read で3シーン目視検証**(MCP切断のため。タイトル・会話・戦闘とも実画像描画を確認)。
+  会話の発話テキストが立ち絵/パネルに隠れるz順バグを発見→utteranceをcontainer後に追加して修正
+- 裁量で決めたこと:
+  - タイルマップ・マップ上のキャラはプレースホルダー維持(asset-pipeline.md「タイルマップの方針」。
+    立ち絵と会話で世界観担保)。OP/ED(op-1/2,ed-1/2)はM6のオープニング/エンディングで組み込む
+  - 会話屋内: 情報屋=tavern-interior、司祭=chapel-interior(宿屋=inn/商人=shopはUI別途)
+- 既知の問題/残: **日本語フォント未導入**(納品にフォント無し。現状systemのserifで表示は成立。
+  BACKLOG/追加納品待ち)。UI装飾(window-frame/cursor)は未組み込み(任意ポリッシュ)
+- 次にやること: M6(縦切り完成)=メインクエスト進行(司祭会話で夢喰いを知る→ダンジョン→
+  ボス撃破→エンディング)、オープニング(op-1/2)/エンディング(ed-1/2)演出、バランス調整、
+  通しE2E(pnpm test:e2e:full)整備。M6着手前にgame-design.mdのメインクエスト/エンディング節を精読
