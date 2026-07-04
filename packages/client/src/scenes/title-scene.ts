@@ -44,7 +44,8 @@ export class TitleScene extends Phaser.Scene {
 
   public create(): void {
     this.cameras.main.setBackgroundColor("#000000");
-    this.uiLayer = this.add.container(0, 0);
+    // メニュー・確認ダイアログはタイトル文字より前面に描画する
+    this.uiLayer = this.add.container(0, 0).setDepth(10);
     this.confirm = null;
     this.pendingMessage = null;
     this.requested = false;

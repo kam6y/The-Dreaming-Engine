@@ -10,6 +10,11 @@ export interface MenuListOptions {
   onSelect: (id: string) => void;
   /** キャンセル時(Esc)。省略時はキャンセル不可 */
   onCancel?: () => void;
+  /**
+   * 初期カーソル位置(省略時は先頭)。無効項目なら以降の有効項目へ送る。
+   * リスト再構築(店の売買後の更新等)でカーソル位置を維持するために使う
+   */
+  initialIndex?: number;
 }
 
 const ROW_HEIGHT = 30;
@@ -73,16 +78,27 @@ export class MenuList {
     this.container = scene.add.container(options.x, options.y, children).setVisible(false);
     parentLayer.add(this.container);
 
-    // 最初の有効項目にカーソルを合わせる
-    this.index = Math.max(
-      0,
-      options.items.findIndex((i) => i.disabled !== true)
-    );
+    // initialIndex(省略時は先頭)から数えて最初の有効項目にカーソルを合わせる
+    const preferred = options.initialIndex ?? 0;
+    let index = 0;
+    for (let step = 0; step < options.items.length; step += 1) {
+      const candidate = (preferred + step) % options.items.length;
+      if (options.items[candidate]?.disabled !== true) {
+        index = candidate;
+        break;
+      }
+    }
+    this.index = index;
     this.updateCursor();
   }
 
   public get isActive(): boolean {
     return this.active;
+  }
+
+  /** 現在のカーソル位置(リスト再構築時の位置維持用) */
+  public get currentIndex(): number {
+    return this.index;
   }
 
   /** メニューを表示してキー入力の受付を開始する */

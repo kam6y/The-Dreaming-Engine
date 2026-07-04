@@ -8,6 +8,7 @@ import {
   tileTypeAt,
   type Direction,
   type EnemyId,
+  type ItemId,
   type MapDefinition,
   type Position,
   type SnapshotView,
@@ -18,6 +19,8 @@ import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.
 import { getGameClient, type GameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { DialogBox } from "../ui/dialog-box.js";
+import { InventoryOverlay } from "../ui/inventory-overlay.js";
+import { ShopOverlay } from "../ui/shop-overlay.js";
 
 /** タイル1マスのピクセルサイズ(game-design.md「マップ構成」) */
 const TILE_SIZE = 32;
@@ -98,6 +101,12 @@ export class ExplorationScene extends Phaser.Scene {
   /** 宿の対話を受信済みで、先行ダイアログの表示完了を待っている状態 */
   private pendingInn: { npcName: string; costGold: number } | null = null;
 
+  /** 商店オーバーレイ(interaction===shop の間表示) */
+  private shopOverlay: ShopOverlay | null = null;
+
+  /** もちものオーバーレイ(Escで開閉) */
+  private inventoryOverlay: InventoryOverlay | null = null;
+
   /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
   private objectViews = new Map<string, Phaser.GameObjects.Rectangle[]>();
 
@@ -139,6 +148,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.pendingStep = null;
     this.innConfirm = null;
     this.pendingInn = null;
+    this.shopOverlay = null;
+    this.inventoryOverlay = null;
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
@@ -175,6 +186,8 @@ export class ExplorationScene extends Phaser.Scene {
         unsubscribe();
       }
       this.unsubscribes = [];
+      this.closeShopOverlay();
+      this.closeInventoryOverlay();
     });
 
     this.updateHud();
@@ -187,11 +200,20 @@ export class ExplorationScene extends Phaser.Scene {
       return;
     }
 
-    // グローバルキューのダイアログを表示可能なタイミングで1件ずつ表示する
-    if (!this.dialog.isOpen && this.innConfirm === null && hasPendingDialog()) {
-      const next = dequeueDialog();
-      if (next !== undefined) {
-        this.dialog.open(next.speaker, next.body);
+    // グローバルキューのダイアログを表示可能なタイミングで1件ずつ表示する。
+    // オーバーレイ表示中は、その通知行へ流す(挨拶・売買/使用の結果)
+    if (hasPendingDialog()) {
+      if (this.shopOverlay !== null || this.inventoryOverlay !== null) {
+        const next = dequeueDialog();
+        if (next !== undefined) {
+          this.shopOverlay?.showMessage(next.body);
+          this.inventoryOverlay?.showMessage(next.body);
+        }
+      } else if (!this.dialog.isOpen && this.innConfirm === null) {
+        const next = dequeueDialog();
+        if (next !== undefined) {
+          this.dialog.open(next.speaker, next.body);
+        }
       }
     }
 
@@ -208,8 +230,15 @@ export class ExplorationScene extends Phaser.Scene {
     if (this.moving || this.awaiting) {
       return;
     }
-    if (this.dialog.isOpen || this.innConfirm !== null || this.pendingInn !== null) {
-      // ダイアログ中に押した移動キーが、閉じた直後の「幽霊移動」にならないよう破棄する
+    if (
+      this.dialog.isOpen ||
+      this.innConfirm !== null ||
+      this.pendingInn !== null ||
+      this.shopOverlay !== null ||
+      this.inventoryOverlay !== null
+    ) {
+      // ダイアログ・オーバーレイ中に押した移動キーが、閉じた直後の「幽霊移動」に
+      // ならないよう破棄する
       this.pendingStep = null;
       return;
     }
@@ -256,13 +285,24 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateEnemySymbols();
     this.updateResolvedObjects();
     this.updateInteraction(view);
+    this.shopOverlay?.refresh(view);
+    this.inventoryOverlay?.refresh(view);
     this.updateHud();
     this.syncDomState();
   }
 
   private handleServerError(message: string): void {
     this.awaiting = false;
-    // 探索中の操作エラー(持ちきれない等)は地の文ダイアログとして表示する
+    // オーバーレイ中の操作エラー(金不足・満杯等)はオーバーレイの通知行へ、
+    // それ以外は地の文ダイアログとして表示する
+    if (this.shopOverlay !== null) {
+      this.shopOverlay.showMessage(message);
+      return;
+    }
+    if (this.inventoryOverlay !== null) {
+      this.inventoryOverlay.showMessage(message);
+      return;
+    }
     enqueueDialog({ speaker: null, body: message });
   }
 
@@ -271,6 +311,7 @@ export class ExplorationScene extends Phaser.Scene {
     const interaction = view.interaction;
     if (interaction === undefined) {
       this.pendingInn = null;
+      this.closeShopOverlay();
       return;
     }
     if (interaction.kind === "inn") {
@@ -279,8 +320,65 @@ export class ExplorationScene extends Phaser.Scene {
       }
       return;
     }
-    // shop: 店オーバーレイはM3後半(インベントリ・店UI)で配線する。
-    // それまでは挨拶ダイアログ(dialog キュー)の表示のみ。
+    // shop: オーバーレイを開く(開いている間は snapshot 毎に refresh される)
+    if (this.shopOverlay === null) {
+      this.closeInventoryOverlay();
+      this.shopOverlay = new ShopOverlay(this, this.uiLayer, {
+        interaction,
+        snapshot: view,
+        onBuy: (itemId: ItemId) => {
+          this.awaiting = this.client.send({ type: "shop-buy", itemId, quantity: 1 });
+        },
+        onSell: (itemId: ItemId) => {
+          this.awaiting = this.client.send({ type: "shop-sell", itemId, quantity: 1 });
+        },
+        onClose: () => {
+          this.closeShopOverlay();
+        }
+      });
+    }
+  }
+
+  private closeShopOverlay(): void {
+    // サーバー側の interaction は次の move / interact で自然に解除される
+    this.shopOverlay?.destroy();
+    this.shopOverlay = null;
+  }
+
+  private closeInventoryOverlay(): void {
+    this.inventoryOverlay?.destroy();
+    this.inventoryOverlay = null;
+  }
+
+  /** Esc: もちものオーバーレイの開閉(各オーバーレイ表示中は自身のEscが処理する) */
+  private handleEscape(): void {
+    if (this.transitioning || this.moving || this.awaiting) {
+      return;
+    }
+    if (this.dialog.isOpen) {
+      this.dialog.close();
+      return;
+    }
+    if (
+      this.shopOverlay !== null ||
+      this.inventoryOverlay !== null ||
+      this.innConfirm !== null ||
+      this.pendingInn !== null
+    ) {
+      return;
+    }
+    this.inventoryOverlay = new InventoryOverlay(this, this.uiLayer, {
+      snapshot: this.snapshot,
+      onUse: (itemId: ItemId) => {
+        this.awaiting = this.client.send({ type: "use-item", itemId });
+      },
+      onDiscard: (itemId: ItemId) => {
+        this.awaiting = this.client.send({ type: "discard-item", itemId, quantity: 1 });
+      },
+      onClose: () => {
+        this.closeInventoryOverlay();
+      }
+    });
   }
 
   private openInnConfirm(inn: { npcName: string; costGold: number }): void {
@@ -593,6 +691,9 @@ export class ExplorationScene extends Phaser.Scene {
     };
     keyboard.on("keydown-SPACE", interact);
     keyboard.on("keydown-ENTER", interact);
+    keyboard.on("keydown-ESC", () => {
+      this.handleEscape();
+    });
 
     // ポーリング(長押し)に加えてkeydownでも1歩を予約する。
     // 短いタップがフレーム間に落ちてisDownで拾えなくても確実に1歩動く
@@ -631,8 +732,13 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.close();
       return;
     }
-    if (this.innConfirm !== null || this.pendingInn !== null) {
-      // 確認ダイアログ側(MenuList)が入力を処理する
+    if (
+      this.innConfirm !== null ||
+      this.pendingInn !== null ||
+      this.shopOverlay !== null ||
+      this.inventoryOverlay !== null
+    ) {
+      // 各オーバーレイ側(MenuList)が入力を処理する
       return;
     }
     if (this.awaiting) {

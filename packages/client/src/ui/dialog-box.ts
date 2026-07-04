@@ -56,7 +56,8 @@ export class DialogBox {
       color: "#f1eee4",
       fontFamily: "serif",
       fontSize: "17px",
-      wordWrap: { width: width - PADDING * 2 },
+      // 日本語(スペース区切りなし)を折り返すため useAdvancedWrap を使う
+      wordWrap: { width: width - PADDING * 2, useAdvancedWrap: true },
       lineSpacing: 6
     });
     children.push(bodyText);

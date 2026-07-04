@@ -38,7 +38,8 @@ export class ConfirmDialog {
         fontFamily: "serif",
         fontSize: "18px",
         align: "center",
-        wordWrap: { width: WIDTH - 48 },
+        // 日本語(スペース区切りなし)を折り返すため useAdvancedWrap を使う
+        wordWrap: { width: WIDTH - 48, useAdvancedWrap: true },
         lineSpacing: 6
       })
       .setOrigin(0.5, 0);

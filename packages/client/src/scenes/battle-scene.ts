@@ -251,7 +251,7 @@ export class BattleScene extends Phaser.Scene {
       color: "#f1eee4",
       fontFamily: "serif",
       fontSize: "18px",
-      wordWrap: { width: width - 320 },
+      wordWrap: { width: width - 320, useAdvancedWrap: true },
       lineSpacing: 6
     });
     this.uiLayer.add(this.messageText);
