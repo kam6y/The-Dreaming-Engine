@@ -3,25 +3,20 @@ import Phaser from "phaser";
 import {
   ENEMY_DISPLAY_NAMES,
   MAPS,
-  NEW_GAME_START,
   NPC_DISPLAY_NAMES,
-  interactionTarget,
-  sampleEnemySymbols,
   samePosition,
   tileTypeAt,
-  transitionAt,
-  tryMove,
   type Direction,
   type EnemyId,
-  type EnemySymbolPlacement,
   type MapDefinition,
-  type MapId,
   type Position,
+  type SnapshotView,
   type TileType
 } from "@dreaming-engine/shared";
 
-import { encountersDisabled, getEncounterRng } from "../game-state.js";
-import type { BattleSceneData } from "./battle-scene.js";
+import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
+import { getGameClient, type GameClient } from "../net/game-client.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { DialogBox } from "../ui/dialog-box.js";
 
 /** タイル1マスのピクセルサイズ(game-design.md「マップ構成」) */
@@ -55,31 +50,23 @@ const SYMBOL_COLORS: Record<EnemyId, number> = {
   "dream-eater": 0x5c2431
 };
 
-interface ExplorationSceneData {
-  mapId?: MapId;
-  position?: Position;
-  facing?: Direction;
-  /**
-   * 敵シンボルの残存状態(戦闘からの復帰時に引き継ぐ)。
-   * 未指定ならマップ入場としてサンプリングし直す(=撃破分のリスポーン)
-   */
-  symbols?: EnemySymbolPlacement[];
-}
-
 /**
- * 探索シーン(見下ろしグリッド移動)。
- * - WASD / 矢印でグリッド単位移動(スムーズ補間、4方向)
- * - カメラ追従
- * - 遷移マスに乗るとマップ間遷移
- * - スペース / Enter で正面のNPC・オブジェクトを調べる(M1はプレースホルダー文言)
- * 移動・衝突・対象探索の判定はすべて shared の純ロジックに委ねる。
+ * 探索シーン(見下ろしグリッド移動)。サーバー正本のスナップショット駆動:
+ * - 移動・調べる等の操作は GameClient でサーバーへ送り、snapshot を受けて描画を更新する
+ * - マップ遷移・戦闘開始も snapshot(mapId 変化 / mode==="battle")で検知する
+ * - dialog はグローバルキュー(dialog-queue)から表示可能なタイミングで順に表示する
+ * 描画そのもの(タイル・NPC・シンボル)はプレースホルダーのまま(M5で差し替え)。
  */
 export class ExplorationScene extends Phaser.Scene {
+  private client!: GameClient;
+
+  /** 直近に処理したスナップショット(描画の正) */
+  private snapshot!: SnapshotView;
+
   private map!: MapDefinition;
 
-  private playerPosition: Position = { x: 0, y: 0 };
-
-  private facing: Direction = "down";
+  /** 現在描画されているプレイヤーの座標(補間の起点) */
+  private renderedPosition: Position = { x: 0, y: 0 };
 
   private playerSprite!: Phaser.GameObjects.Container;
 
@@ -91,12 +78,37 @@ export class ExplorationScene extends Phaser.Scene {
   /** HUD・ダイアログ等のUI描画物(等倍の専用カメラで映す) */
   private uiLayer!: Phaser.GameObjects.Container;
 
+  /** 補間移動中(完了までは次の操作を送らない) */
   private moving = false;
+
+  /** サーバー応答(snapshot / dialog / error)待ち */
+  private awaiting = false;
+
+  /** シーン遷移(マップ移動・戦闘開始)中 */
+  private transitioning = false;
 
   /** タップ入力(短いkeydown)を取りこぼさないための予約ステップ */
   private pendingStep: Direction | null = null;
 
   private dialog!: DialogBox;
+
+  /** 宿の確認ダイアログ(表示中は移動・調べるをブロック) */
+  private innConfirm: ConfirmDialog | null = null;
+
+  /** 宿の対話を受信済みで、先行ダイアログの表示完了を待っている状態 */
+  private pendingInn: { npcName: string; costGold: number } | null = null;
+
+  /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
+  private objectViews = new Map<string, Phaser.GameObjects.Rectangle[]>();
+
+  private symbolViews: Phaser.GameObjects.GameObject[] = [];
+
+  /** 描画済みシンボルのキー(差分がある時だけ再描画する) */
+  private symbolsKey = "";
+
+  private hudStatusText!: Phaser.GameObjects.Text;
+
+  private unsubscribes: (() => void)[] = [];
 
   private keys!: {
     up: Phaser.Input.Keyboard.Key[];
@@ -109,38 +121,40 @@ export class ExplorationScene extends Phaser.Scene {
     super("exploration");
   }
 
-  private symbols: EnemySymbolPlacement[] = [];
-
-  private symbolViews: Phaser.GameObjects.GameObject[] = [];
-
-  private pendingSymbols: EnemySymbolPlacement[] | undefined;
-
-  public init(data: ExplorationSceneData): void {
-    const mapId = data.mapId ?? NEW_GAME_START.mapId;
-    this.map = MAPS[mapId];
-    this.playerPosition = data.position ?? NEW_GAME_START.position;
-    this.facing = data.facing ?? NEW_GAME_START.facing;
-    this.moving = false;
-    this.pendingSymbols = data.symbols;
-  }
-
   public create(): void {
+    const client = getGameClient();
+    const snapshot = client.lastSnapshot;
+    if (snapshot === null) {
+      // スナップショット未受信で探索へ来ることはない想定(防御的フォールバック)
+      this.scene.start("title");
+      return;
+    }
+    this.client = client;
+    this.snapshot = snapshot;
+    this.map = MAPS[snapshot.location.mapId];
+    this.renderedPosition = { ...snapshot.location.position };
+    this.moving = false;
+    this.awaiting = false;
+    this.transitioning = false;
+    this.pendingStep = null;
+    this.innConfirm = null;
+    this.pendingInn = null;
+    this.objectViews.clear();
+    this.symbolViews = [];
+    this.symbolsKey = "";
+
     this.cameras.main.setBackgroundColor("#0b0d12");
 
     this.worldLayer = this.add.container(0, 0);
     this.uiLayer = this.add.container(0, 0).setDepth(1000);
-
-    // 戦闘復帰時は残存シンボルを引き継ぎ、新規入場時はサンプリング(=リスポーン)
-    this.symbols =
-      this.pendingSymbols ??
-      (encountersDisabled() ? [] : sampleEnemySymbols(this.map, getEncounterRng(this)));
 
     this.drawTiles();
     this.drawTransitions();
     this.drawObjects();
     this.drawNpcs();
     this.drawBoss();
-    this.drawEnemySymbols();
+    this.updateEnemySymbols();
+    this.updateResolvedObjects();
     this.createPlayer();
     this.setupHud();
     this.setupCamera();
@@ -148,15 +162,53 @@ export class ExplorationScene extends Phaser.Scene {
 
     this.dialog = new DialogBox(this, this.uiLayer);
 
+    this.unsubscribes = [
+      client.on("snapshot", (view) => {
+        this.handleSnapshot(view);
+      }),
+      client.on("server-error", (error) => {
+        this.handleServerError(error.message);
+      })
+    ];
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      for (const unsubscribe of this.unsubscribes) {
+        unsubscribe();
+      }
+      this.unsubscribes = [];
+    });
+
+    this.updateHud();
     this.syncDomState();
     this.cameras.main.fadeIn(200, 11, 13, 18);
   }
 
   public override update(): void {
-    if (this.moving) {
+    if (this.transitioning) {
       return;
     }
-    if (this.dialog.isOpen) {
+
+    // グローバルキューのダイアログを表示可能なタイミングで1件ずつ表示する
+    if (!this.dialog.isOpen && this.innConfirm === null && hasPendingDialog()) {
+      const next = dequeueDialog();
+      if (next !== undefined) {
+        this.dialog.open(next.speaker, next.body);
+      }
+    }
+
+    // 宿の確認は先行ダイアログ(宿屋の主人の挨拶)をすべて表示し終えてから開く
+    if (
+      this.pendingInn !== null &&
+      !this.dialog.isOpen &&
+      !hasPendingDialog() &&
+      this.innConfirm === null
+    ) {
+      this.openInnConfirm(this.pendingInn);
+    }
+
+    if (this.moving || this.awaiting) {
+      return;
+    }
+    if (this.dialog.isOpen || this.innConfirm !== null || this.pendingInn !== null) {
       // ダイアログ中に押した移動キーが、閉じた直後の「幽霊移動」にならないよう破棄する
       this.pendingStep = null;
       return;
@@ -165,8 +217,117 @@ export class ExplorationScene extends Phaser.Scene {
     const direction = this.pressedDirection() ?? this.pendingStep;
     this.pendingStep = null;
     if (direction !== null) {
-      this.stepTo(direction);
+      this.awaiting = this.client.send({ type: "move", direction });
     }
+  }
+
+  // ----------------------------------------------------------------------
+  // スナップショット・エラーの反映
+  // ----------------------------------------------------------------------
+
+  private handleSnapshot(view: SnapshotView): void {
+    this.awaiting = false;
+    if (this.transitioning) {
+      // 遷移中の更新は保存のみ(次のシーンが lastSnapshot から読む)
+      this.snapshot = view;
+      return;
+    }
+
+    // 戦闘開始
+    if (view.mode === "battle") {
+      this.snapshot = view;
+      this.startBattleTransition();
+      return;
+    }
+
+    // マップ遷移
+    if (view.location.mapId !== this.map.id) {
+      this.snapshot = view;
+      this.startMapTransition();
+      return;
+    }
+
+    // 同一マップ内の更新
+    this.snapshot = view;
+    this.applyFacing(view.location.facing);
+    if (!samePosition(view.location.position, this.renderedPosition)) {
+      this.tweenPlayerTo(view.location.position);
+    }
+    this.updateEnemySymbols();
+    this.updateResolvedObjects();
+    this.updateInteraction(view);
+    this.updateHud();
+    this.syncDomState();
+  }
+
+  private handleServerError(message: string): void {
+    this.awaiting = false;
+    // 探索中の操作エラー(持ちきれない等)は地の文ダイアログとして表示する
+    enqueueDialog({ speaker: null, body: message });
+  }
+
+  /** 対話(店/宿)の開始・終了を snapshot の interaction から反映する */
+  private updateInteraction(view: SnapshotView): void {
+    const interaction = view.interaction;
+    if (interaction === undefined) {
+      this.pendingInn = null;
+      return;
+    }
+    if (interaction.kind === "inn") {
+      if (this.innConfirm === null && this.pendingInn === null) {
+        this.pendingInn = { npcName: interaction.npcName, costGold: interaction.costGold };
+      }
+      return;
+    }
+    // shop: 店オーバーレイはM3後半(インベントリ・店UI)で配線する。
+    // それまでは挨拶ダイアログ(dialog キュー)の表示のみ。
+  }
+
+  private openInnConfirm(inn: { npcName: string; costGold: number }): void {
+    this.pendingInn = null;
+    this.innConfirm = new ConfirmDialog(this, this.uiLayer, {
+      message: `一晩 ${inn.costGold}ゴールド。今夜はここで休むか?\n(休むと、今日までの歩みが機関に記録される)`,
+      yesLabel: "泊まる",
+      noLabel: "やめる",
+      onResult: (yes) => {
+        this.innConfirm = null;
+        if (yes) {
+          this.awaiting = this.client.send({ type: "rest" });
+        }
+      }
+    });
+  }
+
+  private tweenPlayerTo(position: Position): void {
+    this.moving = true;
+    this.renderedPosition = { ...position };
+    const { x, y } = this.tileCenter(position);
+    this.tweens.add({
+      targets: this.playerSprite,
+      x,
+      y,
+      duration: MOVE_DURATION_MS,
+      onComplete: () => {
+        this.moving = false;
+      }
+    });
+  }
+
+  private startBattleTransition(): void {
+    this.transitioning = true;
+    this.cameras.main.fadeOut(240, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start("battle");
+    });
+  }
+
+  private startMapTransition(): void {
+    this.transitioning = true;
+    this.cameras.main.fadeOut(180, 11, 13, 18);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      // create() が client.lastSnapshot(遷移後の状態)から組み直す
+      this.scene.restart();
+    });
   }
 
   // ----------------------------------------------------------------------
@@ -223,9 +384,22 @@ export class ExplorationScene extends Phaser.Scene {
     for (const object of this.map.objects) {
       const { x, y } = this.tileCenter(object.position);
       const color = OBJECT_COLORS[object.kind] ?? 0x9a8f76;
-      this.worldLayer.add(
-        this.add.rectangle(x, y, TILE_SIZE - 12, TILE_SIZE - 12, color).setStrokeStyle(1, 0x0b0d12)
-      );
+      const view = this.add
+        .rectangle(x, y, TILE_SIZE - 12, TILE_SIZE - 12, color)
+        .setStrokeStyle(1, 0x0b0d12);
+      this.worldLayer.add(view);
+      this.objectViews.set(object.id, [view]);
+    }
+  }
+
+  /** 解決済み(開封済み宝箱・採取済み採取点)のオブジェクトを非表示にする */
+  private updateResolvedObjects(): void {
+    const resolved = new Set(this.snapshot.resolvedObjectIds);
+    for (const [id, views] of this.objectViews) {
+      const visible = !resolved.has(id);
+      for (const view of views) {
+        view.setVisible(visible);
+      }
     }
   }
 
@@ -273,20 +447,23 @@ export class ExplorationScene extends Phaser.Scene {
     );
   }
 
-  private drawEnemySymbols(): void {
+  /** snapshot の敵シンボルを描画へ反映する(差分がある時だけ再構築) */
+  private updateEnemySymbols(): void {
+    const key = this.snapshot.symbols
+      .map((s) => `${s.enemyId}@${s.position.x},${s.position.y}`)
+      .join("|");
+    if (key === this.symbolsKey) {
+      return;
+    }
+    this.symbolsKey = key;
     this.symbolViews.forEach((view) => {
       view.destroy();
     });
     this.symbolViews = [];
-    for (const symbol of this.symbols) {
+    for (const symbol of this.snapshot.symbols) {
       const { x, y } = this.tileCenter(symbol.position);
       const diamond = this.add
-        .polygon(
-          x,
-          y,
-          [0, -12, 12, 0, 0, 12, -12, 0],
-          SYMBOL_COLORS[symbol.enemyId]
-        )
+        .polygon(x, y, [0, -12, 12, 0, 0, 12, -12, 0], SYMBOL_COLORS[symbol.enemyId])
         .setStrokeStyle(2, 0x0b0d12);
       this.tweens.add({
         targets: diamond,
@@ -307,10 +484,10 @@ export class ExplorationScene extends Phaser.Scene {
       .setStrokeStyle(2, 0x0b0d12);
     this.facingDot = this.add.circle(0, 0, 3, 0x0b0d12);
 
-    const { x, y } = this.tileCenter(this.playerPosition);
+    const { x, y } = this.tileCenter(this.renderedPosition);
     this.playerSprite = this.add.container(x, y, [body, this.facingDot]).setDepth(10);
     this.worldLayer.add(this.playerSprite);
-    this.updateFacingDot();
+    this.applyFacing(this.snapshot.location.facing);
   }
 
   private setupCamera(): void {
@@ -371,6 +548,21 @@ export class ExplorationScene extends Phaser.Scene {
         padding: { x: 8, y: 4 }
       })
     );
+    this.hudStatusText = this.add.text(12, 42, "", {
+      color: "#a9b0ba",
+      fontFamily: "serif",
+      fontSize: "14px",
+      backgroundColor: "#0b0d12cc",
+      padding: { x: 8, y: 4 }
+    });
+    this.uiLayer.add(this.hudStatusText);
+  }
+
+  private updateHud(): void {
+    const p = this.snapshot.player;
+    this.hudStatusText.setText(
+      `${this.snapshot.day}日目  Lv${p.level}  HP ${p.hp}/${p.maxHp}  MP ${p.mp}/${p.maxMp}  ${p.gold}G`
+    );
   }
 
   // ----------------------------------------------------------------------
@@ -418,8 +610,7 @@ export class ExplorationScene extends Phaser.Scene {
   }
 
   private pressedDirection(): Direction | null {
-    const isDown = (list: Phaser.Input.Keyboard.Key[]): boolean =>
-      list.some((k) => k.isDown);
+    const isDown = (list: Phaser.Input.Keyboard.Key[]): boolean => list.some((k) => k.isDown);
 
     if (isDown(this.keys.up)) return "up";
     if (isDown(this.keys.down)) return "down";
@@ -429,116 +620,25 @@ export class ExplorationScene extends Phaser.Scene {
   }
 
   // ----------------------------------------------------------------------
-  // 移動・遷移
-  // ----------------------------------------------------------------------
-
-  private stepTo(direction: Direction): void {
-    this.facing = direction;
-    this.updateFacingDot();
-
-    const result = tryMove(this.map, this.playerPosition, direction);
-    if (!result.moved) {
-      this.syncDomState();
-      return;
-    }
-
-    // 敵シンボルへの接触判定(シンボルはマップデータ外の動的存在のためここで判定)
-    const symbolIndex = this.symbols.findIndex((s) => samePosition(s.position, result.position));
-    if (symbolIndex >= 0) {
-      this.startBattle(symbolIndex);
-      return;
-    }
-
-    this.moving = true;
-    this.playerPosition = result.position;
-
-    const { x, y } = this.tileCenter(result.position);
-    this.tweens.add({
-      targets: this.playerSprite,
-      x,
-      y,
-      duration: MOVE_DURATION_MS,
-      onComplete: () => {
-        this.moving = false;
-        this.syncDomState();
-        this.checkTransition();
-      }
-    });
-  }
-
-  private startBattle(symbolIndex: number): void {
-    const symbol = this.symbols[symbolIndex];
-    if (symbol === undefined) {
-      return;
-    }
-    this.moving = true; // 遷移中の追加入力を止める
-    const seed = getEncounterRng(this).int(0, 0x7fffffff);
-    const data: BattleSceneData = {
-      enemyId: symbol.enemyId,
-      seed,
-      returnTo: {
-        mapId: this.map.id,
-        position: this.playerPosition,
-        facing: this.facing,
-        symbols: this.symbols,
-        symbolIndex
-      }
-    };
-    this.cameras.main.fadeOut(240, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start("battle", data);
-    });
-  }
-
-  private checkTransition(): void {
-    const transition = transitionAt(this.map, this.playerPosition);
-    if (transition === null) {
-      return;
-    }
-
-    this.moving = true;
-    this.cameras.main.fadeOut(180, 11, 13, 18);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.restart({
-        mapId: transition.to.mapId,
-        position: transition.to.position,
-        facing: transition.to.facing
-      } satisfies ExplorationSceneData);
-    });
-  }
-
-  // ----------------------------------------------------------------------
-  // インタラクション(M1はプレースホルダー文言の表示まで)
+  // インタラクション(サーバーへ送信し、dialog / snapshot で結果を受ける)
   // ----------------------------------------------------------------------
 
   private handleInteract(): void {
+    if (this.transitioning || this.moving) {
+      return;
+    }
     if (this.dialog.isOpen) {
       this.dialog.close();
       return;
     }
-    if (this.moving) {
+    if (this.innConfirm !== null || this.pendingInn !== null) {
+      // 確認ダイアログ側(MenuList)が入力を処理する
       return;
     }
-
-    const target = interactionTarget(this.map, this.playerPosition, this.facing);
-    if (target === null) {
+    if (this.awaiting) {
       return;
     }
-
-    if (target.kind === "npc") {
-      // 会話本体はM4(DreamMaster)で実装する。M1は枠組みの確認用プレースホルダー
-      this.dialog.open(
-        NPC_DISPLAY_NAMES[target.npc.id],
-        "……(静かにこちらを見ている。言葉が紡がれるには、まだ夢が浅すぎるようだ)"
-      );
-    } else if (target.kind === "object") {
-      this.dialog.open(null, target.object.message);
-    } else {
-      this.dialog.open(
-        null,
-        "重い唸りのような静寂が満ちている。……近づくには、まだ力が足りない。"
-      );
-    }
+    this.awaiting = this.client.send({ type: "interact" });
   }
 
   // ----------------------------------------------------------------------
@@ -552,7 +652,7 @@ export class ExplorationScene extends Phaser.Scene {
     };
   }
 
-  private updateFacingDot(): void {
+  private applyFacing(facing: Direction): void {
     const offset = TILE_SIZE / 2 - 9;
     const delta: Record<Direction, { x: number; y: number }> = {
       up: { x: 0, y: -offset },
@@ -560,19 +660,25 @@ export class ExplorationScene extends Phaser.Scene {
       left: { x: -offset, y: 0 },
       right: { x: offset, y: 0 }
     };
-    this.facingDot.setPosition(delta[this.facing].x, delta[this.facing].y);
+    this.facingDot.setPosition(delta[facing].x, delta[facing].y);
   }
 
-  /** E2E・デバッグ用に現在地をDOMデータ属性へ反映する(#game要素) */
+  /** E2E・デバッグ用に現在状態をDOMデータ属性へ反映する(#game要素) */
   private syncDomState(): void {
     const game = document.querySelector<HTMLDivElement>("#game");
-    if (game !== null) {
-      game.dataset["scene"] = "exploration";
-      game.dataset["mapId"] = this.map.id;
-      game.dataset["playerX"] = String(this.playerPosition.x);
-      game.dataset["playerY"] = String(this.playerPosition.y);
-      game.dataset["symbolCount"] = String(this.symbols.length);
-      delete game.dataset["battleEnemy"];
+    if (game === null) {
+      return;
     }
+    const view = this.snapshot;
+    game.dataset["scene"] = "exploration";
+    game.dataset["mapId"] = view.location.mapId;
+    game.dataset["playerX"] = String(view.location.position.x);
+    game.dataset["playerY"] = String(view.location.position.y);
+    game.dataset["symbolCount"] = String(view.symbols.length);
+    game.dataset["day"] = String(view.day);
+    game.dataset["gold"] = String(view.player.gold);
+    game.dataset["level"] = String(view.player.level);
+    game.dataset["hp"] = String(view.player.hp);
+    delete game.dataset["battleEnemy"];
   }
 }

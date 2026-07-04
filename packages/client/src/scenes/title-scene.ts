@@ -1,14 +1,20 @@
 import Phaser from "phaser";
 
-import { GAME_TITLE } from "@dreaming-engine/shared";
+import { GAME_TITLE, type ClientMessage } from "@dreaming-engine/shared";
 
-import { initializeRun } from "../game-state.js";
+import { clearDialogQueue } from "../dialog-queue.js";
+import { getGameClient } from "../net/game-client.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { MenuList } from "../ui/menu-list.js";
+import { newGameOptionsFromUrl } from "../url-flags.js";
 
 /**
  * タイトル画面。「新規ゲーム」と「つづきから」のメニューを持つ。
- * 「つづきから」はサーバーのセーブ有無で有効化する(M3のサーバー配線で接続。
- * 配線されるまでは無効表示)。
+ * - 「つづきから」はサーバーの hello(セーブ有無)で有効化する
+ * - 既存セーブがあるときの「新規ゲーム」は上書き確認を挟む(実際の上書きは
+ *   新規開始後の最初の宿泊セーブ時: game-design.md「セーブ/ロード」)
+ * - 探索への遷移は自分が要求した new-game / continue への snapshot でのみ行う
+ *   (再接続時の再同期 snapshot では遷移しない)
  * スケールモードRESIZEのため、リサイズ時に中央へ再配置する。
  */
 export class TitleScene extends Phaser.Scene {
@@ -16,9 +22,21 @@ export class TitleScene extends Phaser.Scene {
 
   private subtitleText!: Phaser.GameObjects.Text;
 
-  private menu!: MenuList;
+  private statusText!: Phaser.GameObjects.Text;
+
+  private menu: MenuList | null = null;
 
   private uiLayer!: Phaser.GameObjects.Container;
+
+  private confirm: ConfirmDialog | null = null;
+
+  /** 接続確立前に選択された場合に接続後へ持ち越す送信待ちメッセージ */
+  private pendingMessage: ClientMessage | null = null;
+
+  /** 自分の要求(new-game / continue)に対する snapshot 待ちか */
+  private requested = false;
+
+  private unsubscribes: (() => void)[] = [];
 
   public constructor() {
     super("title");
@@ -27,6 +45,9 @@ export class TitleScene extends Phaser.Scene {
   public create(): void {
     this.cameras.main.setBackgroundColor("#000000");
     this.uiLayer = this.add.container(0, 0);
+    this.confirm = null;
+    this.pendingMessage = null;
+    this.requested = false;
 
     this.titleText = this.add
       .text(0, 0, GAME_TITLE, {
@@ -42,12 +63,72 @@ export class TitleScene extends Phaser.Scene {
         fontSize: "20px"
       })
       .setOrigin(0.5);
+    this.statusText = this.add
+      .text(0, 0, "", {
+        color: "#c98f9a",
+        fontFamily: "serif",
+        fontSize: "16px"
+      })
+      .setOrigin(0.5);
 
+    this.buildMenu();
+
+    const client = getGameClient();
+    this.unsubscribes = [
+      // hello(セーブ有無)で「つづきから」の有効/無効を反映する
+      client.on("hello", () => {
+        this.buildMenu();
+        this.syncDomState();
+      }),
+      client.on("snapshot", () => {
+        if (this.requested) {
+          this.startExploration();
+        }
+      }),
+      client.on("server-error", (error) => {
+        // つづきから失敗(no-save / save-corrupted)等。メニューへ戻す
+        if (this.requested || this.pendingMessage !== null) {
+          this.requested = false;
+          this.pendingMessage = null;
+          this.statusText.setText(error.message);
+          this.menu?.activate();
+        }
+      })
+    ];
+
+    this.layout();
+    this.menu?.activate();
+    this.syncDomState();
+
+    const onResize = (): void => {
+      this.layout();
+    };
+    this.scale.on(Phaser.Scale.Events.RESIZE, onResize);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, onResize);
+      for (const unsubscribe of this.unsubscribes) {
+        unsubscribe();
+      }
+      this.unsubscribes = [];
+    });
+  }
+
+  public override update(): void {
+    // 接続確立前に選択された操作を、送信できるようになった時点で送る
+    if (this.pendingMessage !== null && getGameClient().send(this.pendingMessage)) {
+      this.pendingMessage = null;
+    }
+  }
+
+  /** セーブ有無に応じてメニューを組み直す(hello 受信時に呼ばれる) */
+  private buildMenu(): void {
+    const wasActive = this.menu?.isActive ?? false;
+    this.menu?.destroy();
+    const hasSave = getGameClient().hasSave === true;
     this.menu = new MenuList(this, this.uiLayer, {
       items: [
         { id: "new-game", label: "新規ゲーム" },
-        // M3のサーバー配線でセーブ有無に応じて有効化する
-        { id: "continue", label: "つづきから", disabled: true }
+        { id: "continue", label: "つづきから", disabled: !hasSave }
       ],
       x: 0,
       y: 0,
@@ -56,29 +137,65 @@ export class TitleScene extends Phaser.Scene {
         this.onMenuSelected(id);
       }
     });
-
     this.layout();
-    this.menu.activate();
-
-    const onResize = (): void => {
-      this.layout();
-    };
-    this.scale.on(Phaser.Scale.Events.RESIZE, onResize);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.scale.off(Phaser.Scale.Events.RESIZE, onResize);
-    });
+    if (wasActive || this.scene.isActive()) {
+      // 確認ダイアログ表示中・要求送信中はメニューを受け付けない
+      if (this.confirm === null && !this.requested && this.pendingMessage === null) {
+        this.menu.activate();
+      }
+    }
   }
 
   private onMenuSelected(id: string): void {
     if (id === "new-game") {
-      // 既存セーブがある場合の上書き確認はサーバー配線時に追加する
-      this.startNewGame();
+      if (getGameClient().hasSave === true) {
+        this.openOverwriteConfirm();
+        return;
+      }
+      this.request({ type: "new-game", options: newGameOptionsFromUrl() });
+      return;
+    }
+    if (id === "continue") {
+      this.request({ type: "continue" });
     }
   }
 
-  private startNewGame(): void {
-    this.menu.deactivate();
-    initializeRun(this.game);
+  /** 既存セーブがある場合の新規ゲーム上書き確認 */
+  private openOverwriteConfirm(): void {
+    this.menu?.deactivate();
+    this.confirm = new ConfirmDialog(this, this.uiLayer, {
+      message:
+        "すでに記録された夢がある。\n新しく始めると、次に宿で休んだとき、古い記録は上書きされる。\nそれでも新しい夢を見るか?",
+      yesLabel: "新しく始める",
+      noLabel: "やめる",
+      onResult: (yes) => {
+        this.confirm = null;
+        if (yes) {
+          this.request({ type: "new-game", options: newGameOptionsFromUrl() });
+        } else {
+          this.menu?.activate();
+        }
+      }
+    });
+  }
+
+  /** new-game / continue をサーバーへ要求し、snapshot での遷移を待つ */
+  private request(message: ClientMessage): void {
+    this.menu?.deactivate();
+    this.statusText.setText("");
+    this.requested = true;
+    if (!getGameClient().send(message)) {
+      // 未接続なら update() で接続確立後に再送する
+      this.pendingMessage = message;
+    }
+  }
+
+  private startExploration(): void {
+    this.requested = false;
+    this.pendingMessage = null;
+    // 前のプレイの未表示ダイアログを持ち越さない
+    clearDialogQueue();
+    this.menu?.deactivate();
     this.scene.start("exploration");
   }
 
@@ -87,6 +204,22 @@ export class TitleScene extends Phaser.Scene {
     const centerY = this.scale.height / 2;
     this.titleText.setPosition(centerX, centerY - 96);
     this.subtitleText.setPosition(centerX, centerY - 36);
-    this.menu.setPosition(centerX - 120, centerY + 48);
+    this.statusText.setPosition(centerX, centerY + 24);
+    this.menu?.setPosition(centerX - 120, centerY + 48);
+  }
+
+  /** E2E・デバッグ用にタイトル状態をDOMデータ属性へ反映する(#game要素) */
+  private syncDomState(): void {
+    const game = document.querySelector<HTMLDivElement>("#game");
+    if (game === null) {
+      return;
+    }
+    game.dataset["scene"] = "title";
+    game.dataset["hasSave"] = getGameClient().hasSave === true ? "1" : "0";
+    delete game.dataset["mapId"];
+    delete game.dataset["playerX"];
+    delete game.dataset["playerY"];
+    delete game.dataset["symbolCount"];
+    delete game.dataset["battleEnemy"];
   }
 }

@@ -2,10 +2,29 @@ import Phaser from "phaser";
 
 import "./style.css";
 
-import { connectToServer } from "./net/connection.js";
+import { enqueueDialog } from "./dialog-queue.js";
+import { GameClient, setGameClient } from "./net/game-client.js";
 import { BattleScene } from "./scenes/battle-scene.js";
 import { ExplorationScene } from "./scenes/exploration-scene.js";
 import { TitleScene } from "./scenes/title-scene.js";
+
+// サーバー正本のスナップショット駆動: 単一の GameClient を全シーンで共有する
+const connectionStatus = document.querySelector<HTMLParagraphElement>("#connection-status");
+const client = new GameClient({
+  url: "ws://127.0.0.1:3000/ws",
+  setStatusText: (text) => {
+    if (connectionStatus !== null) {
+      connectionStatus.textContent = text;
+    }
+  }
+});
+// dialog はシーン遷移(戦闘→探索など)を跨いで届き得るため、グローバルキューに積み
+// 探索シーンが表示可能なタイミングで順に表示する
+client.on("dialog", (dialog) => {
+  enqueueDialog(dialog);
+});
+setGameClient(client);
+client.connect();
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -21,5 +40,3 @@ new Phaser.Game({
   },
   scene: [TitleScene, ExplorationScene, BattleScene]
 });
-
-connectToServer();

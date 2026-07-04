@@ -1,48 +1,21 @@
 import Phaser from "phaser";
 
 import {
-  ENEMY_DISPLAY_NAMES,
   INITIAL_SKILL_IDS,
   ITEMS,
   SKILLS,
-  applyPartyWipe,
   battleCommandSchema,
-  createBattle,
   encounterMessage,
   isBattleUsable,
-  resolveTurn,
-  toPlayerProgress,
-  townMap,
   type BattleCommand,
-  type BattleEvent,
-  type BattleState,
-  type Direction,
   type EnemyId,
-  type EnemySymbolPlacement,
-  type ItemId,
-  type MapId,
-  type Position
+  type SnapshotView,
+  type ViewBattle
 } from "@dreaming-engine/shared";
 
-import { getRun, setRun } from "../game-state.js";
+import { getGameClient, type BattleEventsPayload, type GameClient } from "../net/game-client.js";
 import { GaugeBar } from "../ui/gauge-bar.js";
 import { MenuList } from "../ui/menu-list.js";
-
-/** 戦闘終了後に探索シーンへ戻るための情報 */
-export interface BattleReturnInfo {
-  mapId: MapId;
-  position: Position;
-  facing: Direction;
-  symbols: EnemySymbolPlacement[];
-  /** 交戦相手のシンボルの symbols 内インデックス(勝利時に除去する) */
-  symbolIndex: number;
-}
-
-export interface BattleSceneData {
-  enemyId: EnemyId;
-  seed: number;
-  returnTo: BattleReturnInfo;
-}
 
 /** 敵種別のプレースホルダーカラー(グラフィックはM5で差し替え) */
 const ENEMY_COLORS: Record<EnemyId, number> = {
@@ -54,22 +27,36 @@ const ENEMY_COLORS: Record<EnemyId, number> = {
 
 type BattleUiMode = "message" | "command" | "finished";
 
+type BattleEventView = BattleEventsPayload[number];
+
 /**
- * ターン制戦闘シーン。戦闘の解決はすべて shared の戦闘エンジンに委ね、
- * このシーンはコマンド入力とイベント列の逐次表示(スペース送り)だけを担う。
+ * ターン制戦闘シーン(サーバー正本)。コマンドは battle-command でサーバーへ送り、
+ * battle-events(1ターン分の解決結果)を逐次表示(スペース送り)する。
+ * ゲージ更新はイベントが運ぶ確定値を使い、戦闘継続中は snapshot の battle ビューで補正する。
+ * 戦闘終了(snapshot.mode==="exploration")で探索シーンへ戻る。
  */
 export class BattleScene extends Phaser.Scene {
-  private battle!: BattleState;
+  private client!: GameClient;
 
-  private sceneData!: BattleSceneData;
+  /** 直近の戦闘ビュー(コマンド可否判定・パネル補正用) */
+  private view!: ViewBattle;
+
+  /** 直近のスナップショット(インベントリ参照・終了判定用) */
+  private latestSnapshot!: SnapshotView;
 
   private mode: BattleUiMode = "message";
 
+  /** サーバーの battle-events 応答待ち(多重送信の防止) */
+  private awaiting = false;
+
   /** 表示待ちのイベント(1件ずつスペース送りで表示する) */
-  private eventQueue: BattleEvent[] = [];
+  private eventQueue: BattleEventView[] = [];
 
   /** イベント列をすべて表示し終えたときの遷移処理 */
   private afterMessages: (() => void) | null = null;
+
+  /** イベント表示中のMP表示値(action イベントの mpCost を反映する) */
+  private currentMp = 0;
 
   private messageText!: Phaser.GameObjects.Text;
 
@@ -91,22 +78,29 @@ export class BattleScene extends Phaser.Scene {
 
   private uiLayer!: Phaser.GameObjects.Container;
 
+  private unsubscribes: (() => void)[] = [];
+
   public constructor() {
     super("battle");
   }
 
-  public init(data: BattleSceneData): void {
-    this.sceneData = data;
+  public create(): void {
+    const client = getGameClient();
+    const snapshot = client.lastSnapshot;
+    if (snapshot === null || snapshot.battle === undefined) {
+      // 戦闘ビューなしで戦闘シーンへ来ることはない想定(防御的フォールバック)
+      this.scene.start(snapshot === null ? "title" : "exploration");
+      return;
+    }
+    this.client = client;
+    this.latestSnapshot = snapshot;
+    this.view = snapshot.battle;
     this.mode = "message";
+    this.awaiting = false;
     this.eventQueue = [];
     this.afterMessages = null;
     this.subMenu = null;
-    this.pendingDrops = [];
-  }
-
-  public create(): void {
-    const run = getRun(this);
-    this.battle = createBattle(run.progress, this.sceneData.enemyId, this.sceneData.seed);
+    this.currentMp = this.view.player.mp;
 
     this.cameras.main.setBackgroundColor("#12141c");
     this.uiLayer = this.add.container(0, 0);
@@ -118,8 +112,34 @@ export class BattleScene extends Phaser.Scene {
     this.setupKeys();
     this.syncDomState();
 
+    this.unsubscribes = [
+      client.on("battle-events", (events) => {
+        this.onBattleEvents(events);
+      }),
+      client.on("snapshot", (view) => {
+        this.latestSnapshot = view;
+        if (view.battle !== undefined) {
+          this.view = view.battle;
+        }
+      }),
+      client.on("server-error", (error) => {
+        // コマンドがサーバーに受理されなかった(通信・状態不整合)。メニューへ戻す
+        this.awaiting = false;
+        this.showMessage(error.message);
+        this.afterMessages = () => {
+          this.openCommandMenu();
+        };
+      })
+    ];
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      for (const unsubscribe of this.unsubscribes) {
+        unsubscribe();
+      }
+      this.unsubscribes = [];
+    });
+
     // 開幕: 「◯◯が現れた。」→ スペースでコマンド選択へ
-    this.showMessage(encounterMessage(this.sceneData.enemyId));
+    this.showMessage(encounterMessage(this.view.enemyId));
     this.afterMessages = () => {
       this.openCommandMenu();
     };
@@ -134,10 +154,10 @@ export class BattleScene extends Phaser.Scene {
   private buildEnemyView(): void {
     const cx = this.scale.width / 2;
     const cy = this.scale.height * 0.36;
-    const radius = this.battle.isBoss ? 96 : 56;
+    const radius = this.view.isBoss ? 96 : 56;
 
     this.enemySprite = this.add
-      .circle(cx, cy, radius, ENEMY_COLORS[this.sceneData.enemyId])
+      .circle(cx, cy, radius, ENEMY_COLORS[this.view.enemyId])
       .setStrokeStyle(3, 0x0b0d12);
     this.tweens.add({
       targets: this.enemySprite,
@@ -149,7 +169,7 @@ export class BattleScene extends Phaser.Scene {
     });
 
     this.add
-      .text(cx, cy - radius - 40, ENEMY_DISPLAY_NAMES[this.sceneData.enemyId], {
+      .text(cx, cy - radius - 40, this.view.enemyName, {
         color: "#f1eee4",
         fontFamily: "serif",
         fontSize: "22px"
@@ -162,8 +182,8 @@ export class BattleScene extends Phaser.Scene {
       width: 220,
       label: "HP",
       barColor: 0xb0524f,
-      max: this.battle.enemy.maxHP,
-      value: this.battle.enemy.hp
+      max: this.view.enemy.maxHp,
+      value: this.view.enemy.hp
     });
   }
 
@@ -192,8 +212,8 @@ export class BattleScene extends Phaser.Scene {
       width: width - 28,
       label: "HP",
       barColor: 0x6fa06b,
-      max: this.battle.player.maxHP,
-      value: this.battle.player.hp
+      max: this.view.player.maxHp,
+      value: this.view.player.hp
     });
     this.playerMpBar = new GaugeBar(this, this.uiLayer, {
       x: x + 14,
@@ -201,16 +221,18 @@ export class BattleScene extends Phaser.Scene {
       width: width - 28,
       label: "MP",
       barColor: 0x5c7cb0,
-      max: this.battle.player.maxMP,
-      value: this.battle.player.mp
+      max: this.view.player.maxMp,
+      value: this.view.player.mp
     });
     this.updatePlayerPanel();
   }
 
+  /** 直近の戦闘ビューでプレイヤーパネルを補正する(ターン確定後に呼ぶ) */
   private updatePlayerPanel(): void {
-    this.playerLevelText.setText(`旅人  Lv${this.battle.player.level}`);
-    this.playerHpBar.setValue(this.battle.player.hp, this.battle.player.maxHP);
-    this.playerMpBar.setValue(this.battle.player.mp, this.battle.player.maxMP);
+    this.playerLevelText.setText(`旅人  Lv${this.view.player.level}`);
+    this.playerHpBar.setValue(this.view.player.hp, this.view.player.maxHp);
+    this.playerMpBar.setValue(this.view.player.mp, this.view.player.maxMp);
+    this.currentMp = this.view.player.mp;
   }
 
   private buildMessageWindow(): void {
@@ -250,7 +272,7 @@ export class BattleScene extends Phaser.Scene {
         { id: "attack", label: "たたかう" },
         { id: "skill", label: "スキル" },
         { id: "item", label: "どうぐ" },
-        { id: "flee", label: "にげる", disabled: this.battle.isBoss }
+        { id: "flee", label: "にげる", disabled: this.view.isBoss }
       ],
       x: 24,
       y: this.scale.height - 264,
@@ -268,7 +290,7 @@ export class BattleScene extends Phaser.Scene {
     }
     keyboard.resetKeys();
     const advance = (): void => {
-      if (this.mode === "message") {
+      if (this.mode === "message" && !this.awaiting) {
         this.advanceMessage();
       }
     };
@@ -303,7 +325,7 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /** 表示中イベントの内容をゲージ・演出へ反映する(値はイベントが運ぶ確定値を使う) */
-  private applyEventToView(event: BattleEvent): void {
+  private applyEventToView(event: BattleEventView): void {
     switch (event.type) {
       case "damage":
       case "status-tick":
@@ -324,7 +346,8 @@ export class BattleScene extends Phaser.Scene {
         break;
       case "action":
         if (event.actor === "player" && event.mpCost !== undefined) {
-          this.playerMpBar.setValue(this.battle.player.mp);
+          this.currentMp = Math.max(0, this.currentMp - event.mpCost);
+          this.playerMpBar.setValue(this.currentMp);
         }
         break;
       case "phase-change":
@@ -333,11 +356,7 @@ export class BattleScene extends Phaser.Scene {
         this.cameras.main.flash(300, 40, 24, 32);
         break;
       case "victory":
-        this.pendingDrops = [...event.drops];
-        break;
       case "level-up":
-        this.updatePlayerPanel();
-        break;
       case "defeat":
       case "flee":
       case "item-used":
@@ -358,10 +377,11 @@ export class BattleScene extends Phaser.Scene {
   // ----------------------------------------------------------------------
 
   private openCommandMenu(): void {
-    if (this.battle.outcome !== "ongoing") {
+    if (this.latestSnapshot.mode !== "battle") {
       this.finishBattle();
       return;
     }
+    this.updatePlayerPanel();
     this.mode = "command";
     this.advanceHint.setVisible(false);
     this.messageText.setText("どうする?");
@@ -394,7 +414,7 @@ export class BattleScene extends Phaser.Scene {
       return {
         id: skillId,
         label: `${skill.name}(MP${skill.mpCost})`,
-        disabled: this.battle.player.mp < skill.mpCost
+        disabled: this.view.player.mp < skill.mpCost
       };
     });
     this.openSubMenu(items, (skillId) => {
@@ -404,8 +424,8 @@ export class BattleScene extends Phaser.Scene {
 
   private openItemMenu(): void {
     this.commandMenu.deactivate();
-    const run = getRun(this);
-    const usable = run.inventory.filter((itemId) => isBattleUsable(itemId));
+    // 所持品はサーバー正本(直近snapshot)から。消費もサーバーが確定する
+    const usable = this.latestSnapshot.inventory.filter((stack) => isBattleUsable(stack.itemId));
     if (usable.length === 0) {
       this.showMessage("使えるどうぐを持っていない。");
       this.afterMessages = () => {
@@ -413,14 +433,9 @@ export class BattleScene extends Phaser.Scene {
       };
       return;
     }
-    // 同一アイテムはまとめて個数表示する
-    const counts = new Map<ItemId, number>();
-    for (const itemId of usable) {
-      counts.set(itemId, (counts.get(itemId) ?? 0) + 1);
-    }
-    const items = [...counts.entries()].map(([itemId, count]) => ({
-      id: itemId,
-      label: `${ITEMS[itemId].name} ×${count}`
+    const items = usable.map((stack) => ({
+      id: stack.itemId,
+      label: `${ITEMS[stack.itemId].name} ×${stack.count}`
     }));
     this.openSubMenu(items, (itemId) => {
       this.executeCommand({ kind: "item", itemId });
@@ -459,16 +474,30 @@ export class BattleScene extends Phaser.Scene {
   }
 
   // ----------------------------------------------------------------------
-  // ターン解決
+  // ターン解決(サーバーへ送信し、battle-events を受けて表示する)
   // ----------------------------------------------------------------------
 
-  /** UI入力(メニューID等の外部入力)をzodで検証してからターンを解決する */
+  /** UI入力(メニューID等の外部入力)をzodで検証してからサーバーへ送る */
   private executeCommand(raw: unknown): void {
     this.commandMenu.deactivate();
     const command: BattleCommand = battleCommandSchema.parse(raw);
-    const result = resolveTurn(this.battle, command);
+    this.mode = "message";
+    this.advanceHint.setVisible(false);
+    this.awaiting = this.client.send({ type: "battle-command", command });
+    if (!this.awaiting) {
+      // 未接続。メニューへ戻して再試行できるようにする
+      this.showMessage("機関との糸が途切れている……(接続待ち)");
+      this.afterMessages = () => {
+        this.openCommandMenu();
+      };
+    }
+  }
 
-    const first = result.events[0];
+  /** 1ターン分の解決結果。逐次表示を開始する */
+  private onBattleEvents(events: BattleEventsPayload): void {
+    this.awaiting = false;
+
+    const first = events[0];
     if (first !== undefined && first.type === "command-rejected") {
       // ターンは進んでいない。メッセージ表示後にコマンド選択へ戻す
       this.showMessage(first.message);
@@ -478,8 +507,7 @@ export class BattleScene extends Phaser.Scene {
       return;
     }
 
-    this.battle = result.state;
-    this.eventQueue = [...result.events];
+    this.eventQueue = [...events];
     this.afterMessages = () => {
       this.openCommandMenu();
     };
@@ -488,86 +516,18 @@ export class BattleScene extends Phaser.Scene {
     this.mode = "message";
     this.advanceHint.setVisible(true);
     this.advanceMessage();
-
-    // どうぐは実際に使用された場合のみ所持品から消費する
-    // (敵の先手で倒れた場合などは item-used イベントが発生せず、消費しない)
-    if (command.kind === "item" && result.events.some((e) => e.type === "item-used")) {
-      const run = getRun(this);
-      const index = run.inventory.indexOf(command.itemId);
-      if (index >= 0) {
-        run.inventory.splice(index, 1);
-        setRun(this, run);
-      }
-    }
   }
 
   // ----------------------------------------------------------------------
-  // 戦闘終了
+  // 戦闘終了(snapshot.mode==="exploration" を検知して探索へ戻る)
   // ----------------------------------------------------------------------
 
   private finishBattle(): void {
     this.mode = "finished";
-    const run = getRun(this);
-    const returnTo = this.sceneData.returnTo;
-
-    if (this.battle.outcome === "victory") {
-      run.progress = toPlayerProgress(this.battle.player);
-      // ドロップ品を所持品へ(所持上限はM3で導入)
-      for (const event of this.collectVictoryDrops()) {
-        run.inventory.push(event);
-      }
-      setRun(this, run);
-      const remaining = returnTo.symbols.filter((_, i) => i !== returnTo.symbolIndex);
-      this.returnToExploration(returnTo.mapId, returnTo.position, returnTo.facing, remaining);
-      return;
-    }
-
-    if (this.battle.outcome === "fled") {
-      run.progress = toPlayerProgress(this.battle.player);
-      setRun(this, run);
-      this.returnToExploration(returnTo.mapId, returnTo.position, returnTo.facing, returnTo.symbols);
-      return;
-    }
-
-    // 全滅: ゴールド半減+全回復し、街の宿屋前で目覚める(日送りはM3のゲーム内時間で導入)
-    const wiped = applyPartyWipe(run.progress);
-    run.progress = wiped.progress;
-    setRun(this, run);
-
-    const innkeeper = townMap.npcs.find((npc) => npc.id === "innkeeper");
-    const wakePosition: Position =
-      innkeeper !== undefined
-        ? { x: innkeeper.position.x, y: innkeeper.position.y + 1 }
-        : { x: 10, y: 10 };
-
-    this.messageText.setText(
-      `……悪夢から覚めた。灯宿の寝台の上だった。(${wiped.goldLost}ゴールドを夢に置き忘れた)`
-    );
-    this.advanceHint.setVisible(true);
-    this.mode = "message";
-    this.eventQueue = [];
-    this.afterMessages = () => {
-      this.returnToExploration("town", wakePosition, "up", undefined);
-    };
-  }
-
-  /** 勝利イベントからドロップ品を集める(finishBattle時点でeventQueueは消化済みのためstateから) */
-  private collectVictoryDrops(): ItemId[] {
-    // resolveTurn のイベントは消化済みなので、直近の victory イベントのドロップを控えておく
-    return this.pendingDrops;
-  }
-
-  private pendingDrops: ItemId[] = [];
-
-  private returnToExploration(
-    mapId: MapId,
-    position: Position,
-    facing: Direction,
-    symbols: EnemySymbolPlacement[] | undefined
-  ): void {
     this.cameras.main.fadeOut(220, 11, 13, 18);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start("exploration", { mapId, position, facing, symbols });
+      // 全滅・勝利の後日談(dialog)は探索シーンがキューから表示する
+      this.scene.start("exploration");
     });
   }
 
@@ -576,7 +536,7 @@ export class BattleScene extends Phaser.Scene {
     const game = document.querySelector<HTMLDivElement>("#game");
     if (game !== null) {
       game.dataset["scene"] = "battle";
-      game.dataset["battleEnemy"] = this.sceneData.enemyId;
+      game.dataset["battleEnemy"] = this.view.enemyId;
     }
   }
 }
