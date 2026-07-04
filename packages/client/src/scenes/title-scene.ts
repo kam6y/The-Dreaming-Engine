@@ -5,6 +5,7 @@ import { GAME_TITLE, type ClientMessage } from "@dreaming-engine/shared";
 import { clearDialogQueue } from "../dialog-queue.js";
 import { getGameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { fitCover } from "../ui/cover-image.js";
 import { MenuList } from "../ui/menu-list.js";
 import { newGameOptionsFromUrl } from "../url-flags.js";
 
@@ -28,6 +29,12 @@ export class TitleScene extends Phaser.Scene {
 
   private uiLayer!: Phaser.GameObjects.Container;
 
+  /** タイトル背景画像(未整備時は null=黒背景のまま) */
+  private background: Phaser.GameObjects.Image | null = null;
+
+  /** 背景の上に敷く暗幕(タイトル文字の可読性確保) */
+  private veil: Phaser.GameObjects.Rectangle | null = null;
+
   private confirm: ConfirmDialog | null = null;
 
   /** 接続確立前に選択された場合に接続後へ持ち越す送信待ちメッセージ */
@@ -44,6 +51,16 @@ export class TitleScene extends Phaser.Scene {
 
   public create(): void {
     this.cameras.main.setBackgroundColor("#000000");
+    // 背景画像(あれば)を最背面に敷く。可読性のため上に薄い暗幕を重ねる
+    this.background = null;
+    this.veil = null;
+    if (this.textures.exists("title-background")) {
+      this.background = this.add.image(0, 0, "title-background").setOrigin(0.5).setDepth(-10);
+      this.veil = this.add
+        .rectangle(0, 0, this.scale.width, this.scale.height, 0x0b0d12, 0.45)
+        .setOrigin(0, 0)
+        .setDepth(-9);
+    }
     // メニュー・確認ダイアログはタイトル文字より前面に描画する
     this.uiLayer = this.add.container(0, 0).setDepth(10);
     this.confirm = null;
@@ -201,6 +218,10 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private layout(): void {
+    if (this.background !== null) {
+      fitCover(this.background, this.scale.width, this.scale.height);
+    }
+    this.veil?.setSize(this.scale.width, this.scale.height);
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
     this.titleText.setPosition(centerX, centerY - 96);

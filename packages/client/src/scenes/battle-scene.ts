@@ -14,16 +14,21 @@ import {
 } from "@dreaming-engine/shared";
 
 import { getGameClient, type BattleEventsPayload, type GameClient } from "../net/game-client.js";
+import { fitContain, fitCover } from "../ui/cover-image.js";
 import { GaugeBar } from "../ui/gauge-bar.js";
 import { MenuList } from "../ui/menu-list.js";
 
-/** 敵種別のプレースホルダーカラー(グラフィックはM5で差し替え) */
+/** 敵種別のプレースホルダーカラー(敵グラフィック未整備時のフォールバック) */
 const ENEMY_COLORS: Record<EnemyId, number> = {
   "mist-wolf": 0x9aa7b8,
   "candle-eater": 0xc9a25c,
   "creaking-doll": 0x8a7f8f,
   "dream-eater": 0x5c2431
 };
+
+/** 敵グラフィックの表示スロット高さ(通常/ボス)。画像は縦横比維持で収める */
+const ENEMY_SLOT_HEIGHT = 220;
+const BOSS_SLOT_HEIGHT = 340;
 
 type BattleUiMode = "message" | "command" | "finished";
 
@@ -70,7 +75,8 @@ export class BattleScene extends Phaser.Scene {
 
   private advanceHint!: Phaser.GameObjects.Text;
 
-  private enemySprite!: Phaser.GameObjects.Arc;
+  /** 敵の表示物。グラフィックがあれば Image、無ければ Arc(円)のフォールバック */
+  private enemySprite!: Phaser.GameObjects.Image | Phaser.GameObjects.Arc;
 
   private enemyHpBar!: GaugeBar;
 
@@ -112,6 +118,7 @@ export class BattleScene extends Phaser.Scene {
     this.currentMp = this.view.player.mp;
 
     this.cameras.main.setBackgroundColor("#12141c");
+    this.buildBattleBackground();
     this.uiLayer = this.add.container(0, 0);
 
     this.buildEnemyView();
@@ -166,17 +173,39 @@ export class BattleScene extends Phaser.Scene {
   // UI構築
   // ----------------------------------------------------------------------
 
+  /** 戦闘背景(場所に応じて field/dungeon)。未整備時は単色のまま */
+  private buildBattleBackground(): void {
+    const mapId = this.latestSnapshot.location.mapId;
+    const key = mapId.startsWith("dungeon") ? "battle-dungeon" : "battle-field";
+    if (this.textures.exists(key)) {
+      const bg = this.add.image(0, 0, key).setOrigin(0.5).setDepth(-10);
+      fitCover(bg, this.scale.width, this.scale.height);
+      // 敵・UIの視認性のため薄い暗幕を重ねる
+      this.add
+        .rectangle(0, 0, this.scale.width, this.scale.height, 0x0b0d12, 0.4)
+        .setOrigin(0, 0)
+        .setDepth(-9);
+    }
+  }
+
   private buildEnemyView(): void {
     const cx = this.scale.width / 2;
     const cy = this.scale.height * 0.36;
     const radius = this.view.isBoss ? 96 : 56;
+    const slotHeight = this.view.isBoss ? BOSS_SLOT_HEIGHT : ENEMY_SLOT_HEIGHT;
 
-    this.enemySprite = this.add
-      .circle(cx, cy, radius, ENEMY_COLORS[this.view.enemyId])
-      .setStrokeStyle(3, 0x0b0d12);
+    if (this.textures.exists(this.view.enemyId)) {
+      const sprite = this.add.image(cx, cy, this.view.enemyId).setOrigin(0.5);
+      fitContain(sprite, slotHeight, slotHeight);
+      this.enemySprite = sprite;
+    } else {
+      this.enemySprite = this.add
+        .circle(cx, cy, radius, ENEMY_COLORS[this.view.enemyId])
+        .setStrokeStyle(3, 0x0b0d12);
+    }
     this.tweens.add({
       targets: this.enemySprite,
-      scale: 1.05,
+      scale: this.enemySprite.scale * 1.04,
       duration: 1400,
       yoyo: true,
       repeat: -1,
@@ -366,7 +395,13 @@ export class BattleScene extends Phaser.Scene {
         }
         break;
       case "phase-change":
-        // 形態変化: 靄が剥がれる暗示として一瞬白く明滅させる
+        // 形態変化: 靄が剥がれる暗示として一瞬白く明滅させ、第2形態グラフィックへ差し替える
+        if (
+          this.enemySprite instanceof Phaser.GameObjects.Image &&
+          this.textures.exists("dream-eater-phase2")
+        ) {
+          this.enemySprite.setTexture("dream-eater-phase2");
+        }
         this.flash(this.enemySprite);
         this.cameras.main.flash(300, 40, 24, 32);
         break;
@@ -383,7 +418,7 @@ export class BattleScene extends Phaser.Scene {
     }
   }
 
-  private flash(target: Phaser.GameObjects.Arc): void {
+  private flash(target: Phaser.GameObjects.Image | Phaser.GameObjects.Arc): void {
     this.tweens.add({ targets: target, alpha: 0.25, duration: 70, yoyo: true, repeat: 1 });
   }
 

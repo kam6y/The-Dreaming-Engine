@@ -7,11 +7,20 @@ import type {
   SnapshotView
 } from "@dreaming-engine/shared";
 
+import { fitContain, fitCover } from "./cover-image.js";
 import { MenuList } from "./menu-list.js";
 import { TextInputBox } from "./text-input-box.js";
 import { TypewriterText } from "./typewriter-text.js";
 
 type ConversationInteraction = Extract<ActiveInteraction, { kind: "conversation" }>;
+
+/** NPC → 会話屋内背景アセット id(未整備時はプレースホルダー暗幕のまま) */
+const INTERIOR_BY_NPC: Record<string, string> = {
+  informant: "tavern-interior",
+  priest: "chapel-interior",
+  innkeeper: "inn-interior",
+  merchant: "shop-interior"
+};
 
 export interface ConversationOverlayOptions {
   interaction: ConversationInteraction;
@@ -99,8 +108,32 @@ export class ConversationOverlay {
     this.panelX = Math.round((scene.scale.width - PANEL_WIDTH) / 2);
     this.panelY = scene.scale.height - PANEL_HEIGHT - 24;
 
+    const screenW = scene.scale.width;
+    const screenH = scene.scale.height;
+
+    // 会話屋内背景(あれば)を最背面に。探索マップを覆い、可読性のため暗幕を重ねる
+    const scenery: Phaser.GameObjects.GameObject[] = [];
+    const interiorKey = INTERIOR_BY_NPC[this.interaction.npcId];
+    if (interiorKey !== undefined && scene.textures.exists(interiorKey)) {
+      const interior = scene.add.image(0, 0, interiorKey).setOrigin(0.5);
+      fitCover(interior, screenW, screenH);
+      scenery.push(interior);
+      scenery.push(
+        scene.add.rectangle(0, 0, screenW, screenH, 0x0b0d12, 0.42).setOrigin(0, 0)
+      );
+    }
+    // NPC 立ち絵(あれば)を左手前に立たせる(下部の会話パネルが下半身を覆う VN 風)
+    const portraitKey = `npc-${this.interaction.npcId}`;
+    if (scene.textures.exists(portraitKey)) {
+      const portrait = scene.add
+        .image(Math.round(screenW * 0.27), screenH + 8, portraitKey)
+        .setOrigin(0.5, 1);
+      fitContain(portrait, screenW * 0.5, screenH * 0.92);
+      scenery.push(portrait);
+    }
+
     const background = scene.add
-      .rectangle(this.panelX, this.panelY, PANEL_WIDTH, PANEL_HEIGHT, 0x0b0d12, 0.96)
+      .rectangle(this.panelX, this.panelY, PANEL_WIDTH, PANEL_HEIGHT, 0x0b0d12, 0.9)
       .setOrigin(0, 0)
       .setStrokeStyle(2, 0x6b6350);
 
@@ -113,12 +146,6 @@ export class ConversationOverlay {
 
     // 発話本文(左カラム。メニュー幅を除いた領域に折り返す)
     const bodyWidth = PANEL_WIDTH - MENU_WIDTH - 72;
-    this.utterance = new TypewriterText(scene, parentLayer, {
-      x: this.panelX + 24,
-      y: this.panelY + 56,
-      width: bodyWidth,
-      fontSize: "18px"
-    });
 
     // 提案の内容(あるときだけ表示)
     this.proposalText = scene.add.text(this.panelX + 24, this.panelY + 168, "", {
@@ -138,12 +165,22 @@ export class ConversationOverlay {
     });
 
     this.container = scene.add.container(0, 0, [
+      ...scenery,
       background,
       this.headerText,
       this.proposalText,
       this.hintText
     ]);
     parentLayer.add(this.container);
+
+    // 発話テキストは container(背景パネル・立ち絵)より後に parentLayer へ足し、
+    // 必ずパネルの前面に描画されるようにする(TypewriterText は自身を parentLayer に add する)
+    this.utterance = new TypewriterText(scene, parentLayer, {
+      x: this.panelX + 24,
+      y: this.panelY + 56,
+      width: bodyWidth,
+      fontSize: "18px"
+    });
 
     this.updateProposal();
     this.rebuildMenu();
