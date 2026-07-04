@@ -61,14 +61,19 @@ interface SessionContext {
   advance: (ms: number) => void;
 }
 
-function createSession(options?: { seed?: number; noSymbols?: boolean }): SessionContext {
+function createSession(options?: {
+  seed?: number;
+  noSymbols?: boolean;
+  aiMode?: "mock" | "live";
+}): SessionContext {
   const store = new FakeSaveStore();
   let now = 0;
   const session = new GameSession({
     saveStore: store,
     clock: () => now,
     seed: options?.seed ?? 1,
-    noSymbols: options?.noSymbols ?? true
+    noSymbols: options?.noSymbols ?? true,
+    ...(options?.aiMode !== undefined ? { aiMode: options.aiMode } : {})
   });
   return {
     session,
@@ -291,6 +296,51 @@ describe("つづきから", () => {
     expect(view.day).toBe(5);
     expect(view.player.gold).toBe(77);
     expect(view.location.mapId).toBe("field");
+  });
+});
+
+// ===========================================================================
+// メインクエスト段階のスナップショット掲載・startLevel 加速フラグ(M6)
+// ===========================================================================
+
+describe("メインクエスト段階(スナップショット)", () => {
+  it("新規ゲームの snapshot は arrival を載せる", async () => {
+    const { session } = createSession();
+    const view = firstSnapshot(await session.handle({ type: "new-game" }));
+    expect(view.mainQuestStage).toBe("arrival");
+  });
+
+  it("セーブの段階をロード後の snapshot に反映する", async () => {
+    const { session, store } = createSession();
+    const saved = fieldState();
+    saved.mainQuestStage = "rift-revealed";
+    store.loadResult = { ok: true, state: saved };
+    const view = firstSnapshot(await session.handle({ type: "continue" }));
+    expect(view.mainQuestStage).toBe("rift-revealed");
+  });
+});
+
+describe("startLevel 加速フラグ", () => {
+  it("mock ではプレイヤーを指定レベルで開始する(HP/MP=statsForLevel・XP=0)", async () => {
+    const { session } = createSession(); // 既定 aiMode=mock
+    const view = firstSnapshot(await session.handle({ type: "new-game", options: { startLevel: 6 } }));
+    const lv6 = statsForLevel(6);
+    expect(view.player.level).toBe(6);
+    expect(view.player.xp).toBe(0);
+    expect(view.player.hp).toBe(lv6.maxHP);
+    expect(view.player.maxHp).toBe(lv6.maxHP);
+    expect(view.player.mp).toBe(lv6.maxMP);
+    expect(view.player.maxMp).toBe(lv6.maxMP);
+    // ゴールドは初期値のまま(加速はレベルのみ)
+    expect(view.player.gold).toBe(INITIAL_GOLD);
+    expect(mustState(session).player.level).toBe(6);
+  });
+
+  it("live では startLevel を無視して Lv1 開始を守る", async () => {
+    const { session } = createSession({ aiMode: "live" });
+    const view = firstSnapshot(await session.handle({ type: "new-game", options: { startLevel: 6 } }));
+    expect(view.player.level).toBe(1);
+    expect(view.player.hp).toBe(statsForLevel(1).maxHP);
   });
 });
 

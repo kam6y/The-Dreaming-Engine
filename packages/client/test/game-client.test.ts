@@ -123,6 +123,7 @@ function sampleView(): SnapshotView {
   const state = createNewGameState();
   return {
     mode: "exploration",
+    mainQuestStage: state.mainQuestStage,
     player: {
       level: state.player.level,
       xp: state.player.xp,

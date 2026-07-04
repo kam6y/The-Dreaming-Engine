@@ -9,11 +9,12 @@ import {
 } from "./combat/battle.js";
 import { enemySymbolPlacementSchema } from "./combat/encounter.js";
 import { itemIdSchema } from "./combat/items.js";
+import { MAX_LEVEL } from "./combat/stats.js";
 import { statusStateSchema } from "./combat/status.js";
 import { gameLocationSchema } from "./game-state.js";
 import { directionSchema } from "./geometry.js";
 import { enemyIdSchema, npcIdSchema } from "./ids.js";
-import { subQuestStatusSchema } from "./quests.js";
+import { mainQuestStageSchema, subQuestStatusSchema } from "./quests.js";
 
 export const GAME_TITLE = "The Dreaming Engine";
 
@@ -146,6 +147,13 @@ export type SubQuestView = z.infer<typeof subQuestViewSchema>;
 export const snapshotViewSchema = z.object({
   /** 探索 or 戦闘 */
   mode: z.enum(["exploration", "battle"]),
+  /**
+   * メインクエスト段階(毎スナップショットに載せる)。クライアント(M6-B)は
+   * これでオープニング要否・ボスマーカーの表示可否・ボス撃破後のエンディング遷移を判定する。
+   * ボスマーカー表示: rift-revealed で描画・戦闘可。arrival は接触時に司祭誘導・
+   * dream-eater-defeated 以降は非アクティブ(描画対象から外す)。
+   */
+  mainQuestStage: mainQuestStageSchema,
   player: viewPlayerSchema,
   /** ゲーム内日付(1日目〜) */
   day: z.number().int().positive(),
@@ -184,10 +192,15 @@ export const clientPingMessageSchema = z.object({
   sentAt: z.number().int().nonnegative()
 });
 
-/** 新規ゲーム開始オプション(E2E/デバッグ用のシード固定・シンボル無効化) */
+/**
+ * 新規ゲーム開始オプション(E2E/デバッグ用のシード固定・シンボル無効化・開始レベル)。
+ * startLevel はテスト加速用で、サーバーは mock(非 live)時のみ尊重する
+ * (通しプレイ E2E がボス(推奨 Lv5-6)へ到達して勝つための加速。live では無視)。
+ */
 export const newGameOptionsSchema = z.object({
   seed: z.number().int().optional(),
-  noSymbols: z.boolean().optional()
+  noSymbols: z.boolean().optional(),
+  startLevel: z.number().int().min(1).max(MAX_LEVEL).optional()
 });
 
 export const clientNewGameMessageSchema = z.object({

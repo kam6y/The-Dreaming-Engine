@@ -40,7 +40,8 @@ export function createDefaultSession(env: NodeJS.ProcessEnv): GameSession {
 
   const aiConfig = loadAiConfig();
   const clock = (): number => Date.now();
-  const dreamMaster = createDreamMaster(resolveAiMode(env), aiConfig);
+  const aiMode = resolveAiMode(env);
+  const dreamMaster = createDreamMaster(aiMode, aiConfig);
   const executor = new AiTurnExecutor({ dreamMaster, config: aiConfig });
   const gatekeeper = new AiFlowGatekeeper({
     executor,
@@ -55,7 +56,8 @@ export function createDefaultSession(env: NodeJS.ProcessEnv): GameSession {
     ...(seed !== undefined ? { seed } : {}),
     noSymbols,
     gatekeeper,
-    playerInputMaxLength: aiConfig.playerInputMaxLength
+    playerInputMaxLength: aiConfig.playerInputMaxLength,
+    aiMode
   });
 }
 

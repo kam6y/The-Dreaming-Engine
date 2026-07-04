@@ -64,6 +64,7 @@ import {
 
 import type { AiFlowGatekeeper } from "../ai/flow-control/index.js";
 import type { StateChangeEffect } from "../ai/flow-control/turn-executor.js";
+import type { AiMode } from "../ai/mode.js";
 import type { PersistentStateContext } from "../ai/tool-validation/types.js";
 import { DEFAULT_PLAYER_INPUT_MAX_LENGTH, sanitizePlayerInput } from "../ai/input-wall.js";
 import { applyStateChangeEffect } from "./ai-effects.js";
@@ -98,6 +99,12 @@ export interface GameSessionDeps {
   playerInputMaxLength?: number;
   /** 機密マスクの env(既定 process.env)。テストで注入可能 */
   maskEnv?: NodeJS.ProcessEnv;
+  /**
+   * AI モード(resolveAiMode(env) の結果)。既定 mock。
+   * new-game の startLevel 加速フラグを **live では無視** するゲートに使う
+   * (テスト実行時の進行加速は防御弱体化にあたらない: ai-integration.md「レート・コスト保護」)。
+   */
+  aiMode?: AiMode;
 }
 
 type Mode = "exploration" | "battle";
@@ -153,6 +160,9 @@ export class GameSession {
   /** 機密マスクの env(会話履歴の永続化前マスクに使う) */
   private readonly maskEnv: NodeJS.ProcessEnv;
 
+  /** AI モード(startLevel 加速フラグの live 無効化ゲートに使う) */
+  private readonly aiMode: AiMode;
+
   /** 提案サブクエストの id 採番カウンタ(プロセス内で単調増加。ロード時に既存 id を跨いで補正) */
   private aiQuestSeq = 0;
 
@@ -167,6 +177,7 @@ export class GameSession {
     this.gatekeeper = deps.gatekeeper ?? null;
     this.playerInputMaxLength = deps.playerInputMaxLength ?? DEFAULT_PLAYER_INPUT_MAX_LENGTH;
     this.maskEnv = deps.maskEnv ?? process.env;
+    this.aiMode = deps.aiMode ?? "mock";
   }
 
   // =========================================================================
@@ -220,17 +231,41 @@ export class GameSession {
   // 新規ゲーム / つづきから
   // =========================================================================
 
-  private newGame(options?: { seed?: number | undefined; noSymbols?: boolean | undefined }): ServerMessage[] {
+  private newGame(options?: {
+    seed?: number | undefined;
+    noSymbols?: boolean | undefined;
+    startLevel?: number | undefined;
+  }): ServerMessage[] {
     const seed = options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0);
     this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
     this.rng = createRng(seed);
     this.state = createNewGameState();
+    // テスト加速: startLevel(mock 限定)。live では無視して通常の Lv1 開始を守る
+    if (options?.startLevel !== undefined && this.aiMode !== "live") {
+      this.applyStartLevel(options.startLevel);
+    }
     this.syncQuestSeq();
     this.resetRuntime();
     this.activeSince = this.clock();
     this.enterCurrentMap();
     // 新規ゲームは既存セーブに触れない(最初の宿泊セーブで自然に上書きされる)
     return [this.snapshotMsg()];
+  }
+
+  /**
+   * テスト加速フラグ: プレイヤーを指定レベルで開始させる(HP/MP は statsForLevel、
+   * XP は当該レベル到達直後の 0、ゴールドは初期値のまま)。mock 限定で newGame が呼ぶ。
+   */
+  private applyStartLevel(startLevel: number): void {
+    const state = this.requireState();
+    const stats = statsForLevel(startLevel);
+    state.player = {
+      ...state.player,
+      level: startLevel,
+      xp: 0,
+      hp: stats.maxHP,
+      mp: stats.maxMP
+    };
   }
 
   private async continueGame(): Promise<ServerMessage[]> {
@@ -958,6 +993,7 @@ export class GameSession {
 
     const base: SnapshotView = {
       mode: this.mode,
+      mainQuestStage: state.mainQuestStage,
       player: {
         level: state.player.level,
         xp: state.player.xp,
