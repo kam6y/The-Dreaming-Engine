@@ -225,3 +225,50 @@
   最新ドキュメントを必ず確認する。`ai-integration.md`と`ai-guardrails.md`を精読し、
   ツール検証層(純TS+ユニットテスト)・DreamMaster/MockDreamMasterをsubagentへ委譲、
   会話UI(自由入力+選択肢・疑似ストリーミング)とクエストジャーナルUIはオーケストレーターが実装
+
+## [9] 2026-07-04 M4着手: AI基盤・純ロジックエンジン・6ツール検証層(M4-A/M4-B完了)
+
+- やったこと(M4はA〜Gに分割。本エントリはA・Bと会話UI部品の先行分):
+  - M4-A(subagent実装・コミット8ecafdb): AI基盤。贈答/hunt/fetch/street-eventの
+    ホワイトリスト列挙(`shared/src/ai/`)、config(`server/config/ai.json`+loader)、
+    AI_MODEフェイルセーフ(`mode.ts`: 非liveは全てmock/テスト下のliveは起動時エラー)、
+    機密マスク・監査ログ・入力壁・出力壁(`checkDisplayText`)・レートリミッタ(テスト59件)
+  - 会話UI部品の先行実装(オーケストレーター・コミット8b2f363): TypewriterText
+    (検証済み全文の疑似ストリーミング)、TextInputBox(IME対応の自由入力。maxLength200・
+    Phaserキーボード停止でスペース/矢印を入力欄へ)。M4-Fで会話UIに組み込む
+  - M4-B前半(subagent実装・コミット4651064): 純ロジックエンジン。クエスト
+    (`quests.ts`: メインクエスト段階enum+サブクエスト状態機械・提案/受諾/hunt進行/
+    報告=納品→報酬・満杯時保留・放棄)、NPC状態(`npc.ts`: 好感度0-100初期30・会話記憶・
+    今日の話題)、世界イベント(`ai/world-event.ts`: WorldEvent判別union・敵シンボル数の
+    絶対クランプ・初期値=レンジ中央値)、GameState拡張(npcs/mainQuestStage/subQuests/
+    world/narratedEnemies/aiDaily。全て`.default()`でversion1のまま後方互換)。テスト36件
+  - M4-B後半(subagent実装・コミット1fc0bd3): ゲーム内AI6ツール検証層
+    (`server/src/ai/tool-validation/`)。純関数`(input,context)=>Result`でスキーマ検証→
+    ゲームルール検証、承認済みeffectのみ返す。フロー許可集合の二重チェック
+    (`validateToolCall`=guardrails第1層)、speak/narrate/adjust_affinity/give_item/
+    propose_quest/trigger_world_event(単一+夢の最大3件・解決規則)。テスト55件
+- 検証: `pnpm check` 緑(ユニット347件・25→27ファイル・build・シークレットスキャン)
+- 裁量で決めたこと:
+  - 検証層の状態分離: 永続=GameState由来(aiDaily/affinity/inventory/subQuests/
+    dungeonSymbolCounts)、揮発=会話セッション(partnerNpcId/affinityAtOpen/
+    会話内adjust回数/give回数/pendingProposal)。揮発は型定義のみでtool-validation内に置き、
+    セッションマネージャは構築しない(M4-Cの責務)
+  - give_itemの好感度50ゲートは会話開始時点`affinityAtOpen`のみ参照(会話中の
+    adjust_affinity上昇では解禁しない: 仕様明記)。名前付きテストで担保
+  - reportedクエストは`subQuests`から除去(`.max(3)`超過回避)。`"reported"`は戻り値/
+    UI用シグナルのみで永続化しない。除去は`removeQuestFromList`
+  - 敵シンボル数の初期値=各層レンジの中央値(2-6→4)。最大/最小初期化だと±1シフトが
+    片方向で恒久クランプ無効化されるため双方向に効き代を残す
+  - initial好感度=30、advanceDayはactiveStreetEventsクリア+aiDailyゼロ+topicデフォルト戻し、
+    weather/dungeonSymbolCounts/affinity/memoryは持続
+- 既知の問題:
+  - M4-BのsubagentディスパッチがAPIエラー(Fable5上限/Response stalled mid-stream)で
+    3回連続失敗。うち1回はadvisor呼び出し(大コンテキスト転送)直前で停止。対処:
+    タスクをshared半分/検証層半分の2ディスパッチへ分割し、model:opus明示+advisor禁止
+    +範囲縮小で両方成功。以後の重いsubagentタスクは分割+advisor禁止を既定とする
+  - `packages/server/test/`はサーバーtsconfig(src/**のみ)対象外でtsc型検査を受けない
+    (eslint+vitestで担保。M4-Aと同じ既存慣習)
+- 次にやること: M4-C(DreamMaster+MockDreamMaster+フロー制御=直列化・クールダウン・
+  縮退・セッション上限)をsubagentへ委譲。着手前に`@anthropic-ai/claude-agent-sdk`の
+  最新ドキュメントを確認(M4-DのLive実装で使用)。ROADMAP M4の「ツール検証層」boxは
+  クールダウン(M4-C)完了まで未チェックのまま
