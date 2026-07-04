@@ -1,18 +1,34 @@
 import { z } from "zod";
 
+import { streetEventIdSchema } from "./ai/street-event.js";
+import {
+  dungeonSymbolCountsSchema,
+  initialDungeonSymbolCounts,
+  weatherSchema
+} from "./ai/world-event.js";
 import { playerProgressSchema, statsForLevel } from "./combat/index.js";
 import { directionSchema, positionSchema } from "./geometry.js";
+import { enemyIdSchema } from "./ids.js";
+import type { EnemyId } from "./ids.js";
 import { addItem, emptyInventory, inventorySchema } from "./inventory.js";
 import { mapIdSchema } from "./map.js";
 import { NEW_GAME_START } from "./maps/index.js";
+import { createDefaultNpcStates, DEFAULT_NPC_TOPICS, npcStatesSchema } from "./npc.js";
+import {
+  MAIN_QUEST_INITIAL_STAGE,
+  mainQuestStageSchema,
+  SUB_QUEST_MAX_ACTIVE,
+  subQuestSchema
+} from "./quests.js";
 
 /**
  * サーバー権威の GameState(セーブの正本)。version 付き。
  *
- * game-design.md「セーブ/ロード」の保存対象のうち、**M3 時点で存在する状態のみ**を含む
- * (プレイヤー・位置・インベントリ・クエスト用アイテム別枠・ゲーム内日付・プレイ時間・
- * マップギミックの解決状態)。M4 以降の NPC 状態・世界状態・クエスト進行・戦果描写済み記録・
- * 日次カウンタは version を上げて追加する(JOURNAL に注記)。
+ * 保存対象の正は game-design.md「セーブ/ロード」。M4 で NPC 状態・クエスト進行・
+ * 世界状態・戦果描写済み記録・AI 日次カウンタを追加した。追加フィールドはすべて
+ * `.default()` 付きで後方互換とし、version は 1 のまま(M3 形式のセーブは
+ * デフォルト値で補完して読める。version を上げるのはデフォルトで補完できない
+ * 変更を入れるときのみ)。
  */
 
 /** セーブスキーマのバージョン。version 不一致は破損と同扱い(game-design.md) */
@@ -47,6 +63,78 @@ export const TOWN_WAKE_POINT: GameLocation = {
   facing: "up"
 };
 
+// ---------------------------------------------------------------------------
+// 世界状態(天候・街頭演出・各層敵シンボル数)
+// ---------------------------------------------------------------------------
+
+/** 世界状態(セーブ対象: game-design.md「セーブ/ロード」) */
+export const worldStateSchema = z.object({
+  /** 天候(初期 clear。weather イベントで置き換わり、日送りでは持続) */
+  weather: weatherSchema.default("clear"),
+  /** 当日有効な街頭演出(複数可・同一 ID は重複しない)。日送りでクリア */
+  activeStreetEvents: z.array(streetEventIdSchema).default([]),
+  /** 各ダンジョン層の敵シンボル数(dungeon_shift 累積適用後の現在値。日送りでは持続) */
+  dungeonSymbolCounts: dungeonSymbolCountsSchema.default(initialDungeonSymbolCounts)
+});
+export type WorldState = z.infer<typeof worldStateSchema>;
+
+/** 世界状態のデフォルト(新規ゲーム・M3 セーブの補完) */
+export function createDefaultWorldState(): WorldState {
+  return {
+    weather: "clear",
+    activeStreetEvents: [],
+    dungeonSymbolCounts: initialDungeonSymbolCounts()
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AI 日次カウンタ(日送りでリセット。セーブ&ロードでの回避を防ぐため永続化)
+// ---------------------------------------------------------------------------
+
+/**
+ * NPC 別の adjust_affinity 承認 delta の日次累積(負値あり)。
+ * キー集合が npcIdSchema と一致することはユニットテストで担保する。
+ */
+export const npcDailyAffinityDeltaSchema = z.object({
+  innkeeper: z.number().int().default(0),
+  merchant: z.number().int().default(0),
+  informant: z.number().int().default(0),
+  priest: z.number().int().default(0)
+});
+export type NpcDailyAffinityDelta = z.infer<typeof npcDailyAffinityDeltaSchema>;
+
+/** NPC 別日次累積のゼロ値 */
+export function createDefaultNpcDailyAffinityDelta(): NpcDailyAffinityDelta {
+  return { innkeeper: 0, merchant: 0, informant: 0, priest: 0 };
+}
+
+/** AI 関連の「ゲーム内1日◯回」系カウンタ(game-design.md「ゲーム内時間」) */
+export const aiDailyCountersSchema = z.object({
+  /** give_item の承認回数(全 NPC 合算。1日3回まで) */
+  giveItemCount: z.number().int().nonnegative().default(0),
+  /** propose_quest の発行数(1日3件まで) */
+  proposeQuestCount: z.number().int().nonnegative().default(0),
+  /** rewardItemId 付き提案の発行数(1日1件まで) */
+  rewardItemProposalCount: z.number().int().nonnegative().default(0),
+  /** NPC 別 adjust_affinity 承認 delta の日次累積(±20 を超える呼び出しは却下) */
+  affinityDeltaByNpc: npcDailyAffinityDeltaSchema.default(createDefaultNpcDailyAffinityDelta)
+});
+export type AiDailyCounters = z.infer<typeof aiDailyCountersSchema>;
+
+/** AI 日次カウンタのゼロ値(新規ゲーム・日送りリセット) */
+export function createDefaultAiDailyCounters(): AiDailyCounters {
+  return {
+    giveItemCount: 0,
+    proposeQuestCount: 0,
+    rewardItemProposalCount: 0,
+    affinityDeltaByNpc: createDefaultNpcDailyAffinityDelta()
+  };
+}
+
+// ---------------------------------------------------------------------------
+// GameState 本体
+// ---------------------------------------------------------------------------
+
 export const gameStateSchema = z.object({
   version: z.literal(GAME_STATE_VERSION),
   /** プレイヤー状態(レベル・経験値・HP/MP・ゴールド) */
@@ -63,7 +151,19 @@ export const gameStateSchema = z.object({
    * マップギミックの解決状態(開けた宝箱・押したスイッチ・使用済みの鍵等の id)。
    * ロードで巻き戻ると鍵消費型の仕掛けが進行不能になるため永続化する(game-design.md)。
    */
-  gimmicks: z.array(z.string())
+  gimmicks: z.array(z.string()),
+  /** NPC 状態(好感度・会話記憶・今日の話題)。M3 セーブはデフォルトで補完 */
+  npcs: npcStatesSchema.default(createDefaultNpcStates),
+  /** メインクエスト段階(M6 で進行に使用) */
+  mainQuestStage: mainQuestStageSchema.default(MAIN_QUEST_INITIAL_STAGE),
+  /** 受注中サブクエスト(最大3。未受諾の「提案」はセーブに載せない) */
+  subQuests: z.array(subQuestSchema).max(SUB_QUEST_MAX_ACTIVE).default([]),
+  /** 世界状態(天候・当日有効な street_event・各層の敵シンボル数) */
+  world: worldStateSchema.default(createDefaultWorldState),
+  /** 戦果描写済みの敵種(「初見」判定用。ロード後に AI 呼び出しが再発しない) */
+  narratedEnemies: z.array(enemyIdSchema).default([]),
+  /** AI 日次カウンタ(日送りでリセット) */
+  aiDaily: aiDailyCountersSchema.default(createDefaultAiDailyCounters)
 });
 export type GameState = z.infer<typeof gameStateSchema>;
 
@@ -85,6 +185,50 @@ export function createNewGameState(): GameState {
     inventory,
     day: 1,
     playtimeSeconds: 0,
-    gimmicks: []
+    gimmicks: [],
+    npcs: createDefaultNpcStates(),
+    mainQuestStage: MAIN_QUEST_INITIAL_STAGE,
+    subQuests: [],
+    world: createDefaultWorldState(),
+    narratedEnemies: [],
+    aiDaily: createDefaultAiDailyCounters()
   };
+}
+
+// ---------------------------------------------------------------------------
+// 日送り・戦果描写記録の純ヘルパー
+// ---------------------------------------------------------------------------
+
+/**
+ * 日送り(宿泊手順2・全滅帰還)の状態更新(純関数):
+ * - 日付 +1
+ * - AI 日次カウンタのリセット(game-design.md「ゲーム内時間」)
+ * - 「今日の話題」を NPC 別デフォルトへリセット(ai-integration.md「会話セッション管理」)
+ * - 当日有効な street_event のクリア(「当日有効」のため翌日へ持ち越さない)
+ * 天候・各層敵シンボル数・好感度・会話記憶は持続する。
+ */
+export function advanceDay(state: GameState): GameState {
+  return {
+    ...state,
+    day: state.day + 1,
+    aiDaily: createDefaultAiDailyCounters(),
+    npcs: {
+      innkeeper: { ...state.npcs.innkeeper, topic: DEFAULT_NPC_TOPICS.innkeeper },
+      merchant: { ...state.npcs.merchant, topic: DEFAULT_NPC_TOPICS.merchant },
+      informant: { ...state.npcs.informant, topic: DEFAULT_NPC_TOPICS.informant },
+      priest: { ...state.npcs.priest, topic: DEFAULT_NPC_TOPICS.priest }
+    },
+    world: { ...state.world, activeStreetEvents: [] }
+  };
+}
+
+/** その敵種の戦果描写が済んでいるか(「初見」判定。初見のみ AI 呼び出し) */
+export function hasNarratedEnemy(state: GameState, enemyId: EnemyId): boolean {
+  return state.narratedEnemies.includes(enemyId);
+}
+
+/** 戦果描写済みとして記録する(純関数。重複は追加しない) */
+export function recordNarratedEnemy(state: GameState, enemyId: EnemyId): GameState {
+  if (hasNarratedEnemy(state, enemyId)) return state;
+  return { ...state, narratedEnemies: [...state.narratedEnemies, enemyId] };
 }
