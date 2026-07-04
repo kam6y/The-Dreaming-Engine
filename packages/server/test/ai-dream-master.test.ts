@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { loadAiConfig } from "../src/ai/config.js";
+import { OAUTH_TOKEN_ENV } from "../src/ai/auth.js";
 import {
   createDreamMaster,
   createLiveDreamMaster,
@@ -20,7 +21,9 @@ import {
   type DreamMasterContext,
   type DreamMasterResult,
   type DreamMasterSuccess,
-  type RawToolCall
+  type QueryFn,
+  type RawToolCall,
+  type SdkMessageLike
 } from "../src/ai/dream-master/index.js";
 import { checkDisplayText } from "../src/ai/output-wall.js";
 import {
@@ -148,16 +151,31 @@ describe("resolveFlowSpec", () => {
 // ファクトリ: mock→MockDreamMaster / live→プレースホルダエラー
 // ---------------------------------------------------------------------------
 
-describe("createDreamMaster ファクトリ", () => {
+describe("createDreamMaster ファクトリ / LiveDreamMaster 構築", () => {
   it("mock は MockDreamMaster を返す", () => {
     const dm = createDreamMaster("mock", config);
     expect(dm).toBeInstanceOf(MockDreamMaster);
     expect(dm.mode).toBe("mock");
   });
 
-  it("live はプレースホルダエラーを投げる(M4-D で実装)", () => {
-    expect(() => createDreamMaster("live", config)).toThrow();
-    expect(() => createLiveDreamMaster()).toThrow();
+  it("live: 資格情報ありで LiveDreamMaster を構築する(構築時に query は呼ばない)", () => {
+    let called = 0;
+    const fakeQuery: QueryFn = (): AsyncIterable<SdkMessageLike> => {
+      called += 1;
+      return (async function* (): AsyncGenerator<SdkMessageLike> {})();
+    };
+    const dm = createLiveDreamMaster({
+      config,
+      env: { [OAUTH_TOKEN_ENV]: "dummy-oauth-present" },
+      query: fakeQuery
+    });
+    expect(dm.mode).toBe("live");
+    // 実AI呼び出しは run 実行時のみ。構築では query を一切呼ばない。
+    expect(called).toBe(0);
+  });
+
+  it("live: 資格情報が無ければ構築時に認証エラー(値は出さない)", () => {
+    expect(() => createLiveDreamMaster({ config, env: {} })).toThrow();
   });
 });
 
@@ -259,15 +277,31 @@ describe("MockDreamMaster 通常モード", () => {
     expect(a).toEqual(b);
   });
 
-  it("外部 SDK 呼び出しが起きない: dream-master ソースは Agent SDK を import しない", () => {
-    const files = ["types.ts", "flow-spec.ts", "mock.ts", "live.ts", "factory.ts", "index.ts"];
-    for (const file of files) {
+  it("mock 経路のソースは Agent SDK を import しない(live.ts のみが SDK 境界)", () => {
+    // mock 実装本体(mock.ts)と、共有の型/仕様/プロンプト/憲法は SDK を import しない。
+    // factory/index は live.ts を相対参照するのみで、SDK リテラルを含まない。
+    const nonSdkFiles = [
+      "types.ts",
+      "flow-spec.ts",
+      "constitution.ts",
+      "prompt.ts",
+      "mock.ts",
+      "factory.ts",
+      "index.ts"
+    ];
+    for (const file of nonSdkFiles) {
       const src = readFileSync(
         fileURLToPath(new URL(`../src/ai/dream-master/${file}`, import.meta.url)),
         "utf8"
       );
-      expect(src).not.toContain("@anthropic-ai");
+      expect(src, `${file} は Agent SDK を import しないこと`).not.toContain("@anthropic-ai");
     }
+    // live.ts は唯一の SDK 境界(実AI呼び出しは run 実行時のみ)。
+    const liveSrc = readFileSync(
+      fileURLToPath(new URL("../src/ai/dream-master/live.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(liveSrc).toContain("@anthropic-ai/claude-agent-sdk");
   });
 });
 
