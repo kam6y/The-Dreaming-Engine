@@ -1,25 +1,6 @@
-export type AiMode = "mock" | "live";
+import { resolveAiMode, type AiMode } from "./ai/mode.js";
 
-export interface ResolveAiModeOptions {
-  allowLive: boolean;
-}
-
-export function resolveAiMode(
-  rawMode: string | undefined,
-  options: ResolveAiModeOptions
-): AiMode {
-  if (rawMode !== "live") {
-    return "mock";
-  }
-
-  if (!options.allowLive) {
-    throw new Error(
-      "AI_MODE=live は通常の開発・テスト実行では拒否されます。実AI疎通は pnpm test:ai-live でのみ行います。"
-    );
-  }
-
-  return "live";
-}
+export type { AiMode };
 
 export interface RuntimeConfig {
   aiMode: AiMode;
@@ -27,11 +8,13 @@ export interface RuntimeConfig {
   port: number;
 }
 
+/**
+ * 実行時設定を env から解決する。
+ * host は常に `127.0.0.1` に固定する(外部公開しない: ai-guardrails.md 第0層)。
+ */
 export function loadRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
-  const allowLive = env.DREAMING_ENGINE_ALLOW_LIVE_AI === "1";
-
   return {
-    aiMode: resolveAiMode(env.AI_MODE, { allowLive }),
+    aiMode: resolveAiMode(env),
     host: "127.0.0.1",
     port: Number.parseInt(env.PORT ?? "3000", 10)
   };

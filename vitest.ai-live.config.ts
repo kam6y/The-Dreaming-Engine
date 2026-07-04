@@ -1,4 +1,33 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
+
+/**
+ * リポジトリ直下 `.env` を process.env へ読み込む(この config は Node/Vite が評価するため
+ * ここが `pnpm test:ai-live` の env 読み込み点になる)。認証トークン(既定
+ * `CLAUDE_CODE_OAUTH_TOKEN`)を `.env` に置くだけで資格情報ガードの skip が解消される。
+ *
+ * - 既存 env は上書きしない(`process.loadEnvFile` 既定=環境変数が優先)。よって
+ *   `pnpm test:ai-live` が立てる `AI_MODE=live` / `AI_LIVE_TEST=1` は `.env` より優先される。
+ * - `.env` 欠落(ENOENT)は正常系として無視する(無いと config 評価が壊れるのを防ぐ)。
+ * - server 側 `packages/server/src/env.ts` と同方針の最小重複(ルート config から
+ *   packages 配下の src を直接 import しないため、数行を複製する)。
+ */
+const repoEnvPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  ".env"
+);
+try {
+  process.loadEnvFile(repoEnvPath);
+} catch (error: unknown) {
+  if (
+    !(error instanceof Error) ||
+    (error as NodeJS.ErrnoException).code !== "ENOENT"
+  ) {
+    throw error;
+  }
+}
 
 /**
  * 実AI疎通テスト専用の Vitest 設定(`pnpm test:ai-live` からのみ使用)。

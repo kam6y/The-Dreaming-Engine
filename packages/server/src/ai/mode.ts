@@ -7,10 +7,10 @@
  *   (設定漏れによる実 AI 誤爆とサブスク枠消費を機構で防ぐ)。
  *   例外は明示フラグ `AI_LIVE_TEST=1`(`pnpm test:ai-live` だけが立てる)。
  *
- * 注記: 既存の `src/config.ts` にも旧 `resolveAiMode` があるが、そちらは
- * `DREAMING_ENGINE_ALLOW_LIVE_AI` フラグを外部注入する設計。本モジュールは env から
- * テスト実行下を自動判定する M4 仕様の版であり、両者の統合は後続の配線タスクで行う
- * (それまでは互いに独立。共通バレルからの二重 export はしない=名前衝突回避)。
+ * これが AI モード解決の**唯一の正準**。`src/config.ts` の `loadRuntimeConfig` も本モジュールへ
+ * 委譲する(旧 config.ts 版 resolveAiMode と `DREAMING_ENGINE_ALLOW_LIVE_AI` フラグは撤去済み=
+ * 統合済み)。これにより index.ts(loadRuntimeConfig)と server.ts(createDefaultSession)の
+ * 判定が一致する。
  */
 
 export type AiMode = "mock" | "live";

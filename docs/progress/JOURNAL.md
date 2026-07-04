@@ -547,3 +547,43 @@
   snapshot 先行付与は本修正で冗長になるが無害なため据え置き=スコープ拡大回避)
 - 既知の問題: なし
 - 次にやること: 縦切りは完成済み。拡張フェーズ(/loop + BACKLOG.md)。人間確認待ち項目の消化は人間
+
+## [18] 2026-07-05 バグ修正: .env読み込み経路の欠如(実AI=liveで生成できない)
+
+- やったこと:
+  - 症状(ユーザー報告): `.env` に認証情報や `AI_MODE=live` を設定しても実AIで生成できない
+  - 根本原因(systematic-debugging で特定・2点):
+    (1) `.env` を `process.env` へ読み込む経路が皆無。サーバー起動は `node dist/index.js` で
+    dotenv/`--env-file`/`process.loadEnvFile` のいずれも無く、`pnpm test:ai-live`
+    (vitest.ai-live.config.ts)も同様で資格情報ガードにより全テストが静かに skip されていた。
+    (2) resolveAiMode の二重実装が未統合。起動エントリ index.ts は旧 config.ts 版
+    (未文書化の `DREAMING_ENGINE_ALLOW_LIVE_AI=1` が必須)を使い、仮に .env が読めても
+    `AI_MODE=live` で起動時 throw。ai/mode.ts 冒頭に「統合は後続の配線タスク」と記録された
+    M4 の宿題が未実施だった
+  - 修正(実装は subagent=Opus へ委譲、オーケストレーターが検収。UI変更なし):
+    - 新規 `packages/server/src/env.ts`: `loadDotEnv(filePath?)` が リポジトリ直下 `.env` を
+      Node native `process.loadEnvFile` で読み込む(依存追加なし)。ENOENT のみ黙って
+      スキップ(fresh clone/CI 保護)、他エラーは再throw。index.ts の最初で呼ぶ
+    - `config.ts`: 旧 resolveAiMode と `DREAMING_ENGINE_ALLOW_LIVE_AI` を撤去し
+      `ai/mode.ts` の resolveAiMode(env) へ一本化(mode.ts の宿題の実施)。
+      フェイルセーフ(未設定・不正値=mock/テスト実行下live拒否)は不変
+    - `vitest.ai-live.config.ts`: 先頭でルート `.env` を読み込み(test:ai-live へ資格情報が届く)
+    - ユニットテスト追加: env.test.ts 3件(載る/既存env非上書き/欠落で無害)+ config.test.ts 書き直し
+  - 安全性の根拠(実測): `process.loadEnvFile` は既存環境変数を**上書きしない**ことを実測確認。
+    `pnpm dev:mock`/E2E(Playwright webServer)の `AI_MODE=mock` 注入は `.env` の live に侵食されない
+- 検証: `pnpm check` 緑(unit 520件)・`pnpm test:e2e` **10/10緑**・mock手動起動で `(mock)` ログ確認。
+  live起動・実AI呼び出しは規約どおり未実行
+- E2E干渉の顛末(記録): 検収中 battle.spec.ts:113 が4連続失敗。エラーページに
+  「サーバー: 別画面に接続されました」→ **開きっぱなしの Chrome タブ(127.0.0.1:5173)が
+  E2E の Vite 起動で HMR 自動リロード→WS再接続し、WS同時1接続仕様がテストページを切断**していた。
+  ベースライン(HEAD・変更 stash)でも同一失敗を確認し修正無関係と断定。当該タブを
+  about:blank へ退避(可逆)したところ 10/10 緑。**教訓: E2E 実行前にゲームを開いた
+  ブラウザタブを閉じること**(実プレイ確認と E2E の併用時に再発しうる)
+- 裁量で決めたこと: Node native `process.loadEnvFile` 採用(dotenv 依存を追加しない)。
+  `DREAMING_ENGINE_ALLOW_LIVE_AI` の撤去は mode.ts 自身が予告していた統合の実施であり
+  防御の弱体化ではない(live には依然 明示的 `AI_MODE=live` が必要・テスト実行下は拒否)
+- 既知の問題: なし(ai-live の vitest worker への env 伝播は未実測だが、最悪でも従来どおり
+  skip に留まり実AI誤爆は起きない)
+- 人間確認待ち: (1) `.env` 設定の上で `pnpm dev` → 実プレイで live 生成の確認、
+  (2) `pnpm test:ai-live` の実行(資格情報が届き skip が解消されるはず)
+- 次にやること: 拡張フェーズ(/loop + BACKLOG.md)。人間確認待ち項目の消化は人間
