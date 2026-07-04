@@ -123,7 +123,7 @@ test("seed=42でフィールドの霧狼に接触し、勝利して探索へ復�
   expect(symbols.every((s) => s.enemyId === "mist-wolf")).toBe(true);
 
   // --- 新規ゲーム開始 → 街「灯町」 ---
-  await page.goto(`/?seed=${SEED}`);
+  await page.goto(`/?seed=${SEED}&skipIntro=1`);
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
 
@@ -219,7 +219,7 @@ test("初見霧狼の撃破で戦果narrate(ai-utterance)が探索復帰前に�
   const symbols = sampleEnemySymbols(fieldMap, rng);
   expect(symbols).toHaveLength(2);
 
-  await page.goto(`/?seed=${SEED}`);
+  await page.goto(`/?seed=${SEED}&skipIntro=1`);
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
   await page.locator("canvas").click();

@@ -29,7 +29,7 @@ test("新規ゲームで街から裂け目最深部まで移動して到達で�
   test.setTimeout(60_000);
 
   // M2以降は敵シンボルがランダム配置されるため、踏破スモークではシンボルを無効化する
-  await page.goto("/?noSymbols=1");
+  await page.goto("/?noSymbols=1&skipIntro=1");
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
 

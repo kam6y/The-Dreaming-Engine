@@ -39,7 +39,7 @@ async function stepTo(page: Page, key: string, x: number, y: number): Promise<vo
 
 /** 新規ゲームを開始して街(灯町)の探索へ入る */
 async function startNewGame(page: Page): Promise<void> {
-  await page.goto("/?noSymbols=1");
+  await page.goto("/?noSymbols=1&skipIntro=1");
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
   await page.locator("canvas").click();

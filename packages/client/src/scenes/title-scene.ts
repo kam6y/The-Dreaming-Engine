@@ -7,7 +7,7 @@ import { getGameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { fitCover } from "../ui/cover-image.js";
 import { MenuList } from "../ui/menu-list.js";
-import { newGameOptionsFromUrl } from "../url-flags.js";
+import { newGameOptionsFromUrl, shouldSkipIntro } from "../url-flags.js";
 
 /**
  * タイトル画面。「新規ゲーム」と「つづきから」のメニューを持つ。
@@ -42,6 +42,9 @@ export class TitleScene extends Phaser.Scene {
 
   /** 自分の要求(new-game / continue)に対する snapshot 待ちか */
   private requested = false;
+
+  /** 待っている要求が new-game か(true=遷移先はオープニング、false=探索へ直行) */
+  private requestedNewGame = false;
 
   private unsubscribes: (() => void)[] = [];
 
@@ -202,6 +205,10 @@ export class TitleScene extends Phaser.Scene {
     this.menu?.deactivate();
     this.statusText.setText("");
     this.requested = true;
+    // 新規ゲームはオープニングを経由し、つづきからは保存地点(探索)へ直行する。
+    // 判定は要求(=新規ゲームの操作)で行い、snapshot の段階には依存しない
+    // (再接続の再同期 snapshot でオープニングが再生されないようにする)
+    this.requestedNewGame = message.type === "new-game";
     if (!getGameClient().send(message)) {
       // 未接続なら update() で接続確立後に再送する
       this.pendingMessage = message;
@@ -209,12 +216,15 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private startExploration(): void {
+    // 新規ゲームはオープニングを経由(?skipIntro=1 のときは演出を飛ばして探索へ直行)
+    const toOpening = this.requestedNewGame && !shouldSkipIntro();
     this.requested = false;
+    this.requestedNewGame = false;
     this.pendingMessage = null;
     // 前のプレイの未表示ダイアログを持ち越さない
     clearDialogQueue();
     this.menu?.deactivate();
-    this.scene.start("exploration");
+    this.scene.start(toOpening ? "opening" : "exploration");
   }
 
   private layout(): void {

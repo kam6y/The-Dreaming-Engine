@@ -723,6 +723,12 @@ export class ExplorationScene extends Phaser.Scene {
     if (this.map.boss === undefined) {
       return;
     }
+    // ボスマーカーは rift-revealed(司祭に会い夢喰いを知った後)のみ描画・アクティブ。
+    // arrival では未出現、撃破後(dream-eater-defeated/epilogue)は非表示にする
+    // (戦闘可否のゲート自体はサーバーが mainQuestStage で権威的に行う)
+    if (this.snapshot.mainQuestStage !== "rift-revealed") {
+      return;
+    }
     const { x, y } = this.tileCenter(this.map.boss.position);
     const bossCircle = this.add.circle(x, y, TILE_SIZE - 10, 0x5c2431).setStrokeStyle(2, 0x2a0f16);
     this.worldLayer.add(bossCircle);

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import { clearDialogQueue } from "../dialog-queue.js";
+import { getGameClient } from "../net/game-client.js";
 import { Cinematic, type CinematicPanel } from "../ui/cinematic.js";
 
 /**
@@ -39,6 +40,8 @@ export class EndingScene extends Phaser.Scene {
     this.syncDomState();
     // シーン跨ぎの残ダイアログ(戦果ナレーション等)は持ち越さない
     clearDialogQueue();
+    // エンディング到達を確定(サーバーが dream-eater-defeated → epilogue にしてセーブへ刻む)
+    getGameClient().send({ type: "acknowledge-ending" });
     this.cinematic = new Cinematic(this, ENDING_PANELS, () => {
       this.toTitle();
     });

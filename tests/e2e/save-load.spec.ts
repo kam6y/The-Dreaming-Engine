@@ -45,7 +45,7 @@ test("宿泊でセーブし、リロード→つづきからで状態が復元�
 
   // --- 新規ゲーム開始 → 街「灯町」 ---
   // 敵シンボルは移動の邪魔になるため無効化する(このテストは戦闘を扱わない)
-  await page.goto("/?noSymbols=1");
+  await page.goto("/?noSymbols=1&skipIntro=1");
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
 
@@ -102,7 +102,7 @@ test("宿泊でセーブし、リロード→つづきからで状態が復元�
   await expect.poll(() => existsSync(E2E_SAVE_FILE), { timeout: 10_000 }).toBe(true);
 
   // --- リロード → タイトル → つづきから ---
-  await page.goto("/?noSymbols=1");
+  await page.goto("/?noSymbols=1&skipIntro=1");
   await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("title");
   await page.locator("canvas").click();
 

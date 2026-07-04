@@ -585,10 +585,13 @@ export class BattleScene extends Phaser.Scene {
 
   private finishBattle(): void {
     this.mode = "finished";
+    // ボス「夢喰い」撃破(mainQuestStage=dream-eater-defeated)ならエンディングへ直行する
+    // (探索を経由せず、ダンジョンの一瞬の再描画と遷移レースを避ける)
+    const toEnding = this.latestSnapshot.mainQuestStage === "dream-eater-defeated";
     this.cameras.main.fadeOut(220, 11, 13, 18);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       // 全滅・勝利の後日談(dialog)は探索シーンがキューから表示する
-      this.scene.start("exploration");
+      this.scene.start(toEnding ? "ending" : "exploration");
     });
   }
 

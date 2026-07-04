@@ -47,7 +47,7 @@ test("宿屋で宿泊: 日送り+宿代徴収+HP全回復→夢→目覚めて�
   test.setTimeout(60_000);
 
   // --- 新規ゲーム開始 → 街「灯町」 ---
-  await page.goto("/?noSymbols=1");
+  await page.goto("/?noSymbols=1&skipIntro=1");
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
   await page.locator("canvas").click();

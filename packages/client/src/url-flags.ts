@@ -27,3 +27,12 @@ export function newGameOptionsFromUrl(): NewGameOptions {
     ...(startLevel !== undefined ? { startLevel } : {})
   };
 }
+
+/**
+ * 新規ゲーム時にオープニング演出を飛ばして直接探索へ入るか(?skipIntro=1)。
+ * E2E・デバッグ用の演出スキップ(ai-integration.md「レート・コスト保護」の注記=
+ * テスト時の演出スキップは防御弱体化にあたらない)。本番URLでは付与されない。
+ */
+export function shouldSkipIntro(): boolean {
+  return new URLSearchParams(window.location.search).has("skipIntro");
+}
