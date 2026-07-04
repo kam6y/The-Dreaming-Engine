@@ -66,16 +66,16 @@ JOURNALへ「仕様変更提案」として記録する)。
 
 ## M4: AI統合(DreamMaster)
 
-- [ ] `docs/spec/ai-integration.md` に従いDreamMaster実装(Agent SDK + カスタムMCPツール6種)
-- [ ] ツール検証層(純TSモジュール+ユニットテスト。仕様の上限・ホワイトリスト・クールダウンすべて)
-- [ ] `MockDreamMaster`(定型応答)と `AI_MODE=mock|live` 切り替え
+- [x] `docs/spec/ai-integration.md` に従いDreamMaster実装(Agent SDK + カスタムMCPツール6種)
+- [x] ツール検証層(純TSモジュール+ユニットテスト。仕様の上限・ホワイトリスト・クールダウンすべて)
+- [x] `MockDreamMaster`(定型応答)と `AI_MODE=mock|live` 切り替え
       (未設定・不正値はmockに倒すフェイルセーフ: `ai-integration.md`)
 - [ ] NPC会話UI(自由入力+選択肢、検証済み全文の疑似ストリーミング表示、会話履歴・要約管理)
 - [ ] 酒場でのサブクエスト動的生成(`propose_quest`)とクエストジャーナルUI
 - [ ] 宿泊時の夢シーン→翌朝の世界変化(`trigger_world_event`)
 - [ ] 戦闘勝利後の戦果描写(`narrate`)
 - [ ] `docs/spec/ai-guardrails.md` の防御実装(境界壁・入力壁・出力壁・監査ログ)と攻撃リグレッションテスト
-- [ ] `pnpm test:ai-live`(実AI疎通の最小テスト)整備
+- [x] `pnpm test:ai-live`(実AI疎通の最小テスト)整備(実行は人間確認待ち: JOURNAL[11])
 - [ ] E2Eに会話・クエスト受注・夢シーンのスモークを追加(モックAI)
 
 完了条件: モックAIでE2E(会話・クエスト受注・夢シーン)が緑。攻撃テストA(モック攻撃)が

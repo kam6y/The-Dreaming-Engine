@@ -312,3 +312,36 @@
   canUseToolでデフォルト拒否(権威的二重チェック)、permissionMode:'default'・
   allowDangerouslySkipPermissions:false(bypassPermissions禁止)。認証はenvでサブプロセスへ
   渡す変数を制御しOAuth優先(CLAUDE_CODE_OAUTH_TOKEN既定・ANTHROPIC_API_KEYフォールバック)
+
+## [11] 2026-07-04 M4-D完了: LiveDreamMaster(Agent SDK統合)+認証抽象+test:ai-live整備
+
+- やったこと(subagent実装。2コミット):
+  - コミットe6fe6af: `@anthropic-ai/claude-agent-sdk@0.3.200` をserverへ追加。LiveDreamMaster
+    (`dream-master/live.ts`)がDreamMaster IFを実装。フロー別に `query()` を呼び、6ツールを
+    `createSdkMcpServer`+`tool()`で登録(ハンドラは生intentを記録して無害ackを返すだけ=
+    検証・適用はしない)。認証抽象(`auth.ts`): キー名の有無のみ判定・値は読まない、
+    OAuth優先、非採用資格情報をenvから削除して優先制御(env1つで切替)。世界観憲法
+    プロンプト(`constitution.ts`/`prompt.ts`)。テスト34件(auth 8+live 26)
+  - コミット48aeb56: `pnpm test:ai-live`(`AI_LIVE_TEST=1 AI_MODE=live` を付与し専用
+    `vitest.ai-live.config.ts` で `*.ailive.ts` のみ実行)。挨拶1回の最小疎通テスト。
+    `describe.runIf` で実キー存在時のみ実行・未達はskip。通常 `pnpm check` からは除外
+- 検証: `pnpm check`(mock)緑(ユニット426件・build・シークレットスキャン)。防御姿勢を
+  オーケストレーターが直接確認: `settingSources:[]`・`strictMcpConfig:true`・`canUseTool`
+  デフォルト拒否(許可集合内のカスタムツールのみallow、組み込み/クロスフロー/未知は全deny)・
+  `disallowedTools`組み込み遮断・`permissionMode:'default'`・bypass系不使用・`persistSession:false`
+- 裁量で決めたこと:
+  - 出力トークン上限はSDK Optionsに直接の口が無いため、`maxTurns`+出力壁(表示テキスト
+    長さ上限)で有界化。config `maxOutputTokens` はFlowSpecに残置(将来SDKが口を持てば渡す)
+  - プロンプトは常に単発文字列。会話履歴は毎回スナップショットから `<conversation>` タグで
+    注入しSDKセッション再開に依存しない(全可変テキストは `neutralizeTags` でタグ無害化=第3層)
+  - 追加ハードニング(guardrailsが許容する強化のみ): strictMcpConfig/persistSession/
+    組み込み遮断リスト網羅。防御要件の弱体化はなし
+  - DreamMasterContext(C1)は最小構成。好感度/受注クエスト等の完全スナップショット注入は
+    M4-EでIF拡張時に充実(`prompt.ts`は前方互換)
+- 人間確認待ち: **`pnpm test:ai-live` の実行**(実AI疎通)。テストコード・スクリプト・
+  手順は整備済み(実行はオーナーが `.env` に `CLAUDE_CODE_OAUTH_TOKEN` 設定後 `pnpm test:ai-live`)。
+  CLAUDE.md規約によりClaude Codeは実行しない。この項目を待たずに先へ進む
+- 既知の問題: なし(SDKの出力トークン上限の件は上記のとおり有界化で対応)
+- 次にやること: M4-E(サーバー統合=WS会話/クエスト/夢/戦果フローの配線+セーブ拡張+
+  DreamMasterContextの充実)をsubagentへ委譲。会話UI等(M4-F)はM4-EのWS protocol確定後に
+  オーケストレーターが実装。ROADMAP M4のツール検証層boxはM4-C完了済みなのでチェック可
