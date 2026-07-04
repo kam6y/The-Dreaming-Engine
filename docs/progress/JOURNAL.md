@@ -272,3 +272,43 @@
   縮退・セッション上限)をsubagentへ委譲。着手前に`@anthropic-ai/claude-agent-sdk`の
   最新ドキュメントを確認(M4-DのLive実装で使用)。ROADMAP M4の「ツール検証層」boxは
   クールダウン(M4-C)完了まで未チェックのまま
+
+## [10] 2026-07-04 M4-C完了: DreamMaster抽象・Mock・フロー制御(縮退/上限/クールダウン)
+
+- やったこと(すべてsubagent実装。C1→C2の順で3コミット):
+  - C1(コミットd7c9a98): DreamMaster抽象IF(`server/src/ai/dream-master/`)。単一
+    `run(context,options)`→`{ok:true,flow,toolCalls:RawToolCall[],text,meta}` または
+    `{ok:false,failure:'timeout_first'|'timeout_total'|'api_error'}`。検証・適用はしない
+    (生の意図を返すだけ)。`createDreamMaster(mode,config)`ファクトリ、Liveはプレースホルダ。
+    MockDreamMaster(通常/悪意モード・決定論・夢は必ずnarrate+weather:fog)。テスト19件
+  - C2コミット1(76517af): 会話セッション管理(affinityAtOpenスナップショット・会話内
+    カウンタ・pendingProposal)+ AIターン実行器(DreamMaster→validateToolCall→
+    表示系0件でオールオアナッシング破棄+定型フォールバック+失敗計上、タイムアウト/
+    APIエラーのみ1回リトライ)+ 縮退状態機械 + セッション総数上限。テスト15件
+  - C2コミット2(c825d53): ゲートキーパー(直列化=同時1件・実行中拒否、クールダウン=
+    会話10秒/夢60秒/クエスト30秒、送信レート3秒・同一内容拒否)+ 監査境界イベント配線
+    + 縮退解除(onDayAdvanced)。定型フォールバック文は`shared/src/ai/fallback.ts`。テスト11件
+- 検証: `pnpm check` 緑(ユニット392件・build・シークレットスキャン)。全コミット個別緑
+- 裁量で決めたこと:
+  - サービスはGameStateを変更せず・WS/セーブに触れず、検証済みeffectと表示テキスト
+    (または定型)を返すだけ。保護状態(クールダウン時刻・実行中・縮退・セッション数)は
+    ランタイム保持でセーブ非対象(縮退はセーブに載せない仕様に忠実)
+  - 縮退フラグを2分離: `normalDegraded`(3連続失敗・日送りで解除)と
+    `sessionLimitDegraded`(総数上限・日送りで解除しない)。連続失敗カウントはフロー別
+    (仕様「同一フローで3回連続」に忠実)、発動/解除時に0化
+  - 時刻・乱数は全注入(Date.now直呼びなし)、設定値は全てconfig由来でテスト差し替え可能。
+    ハードコードは仕様固定の「3連続」閾値のみ
+  - 会話要約の出力壁上限`SUMMARY_MAX_LENGTH=200`をnpc.tsに追加
+- 既知の問題:
+  - 重いsubagentタスク(C2=234kトークン)でもmodel:opus明示+advisor禁止+2コミット
+    チェックポイント方式で安定完走。M4-B/Cを通じ本方式を確立
+  - `packages/server/test/`はtsc対象外(eslint+vitestで担保。既存慣習)
+- 次にやること: M4-D(LiveDreamMaster=Agent SDK統合+test:ai-live整備)。SDK未導入
+  (`pnpm add @anthropic-ai/claude-agent-sdk`が必要)。オーケストレーターがcontext7で
+  SDK最新APIを確認済み(下記)。M4-Dのセキュリティ姿勢:
+  settingSources省略/[](CLAUDE.md・FS設定を読まない)、systemPromptは世界観憲法の文字列
+  (claude_codeプリセット不使用)、tools未指定、mcpServersは自作dream-toolsのみ、
+  allowedToolsは現在フローのカスタムツールのみ、disallowedToolsで組み込み明示遮断、
+  canUseToolでデフォルト拒否(権威的二重チェック)、permissionMode:'default'・
+  allowDangerouslySkipPermissions:false(bypassPermissions禁止)。認証はenvでサブプロセスへ
+  渡す変数を制御しOAuth優先(CLAUDE_CODE_OAUTH_TOKEN既定・ANTHROPIC_API_KEYフォールバック)
