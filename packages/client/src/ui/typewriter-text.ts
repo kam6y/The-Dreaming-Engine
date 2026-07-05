@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
+
 export interface TypewriterTextOptions {
   x: number;
   y: number;
@@ -46,7 +48,7 @@ export class TypewriterText {
     this.msPerChar = options.msPerChar ?? 25;
     this.text = scene.add.text(options.x, options.y, "", {
       color: options.color ?? "#f1eee4",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: options.fontSize ?? "17px",
       wordWrap: { width: options.width, useAdvancedWrap: true },
       lineSpacing: 6

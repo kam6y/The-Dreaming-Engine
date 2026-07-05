@@ -14,7 +14,8 @@ function serveRepoAssets(): Plugin {
   const assetsRoot = path.resolve(import.meta.dirname, "../../assets");
   const contentTypes: Record<string, string> = {
     ".png": "image/png",
-    ".json": "application/json"
+    ".json": "application/json",
+    ".woff2": "font/woff2"
   };
   return {
     name: "serve-repo-assets",

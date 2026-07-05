@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
+
 const BOX_MARGIN = 16;
 const BOX_HEIGHT = 128;
 const PADDING = 16;
@@ -45,7 +47,7 @@ export class DialogBox {
     if (speaker !== null) {
       const speakerText = this.scene.add.text(PADDING, textY, speaker, {
         color: "#d8c98f",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "18px"
       });
       children.push(speakerText);
@@ -54,7 +56,7 @@ export class DialogBox {
 
     const bodyText = this.scene.add.text(PADDING, textY, body, {
       color: "#f1eee4",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "17px",
       // 日本語(スペース区切りなし)を折り返すため useAdvancedWrap を使う
       wordWrap: { width: width - PADDING * 2, useAdvancedWrap: true },
@@ -65,7 +67,7 @@ export class DialogBox {
     const hint = this.scene.add
       .text(width - PADDING, BOX_HEIGHT - 12, "▼ スペースで閉じる", {
         color: "#a9b0ba",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "13px"
       })
       .setOrigin(1, 1);

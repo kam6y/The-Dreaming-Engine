@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import { fitCover } from "./cover-image.js";
+import { UI_FONT_FAMILY } from "./font.js";
 import { TypewriterText } from "./typewriter-text.js";
 
 /** シネマティックの1枚(背景画像 id + その上に順に流すナレーション行) */
@@ -78,7 +79,7 @@ export class Cinematic {
     this.prompt = scene.add
       .text(Math.round(width * 0.88), Math.round(height * 0.93), "▽ スペース", {
         color: "#8f96a4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "15px"
       })
       .setOrigin(1, 0.5)

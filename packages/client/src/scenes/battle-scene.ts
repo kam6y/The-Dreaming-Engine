@@ -15,6 +15,7 @@ import {
 
 import { getGameClient, type BattleEventsPayload, type GameClient } from "../net/game-client.js";
 import { fitContain, fitCover } from "../ui/cover-image.js";
+import { UI_FONT_FAMILY } from "../ui/font.js";
 import { GaugeBar } from "../ui/gauge-bar.js";
 import { MenuList } from "../ui/menu-list.js";
 
@@ -215,7 +216,7 @@ export class BattleScene extends Phaser.Scene {
     this.add
       .text(cx, cy - radius - 40, this.view.enemyName, {
         color: "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "22px"
       })
       .setOrigin(0.5);
@@ -245,7 +246,7 @@ export class BattleScene extends Phaser.Scene {
 
     this.playerLevelText = this.add.text(x + 14, y + 10, "", {
       color: "#f1eee4",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "17px"
     });
     this.uiLayer.add(this.playerLevelText);
@@ -293,7 +294,7 @@ export class BattleScene extends Phaser.Scene {
 
     this.messageText = this.add.text(margin + 16, y + 14, "", {
       color: "#f1eee4",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "18px",
       wordWrap: { width: width - 320, useAdvancedWrap: true },
       lineSpacing: 6
@@ -303,7 +304,7 @@ export class BattleScene extends Phaser.Scene {
     this.advanceHint = this.add
       .text(margin + width - 16, y + height - 10, "▼ スペース", {
         color: "#a9b0ba",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "13px"
       })
       .setOrigin(1, 1);

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
 import { MenuList } from "./menu-list.js";
 
 export interface ConfirmDialogOptions {
@@ -35,7 +36,7 @@ export class ConfirmDialog {
     const text = scene.add
       .text(0, 0, options.message, {
         color: "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "18px",
         align: "center",
         // 日本語(スペース区切りなし)を折り返すため useAdvancedWrap を使う

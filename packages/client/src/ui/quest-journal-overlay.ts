@@ -2,6 +2,8 @@ import Phaser from "phaser";
 
 import type { SnapshotView, SubQuestView } from "@dreaming-engine/shared";
 
+import { UI_FONT_FAMILY } from "./font.js";
+
 export interface QuestJournalOverlayOptions {
   snapshot: SnapshotView;
 }
@@ -45,13 +47,13 @@ export class QuestJournalOverlay {
 
     const title = scene.add.text(panelX + 20, panelY + 14, "クエストジャーナル", {
       color: "#d8c98f",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "20px"
     });
 
     this.bodyText = scene.add.text(panelX + 20, panelY + 54, this.describe(options.snapshot.subQuests), {
       color: "#f1eee4",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "15px",
       wordWrap: { width: PANEL_WIDTH - 40, useAdvancedWrap: true },
       lineSpacing: 5
@@ -59,7 +61,7 @@ export class QuestJournalOverlay {
 
     const footer = scene.add.text(panelX + 20, panelY + PANEL_HEIGHT - 30, "Esc / Q でとじる", {
       color: "#6f7684",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "13px"
     });
 

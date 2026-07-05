@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
 import { TypewriterText } from "./typewriter-text.js";
 
 export interface DreamOverlayOptions {
@@ -51,7 +52,7 @@ export class DreamOverlay {
     const title = scene.add
       .text(width / 2, height * 0.22, "― 夢 ―", {
         color: "#8f86b0",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "22px"
       })
       .setOrigin(0.5);
@@ -59,7 +60,7 @@ export class DreamOverlay {
     this.wakePrompt = scene.add
       .text(width / 2, height * 0.8, "▽ 目を覚ます(スペース)", {
         color: "#6f6890",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "15px"
       })
       .setOrigin(0.5)

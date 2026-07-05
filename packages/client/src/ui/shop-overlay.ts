@@ -8,6 +8,7 @@ import {
   type SnapshotView
 } from "@dreaming-engine/shared";
 
+import { UI_FONT_FAMILY } from "./font.js";
 import { MenuList } from "./menu-list.js";
 
 type ShopInteraction = Extract<ActiveInteraction, { kind: "shop" }>;
@@ -86,14 +87,14 @@ export class ShopOverlay {
       `商店 — ${options.interaction.npcName}`,
       {
         color: "#d8c98f",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "20px"
       }
     );
 
     this.headerText = scene.add.text(this.panelX + 20, this.panelY + 48, "", {
       color: "#a9b0ba",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "15px"
     });
 
@@ -103,7 +104,7 @@ export class ShopOverlay {
       "",
       {
         color: "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "15px",
         wordWrap: { width: PANEL_WIDTH - 40, useAdvancedWrap: true },
         lineSpacing: 4

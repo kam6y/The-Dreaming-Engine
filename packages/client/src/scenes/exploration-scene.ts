@@ -24,6 +24,7 @@ import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { ConversationOverlay } from "../ui/conversation-overlay.js";
 import { DialogBox } from "../ui/dialog-box.js";
 import { DreamOverlay } from "../ui/dream-overlay.js";
+import { UI_FONT_FAMILY } from "../ui/font.js";
 import { InventoryOverlay } from "../ui/inventory-overlay.js";
 import { QuestJournalOverlay } from "../ui/quest-journal-overlay.js";
 import { ShopOverlay } from "../ui/shop-overlay.js";
@@ -680,7 +681,7 @@ export class ExplorationScene extends Phaser.Scene {
         this.add
           .text(x, y, "▽", {
             color: "#d8c98f",
-            fontFamily: "serif",
+            fontFamily: UI_FONT_FAMILY,
             fontSize: "16px"
           })
           .setOrigin(0.5)
@@ -722,7 +723,7 @@ export class ExplorationScene extends Phaser.Scene {
         this.add
           .text(x, y - TILE_SIZE + 8, NPC_DISPLAY_NAMES[npc.id], {
             color: "#a9b0ba",
-            fontFamily: "serif",
+            fontFamily: UI_FONT_FAMILY,
             fontSize: "13px"
           })
           .setOrigin(0.5)
@@ -755,7 +756,7 @@ export class ExplorationScene extends Phaser.Scene {
       this.add
         .text(x, y - TILE_SIZE - 6, ENEMY_DISPLAY_NAMES[this.map.boss.enemyId], {
           color: "#c98f9a",
-          fontFamily: "serif",
+          fontFamily: UI_FONT_FAMILY,
           fontSize: "13px"
         })
         .setOrigin(0.5)
@@ -857,7 +858,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.uiLayer.add(
       this.add.text(12, 10, this.map.displayName, {
         color: "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "16px",
         backgroundColor: "#0b0d12cc",
         padding: { x: 8, y: 4 }
@@ -865,7 +866,7 @@ export class ExplorationScene extends Phaser.Scene {
     );
     this.hudStatusText = this.add.text(12, 42, "", {
       color: "#a9b0ba",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "14px",
       backgroundColor: "#0b0d12cc",
       padding: { x: 8, y: 4 }

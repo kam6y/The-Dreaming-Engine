@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY, waitForUiFont } from "../ui/font.js";
+
 /**
  * アセット台帳(assets/manifest.json)の1エントリ。
  * クライアントは path 直書きをせず、この台帳経由で id → 画像をロードする
@@ -28,7 +30,7 @@ export class PreloadScene extends Phaser.Scene {
     const label = this.add
       .text(width / 2, height / 2 - 20, "夢見る機関を呼び起こしています…", {
         color: "#a9b0ba",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "18px"
       })
       .setOrigin(0.5);
@@ -66,6 +68,11 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   public create(): void {
-    this.scene.start("title");
+    // 基本フォントの読み込みを待ってからタイトルへ遷移する(Phaser Text は生成時に
+    // 自前キャンバスへ描画するため、確定前に描画したテキストはフォールバック字形のまま残る)。
+    // waitForUiFont は失敗・タイムアウトでも解決するので、起動が止まることはない
+    void waitForUiFont().then(() => {
+      this.scene.start("title");
+    });
   }
 }

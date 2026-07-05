@@ -730,3 +730,31 @@
   今回は視覚確認に再利用した上で kill した。残留サーバーは古い dist を配信し得るため、
   E2E 前後にポートを確認するとよい
 - 次にやること: 拡張フェーズ(/loop + BACKLOG.md)
+
+## [24] 2026-07-05 日本語フォント「しっぽり明朝」の導入(M5完了)
+
+- やったこと(ROADMAP M5最後の未完了項目。UI作業のためオーケストレーター自身が実装、
+  fontFamily使用箇所の調査のみExplore subagentへ委譲):
+  - しっぽり明朝 Regular(SIL OFL 1.1)を google/fonts リポジトリから取得し、
+    fonttools で woff2 へ無加工圧縮(8.7MB→3.2MB)して `assets/fonts/` に同梱
+    (OFL.txt・出典README付き)。**サブセット化はしない**(AIが任意の漢字を出力しうるため全グリフ保持)
+  - `@font-face` を style.css に宣言し、vite の assets 配信ミドルウェアに
+    `.woff2: font/woff2` を追加。HTMLオーバーレイ(h1等)のfont-familyにも先頭適用
+  - 共通定数 `UI_FONT_FAMILY`(`"Shippori Mincho", serif`)を
+    `packages/client/src/ui/font.ts` に新設し、38箇所の `fontFamily: "serif"`
+    ハードコード(16ファイル)をすべて置換(以後のフォント変更は1箇所で済む)
+  - PreloadScene の create で `waitForUiFont()` を待ってからタイトルへ遷移
+    (Phaser Text は生成時に自前キャンバスへ描画するため、確定前に描画すると
+    フォールバック字形のまま残る)。**失敗・タイムアウト(5秒)・非ブラウザ環境でも
+    必ず解決**して起動を阻害しない設計。テスト5件追加(font.test.ts。unit 556)
+- 検証: `pnpm check` 緑・`pnpm test:e2e` 10/10緑・モック実プレイ(Playwright MCP)で
+  タイトル画面スクリーンショット確認(明朝体で描画)+ `document.fonts.check` true
+- 裁量で決めたこと:
+  - Boldウェイトは導入しない(クライアントに fontStyle 指定が0件のため。必要になったら
+    `assets/fonts/` へ追加して @font-face を足す)
+  - フォントは manifest.json の管理対象外(台帳は画像用で、preload が全エントリを
+    load.image するため混ぜられない)。出典・ライセンスは assets/fonts/README.md に記録
+- これで **M5の全項目が完了**(ROADMAPの未完了項目は尽きた)
+- 次にやること: 拡張フェーズ。BACKLOG.md 最上位の未完了項目「タイルマップの
+  グラフィック改善(Kenney等CC0素材への置換、またはオートタイル実装)」を
+  M7+としてROADMAP末尾へ分割展開してから着手する

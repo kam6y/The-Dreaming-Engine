@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
+
 export interface GaugeBarOptions {
   x: number;
   y: number;
@@ -33,7 +35,7 @@ export class GaugeBar {
 
     const label = scene.add.text(0, -2, options.label, {
       color: "#a9b0ba",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "14px"
     });
 
@@ -49,7 +51,7 @@ export class GaugeBar {
     this.valueText = scene.add
       .text(LABEL_WIDTH + this.barWidth + 8, -2, "", {
         color: "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "14px"
       })
       .setOrigin(0, 0);

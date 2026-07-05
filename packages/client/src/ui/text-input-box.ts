@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
+
 export interface TextInputBoxOptions {
   /** 最大文字数(会話の自由入力は200字: ai-guardrails.md第3層。サーバー側でも強制) */
   maxLength?: number;
@@ -69,7 +71,7 @@ export class TextInputBox {
       width: "min(640px, 80%)",
       padding: "10px 14px",
       fontSize: "16px",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       color: "#f1eee4",
       background: "#0b0d12f2",
       border: "2px solid #6b6350",

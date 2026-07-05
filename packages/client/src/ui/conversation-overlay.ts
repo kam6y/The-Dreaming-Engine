@@ -8,6 +8,7 @@ import type {
 } from "@dreaming-engine/shared";
 
 import { fitContain, fitCover } from "./cover-image.js";
+import { UI_FONT_FAMILY } from "./font.js";
 import { MenuList } from "./menu-list.js";
 import { TextInputBox } from "./text-input-box.js";
 import { TypewriterText } from "./typewriter-text.js";
@@ -143,7 +144,7 @@ export class ConversationOverlay {
       this.panelX + 24,
       this.panelY + 16,
       this.interaction.npcName,
-      { color: "#d8c98f", fontFamily: "serif", fontSize: "20px" }
+      { color: "#d8c98f", fontFamily: UI_FONT_FAMILY, fontSize: "20px" }
     );
 
     // 発話本文(左カラム。メニュー幅を除いた領域に折り返す)
@@ -152,7 +153,7 @@ export class ConversationOverlay {
     // 提案の内容(あるときだけ表示)
     this.proposalText = scene.add.text(this.panelX + 24, this.panelY + 168, "", {
       color: "#c9b98f",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "15px",
       wordWrap: { width: bodyWidth, useAdvancedWrap: true },
       lineSpacing: 4
@@ -161,7 +162,7 @@ export class ConversationOverlay {
     // 下部のヒント/通知行(応答待ち・エラー等)
     this.hintText = scene.add.text(this.panelX + 24, this.panelY + PANEL_HEIGHT - 34, "", {
       color: "#a9b0ba",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "14px",
       wordWrap: { width: PANEL_WIDTH - 48, useAdvancedWrap: true }
     });

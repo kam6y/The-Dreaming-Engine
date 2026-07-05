@@ -6,6 +6,7 @@ import { clearDialogQueue } from "../dialog-queue.js";
 import { getGameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { fitCover } from "../ui/cover-image.js";
+import { UI_FONT_FAMILY } from "../ui/font.js";
 import { MenuList } from "../ui/menu-list.js";
 import { newGameOptionsFromUrl, shouldSkipIntro } from "../url-flags.js";
 
@@ -73,21 +74,21 @@ export class TitleScene extends Phaser.Scene {
     this.titleText = this.add
       .text(0, 0, GAME_TITLE, {
         color: "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "44px"
       })
       .setOrigin(0.5);
     this.subtitleText = this.add
       .text(0, 0, "夢見る機関は、まだ微かに動いている。", {
         color: "#a9b0ba",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "20px"
       })
       .setOrigin(0.5);
     this.statusText = this.add
       .text(0, 0, "", {
         color: "#c98f9a",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "16px"
       })
       .setOrigin(0.5);

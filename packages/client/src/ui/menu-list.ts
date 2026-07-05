@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 
+import { UI_FONT_FAMILY } from "./font.js";
+
 export interface MenuListOptions {
   /** メニュー項目(表示順) */
   items: readonly { id: string; label: string; disabled?: boolean }[];
@@ -61,7 +63,7 @@ export class MenuList {
     options.items.forEach((item, i) => {
       const text = scene.add.text(PADDING + 22, PADDING + i * ROW_HEIGHT, item.label, {
         color: item.disabled === true ? "#5c6068" : "#f1eee4",
-        fontFamily: "serif",
+        fontFamily: UI_FONT_FAMILY,
         fontSize: "18px"
       });
       this.rowTexts.push(text);
@@ -70,7 +72,7 @@ export class MenuList {
 
     this.cursor = scene.add.text(PADDING, PADDING, "▶", {
       color: "#d8c98f",
-      fontFamily: "serif",
+      fontFamily: UI_FONT_FAMILY,
       fontSize: "18px"
     });
     children.push(this.cursor);
