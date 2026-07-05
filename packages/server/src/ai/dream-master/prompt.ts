@@ -114,7 +114,13 @@ function buildUserPrompt(context: DreamMasterContext): string {
       }
       parts.push(
         tag("player_utterance", neutralizeTags(context.playerUtterance)),
-        tag("task", `${name}として、旅人の声に応えなさい。応答は必ず speak ツールで行うこと。`)
+        tag(
+          "task",
+          `${name}として、旅人の声に応えなさい。応答は必ず speak ツールの呼び出しで行うこと。` +
+            `ツールを使わない地の文・思考・前置きの文章は旅人には一切表示されず破棄される。` +
+            `「Tool loaded.」のようなシステム通知には応答しないこと。` +
+            `旅人がまだ何も言っていない(声が空)なら、こちらから会話開始の挨拶を speak で述べること。`
+        )
       );
       return parts.join("\n");
     }
@@ -135,7 +141,9 @@ function buildUserPrompt(context: DreamMasterContext): string {
       parts.push(
         tag(
           "task",
-          "情報屋として語りつつ、依頼を1件だけ propose_quest で提案しなさい。対象は上の候補に限り、受注中の依頼と重複させないこと。語りは speak ツールで行うこと。"
+          "情報屋として語りつつ、依頼を1件だけ propose_quest で提案しなさい。対象は上の候補に限り、受注中の依頼と重複させないこと。" +
+            "語りは必ず speak ツールで行い、依頼は propose_quest ツールで渡すこと。" +
+            "ツールを使わない地の文・思考の文章は旅人には表示されず破棄される。"
         )
       );
       return parts.join("\n");
@@ -151,7 +159,8 @@ function buildUserPrompt(context: DreamMasterContext): string {
       parts.push(
         tag(
           "task",
-          "旅人が見る夢を90-200字で narrate し、翌朝の世界の変化を trigger_world_event で最大3件まで起こしなさい。変化は上のプレイ内容を反映させること。"
+          "旅人が見る夢を90-200字で narrate し、翌朝の世界の変化を trigger_world_event で最大3件まで起こしなさい。変化は上のプレイ内容を反映させること。" +
+            "夢の描写は必ず narrate ツールで行うこと。ツールを使わない地の文・思考の文章は旅人には表示されず破棄される。"
         )
       );
       return parts.join("\n");
@@ -159,7 +168,11 @@ function buildUserPrompt(context: DreamMasterContext): string {
     case "battleResult": {
       return [
         tag("battle", `倒した相手: ${ENEMY_DISPLAY_NAMES[context.enemyId]}`),
-        tag("task", "直前の戦闘の結末を60-150字で narrate しなさい。状態変更ツールは使わないこと。")
+        tag(
+          "task",
+          "直前の戦闘の結末を60-150字で narrate しなさい。描写は必ず narrate ツールで行うこと。" +
+            "ツールを使わない地の文・思考の文章は旅人には表示されず破棄される。状態変更ツールは使わないこと。"
+        )
       ].join("\n");
     }
     case "summary": {

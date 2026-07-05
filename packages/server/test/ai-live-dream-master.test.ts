@@ -1,3 +1,4 @@
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 
 import { OAUTH_TOKEN_ENV } from "../src/ai/auth.js";
@@ -14,6 +15,7 @@ import {
   makeCanUseTool,
   mcpToolName,
   WORLD_CONSTITUTION,
+  type DreamMasterContext,
   type DrainDeps,
   type QueryFn,
   type SdkMessageLike
@@ -379,5 +381,78 @@ describe("LiveDreamMaster.run: 結線(実AI不使用)", () => {
       // dream は sonnet
       expect(result.meta.model).toBe(config.models.sonnet);
     }
+  });
+
+  // 拡張思考(thinking)のフロー別制御(ユーザー決定):
+  // プレイヤーがリアルタイムに待つフロー(会話・依頼提案・戦果)は無効化、裏方GM(夢・要約)は維持。
+  async function captureThinking(context: DreamMasterContext): Promise<Options["thinking"]> {
+    let capturedOptions: Options | undefined;
+    const capturingQuery: QueryFn = (params) => {
+      capturedOptions = params.options;
+      return (async function* (): AsyncGenerator<SdkMessageLike> {
+        yield { type: "result", subtype: "success", result: "..." };
+      })();
+    };
+    const dm = new LiveDreamMaster({ config, env: liveEnv, query: capturingQuery });
+    await dm.run(context);
+    return capturedOptions?.thinking;
+  }
+
+  it("会話は thinking を disabled で渡す(リアルタイム待ちフロー)", async () => {
+    expect(await captureThinking({ flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "やあ" })).toEqual({
+      type: "disabled"
+    });
+  });
+
+  it("依頼提案(questGeneration)は thinking を disabled で渡す", async () => {
+    expect(await captureThinking({ flow: "questGeneration", partnerNpcId: "informant" })).toEqual({ type: "disabled" });
+  });
+
+  it("戦果(battleResult)は thinking を disabled で渡す", async () => {
+    expect(await captureThinking({ flow: "battleResult", enemyId: "mist-wolf" })).toEqual({ type: "disabled" });
+  });
+
+  it("夢(dream)は thinking キーを渡さない(SDK既定=維持)", async () => {
+    expect(await captureThinking({ flow: "dream", recentPlay: "戦った" })).toBeUndefined();
+  });
+
+  it("要約(summary)は thinking キーを渡さない(SDK既定=維持)", async () => {
+    expect(
+      await captureThinking({ flow: "summary", partnerNpcId: "innkeeper", existingSummary: "", exchanges: [] })
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// task タグのツール必須拘束(ツール外テキストは破棄される旨を明示)
+// ---------------------------------------------------------------------------
+
+describe("buildPrompt: task タグのツール必須拘束", () => {
+  it("会話 task は speak 必須とツール外テキスト破棄を明示する", () => {
+    const built = buildPrompt({ flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "" });
+    expect(built.userPrompt).toContain("speak");
+    expect(built.userPrompt).toContain("破棄");
+  });
+
+  it("questGeneration task もツール外テキスト破棄を明示する", () => {
+    const built = buildPrompt({ flow: "questGeneration", partnerNpcId: "informant" });
+    expect(built.userPrompt).toContain("破棄");
+  });
+
+  it("dream task は narrate 必須とツール外テキスト破棄を明示する", () => {
+    const built = buildPrompt({ flow: "dream", recentPlay: "忘れ野を歩いた" });
+    expect(built.userPrompt).toContain("narrate");
+    expect(built.userPrompt).toContain("破棄");
+  });
+
+  it("battleResult task は narrate 必須とツール外テキスト破棄を明示する", () => {
+    const built = buildPrompt({ flow: "battleResult", enemyId: "mist-wolf" });
+    expect(built.userPrompt).toContain("narrate");
+    expect(built.userPrompt).toContain("破棄");
+  });
+
+  it("summary task は変更しない(テキスト応答が本体なので破棄と書かない)", () => {
+    const built = buildPrompt({ flow: "summary", partnerNpcId: "innkeeper", existingSummary: "", exchanges: [] });
+    expect(built.userPrompt).not.toContain("破棄");
   });
 });

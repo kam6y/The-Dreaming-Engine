@@ -367,6 +367,7 @@ export class LiveDreamMaster implements DreamMaster {
       maxTurns: spec.limits.maxTurns,
       permissionMode: "default",
       persistSession: false,
+      ...(spec.thinkingDisabled ? { thinking: { type: "disabled" as const } } : {}),
       env: this.authEnv,
       abortController
     };

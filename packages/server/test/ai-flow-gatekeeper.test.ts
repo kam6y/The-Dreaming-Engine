@@ -63,6 +63,14 @@ class FailingDreamMaster implements DreamMaster {
   }
 }
 
+/** 成功するがツールを1つも呼ばない DreamMaster(実プレイの失敗インシデント再現用) */
+class ToollessSuccessDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    return Promise.resolve({ ok: true, flow: ctx.flow, toolCalls: [], text: null, meta: META });
+  }
+}
+
 /** 応答を任意のタイミングで解決できる DreamMaster(直列化テスト用) */
 class DeferredDreamMaster implements DreamMaster {
   public readonly mode = "mock" as const;
@@ -340,6 +348,40 @@ describe("AiFlowGatekeeper", () => {
     const cooldown = lines.filter((l) => l.kind === "cooldown_blocked");
     expect(cooldown).toHaveLength(1);
     expect(cooldown[0]?.count).toBe(2);
+  });
+
+  it("表示系承認0件の会話ターンは failureKind=display_approved_zero と usedFallback を ai_call に記録する", async () => {
+    // 実プレイのインシデント(responseText=null・toolCalls=[])の再現:
+    // AIがツールを1つも呼ばずテキストだけで応答を終える → 表示系承認0件 → 定型フォールバック。
+    const { gk } = makeGatekeeper(new ToollessSuccessDreamMaster());
+    const r = await gk.openConversation({ npcId: "innkeeper", affinityAtOpen: 30, persistent: persistentBase() });
+    expect(r.outcome).toBe("ai");
+    expect(r.aiInvoked).toBe(true);
+
+    const aiCalls = readLines().filter((l) => l.type === "ai_call");
+    expect(aiCalls).toHaveLength(1);
+    expect(aiCalls[0]).toMatchObject({
+      flow: "conversation",
+      failureKind: "display_approved_zero",
+      usedFallback: true
+    });
+  });
+
+  it("成功した会話ターンは failureKind=null・usedFallback=false を ai_call に記録する", async () => {
+    const dm = new DeferredDreamMaster(speakSuccess);
+    const { gk } = makeGatekeeper(dm);
+    const p = gk.openConversation({ npcId: "innkeeper", affinityAtOpen: 30, persistent: persistentBase() });
+    dm.flush(); // AI成功(speak)を解決
+    const r = await p;
+    expect(r.outcome).toBe("ai");
+
+    const aiCalls = readLines().filter((l) => l.type === "ai_call");
+    expect(aiCalls).toHaveLength(1);
+    expect(aiCalls[0]).toMatchObject({
+      flow: "conversation",
+      failureKind: null,
+      usedFallback: false
+    });
   });
 
   it("縮退の発動を境界イベントとして記録する", async () => {

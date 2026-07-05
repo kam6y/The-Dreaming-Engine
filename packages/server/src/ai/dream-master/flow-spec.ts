@@ -6,9 +6,10 @@ import { FLOW_TOOL_ALLOWLIST, type ToolFlow, type ToolName } from "../tool-valid
  * `config/ai.json`(`AiConfig`)と `FLOW_TOOL_ALLOWLIST` から解決する。
  *
  * **値はすべて config 由来**(モデル名・タイムアウト秒・ターン/トークン上限)であり、
- * ここでハードコードするのは「フロー→モデル区分(haiku/sonnet)」と「フロー→上限区分
- * (会話/GM)」の対応だけ。これは ai-integration.md「呼び出しフロー別仕様」220-229 の
- * 表そのものの構造(可変値ではない)であり、`FLOW_TOOL_ALLOWLIST` と同格の分類である。
+ * ここでハードコードするのは「フロー→モデル区分(haiku/sonnet)」「フロー→上限区分
+ * (会話/GM)」「フロー→拡張思考の有効/無効」の対応だけ。これは ai-integration.md
+ * 「呼び出しフロー別仕様」220-229 の表そのものの構造(可変値ではない)であり、
+ * `FLOW_TOOL_ALLOWLIST` と同格の分類である。
  */
 
 /** フロー → モデル区分(ai-integration.md 220-226 の「モデル」列) */
@@ -29,6 +30,15 @@ export const FLOW_DIVISION: Record<ToolFlow, "conversation" | "gm"> = {
   summary: "conversation"
 };
 
+/** フロー → 拡張思考(thinking)を無効化するか(ユーザー決定)。*/
+export const FLOW_THINKING_DISABLED: Record<ToolFlow, boolean> = {
+  conversation: true,
+  questGeneration: true,
+  dream: false,
+  battleResult: true,
+  summary: false
+};
+
 /** フロー別の解決済み実行仕様(Live/Mock 双方が参照する共通スペック) */
 export interface FlowSpec {
   readonly flow: ToolFlow;
@@ -46,6 +56,8 @@ export interface FlowSpec {
     readonly maxTurns: number;
     readonly maxOutputTokens: number;
   };
+  /** 拡張思考を無効化するか(FLOW_THINKING_DISABLED 由来。true のフローのみ live が thinking を渡す) */
+  readonly thinkingDisabled: boolean;
 }
 
 /** フローと config から実行仕様を解決する(純関数) */
@@ -59,6 +71,7 @@ export function resolveFlowSpec(flow: ToolFlow, config: AiConfig): FlowSpec {
     model: config.models[tier],
     allowedTools: FLOW_TOOL_ALLOWLIST[flow],
     timeout: { firstTokenSeconds: timeout.firstTokenSeconds, totalSeconds: timeout.totalSeconds },
-    limits: { maxTurns: limits.maxTurns, maxOutputTokens: limits.maxOutputTokens }
+    limits: { maxTurns: limits.maxTurns, maxOutputTokens: limits.maxOutputTokens },
+    thinkingDisabled: FLOW_THINKING_DISABLED[flow]
   };
 }

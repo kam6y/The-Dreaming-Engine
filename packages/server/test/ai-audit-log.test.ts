@@ -58,6 +58,29 @@ describe("AuditLog", () => {
     });
   });
 
+  it("失敗ターンの failureKind と usedFallback を記録する(診断性の強化)", () => {
+    const log = new AuditLog({ dir, now, maskEnv: {} });
+    log.logAiCall({
+      flow: "conversation",
+      contextHash: "h",
+      playerInput: null,
+      responseText: null,
+      toolCalls: [],
+      durationMs: 19580,
+      model: "claude-haiku-4-5",
+      failureKind: "display_approved_zero",
+      usedFallback: true
+    });
+    const lines = readLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      type: "ai_call",
+      flow: "conversation",
+      failureKind: "display_approved_zero",
+      usedFallback: true
+    });
+  });
+
   it("全フィールドに機密マスクを適用してから書く", () => {
     const log = new AuditLog({ dir, now, maskEnv: {} });
     log.logAiCall({

@@ -587,3 +587,53 @@
 - 人間確認待ち: (1) `.env` 設定の上で `pnpm dev` → 実プレイで live 生成の確認、
   (2) `pnpm test:ai-live` の実行(資格情報が届き skip が解消されるはず)
 - 次にやること: 拡張フェーズ(/loop + BACKLOG.md)。人間確認待ち項目の消化は人間
+
+## [19] 2026-07-05 バグ修正: live会話でフォールバック文表示(speak呼び忘れ)+thinkingフロー別制御
+
+- やったこと:
+  - 症状(ユーザー報告): 実プレイ(AI_MODE=live)のNPC会話でフォールバック文章が表示された。
+    `pnpm test:ai-live` 自体は緑(23.7秒)=認証・疎通は前エントリ[18]の修正で機能している
+  - 根本原因(systematic-debugging+実測プローブで特定): 監査ログ(durationMs=19580・
+    responseText=null・toolCalls=[])から、**AIがツールを1つも呼ばずテキストのみで応答を
+    終え、表示系(speak)承認0件 → display_approved_zero → 定型フォールバック**の経路と特定。
+    寄与要因は (a) SDK既定で有効な拡張思考(thinking)による長考(実測: 会話応答22秒中
+    思考8秒超)と脱線、(b) SDK/CLIが注入する合成メッセージ(「Tool loaded.」等)への
+    気取られ、(c) taskタグの「必ずspeakツールで」だけではHaikuへの拘束が弱い、の複合
+  - 修正(実装はsubagent=Opusへ委譲、オーケストレーターが検収):
+    - **thinkingのフロー別制御**(flow-spec.ts に FLOW_THINKING_DISABLED 追加、live.ts で
+      該当フローのみ thinking: disabled を SDK Options へ):
+      プレイヤーがリアルタイムで待つ conversation / questGeneration / battleResult は無効、
+      裏方GM処理の dream / summary は維持(**ユーザー決定**: 対話するAIは思考不要、
+      対話しないAIは思考維持)
+    - **taskタグのツール必須拘束を強化**(prompt.ts): 「ツールを使わない地の文・思考・
+      前置きはプレイヤーに表示されず破棄される」「システム通知に応答しない」「声が空なら
+      こちらから挨拶をspeakで」等を4フローに明文化(summary・世界観憲法は不変更)
+    - **監査ログの診断性強化**: ai_call レコードへ failureKind / usedFallback を追加
+      (audit-log.ts+gatekeeper.ts。今回の診断が難航した教訓。監査の強化=仕様の弱体化なし)
+  - 実AI検証(ユーザーの明示許可により実行): `pnpm test:ai-live` **緑・11.9秒**(修正前
+    23.7秒からほぼ半減)。実プレイ失敗ケース再現プローブ(会話開始・playerUtterance空)で
+    **9.1秒完了・speak確実発火・オルガの口調正常**(修正前22秒)を確認
+- 検証: `pnpm check` 緑(unit 534件)・`pnpm test:e2e` 10/10緑・実AI2回(上記)
+- 実AI観測の記録(プローブで判明した既知挙動・スコープ外):
+  - モデルが ToolSearch を1ターン使って mcp__dream__speak をロードしてから呼ぶ
+    (SDKのツール遅延ロード)。また speak 後にSDK合成メッセージ(「no visible output」)への
+    応答で1ターン消費し、**num_turns=4/4 と maxTurns ギリギリ**。ツール検証層の防御は活き
+    ており実害なしだが、余裕がない
+  - CLAUDE_SDK_CAN_USE_TOOL_SHADOWED 警告: bare allowedTools が canUseTool を
+    シャドーする(SDK仕様)。検証層(第1層)の二重検査は独立して機能しているため
+    防御は維持されているが、canUseTool のデフォルト拒否を実効化するなら
+    PreToolUse フック等への移行が必要
+- 仕様変更提案(実装せず記録のみ):
+  - (1) display_approved_zero もリトライ1回の対象に加える(現仕様 ai-integration.md 258-259 は
+    「検証却下はリトライせず」。thinking無効化+プロンプト強化で発生率は下げたが、
+    非決定的な再発の保険として)
+  - (2) 会話フローの maxTurns を 4→6 へ(SDKのツール遅延ロード+合成メッセージ応答で
+    2ターン浪費し、実測 4/4 ギリギリのため。ai-integration.md「ターン数上限(会話: 4)」の変更)
+- 裁量で決めたこと: FLOW_THINKING_DISABLED は config でなく flow-spec.ts の分類定数
+  (FLOW_MODEL_TIER と同格)。維持フローは thinking キー自体を渡さず SDK 既定に委ねる
+- 既知の問題: audit-log.ts に HEAD から NUL 文字(境界イベント集約キーの区切りに実バイトの
+  0x00 がテンプレートリテラル内へ直接埋め込まれている)があり、git がバイナリ扱いして
+  diff が見えない。可視のエスケープ表記への置換を検討(機能は正常。次回の軽微タスク向き)
+- 人間確認待ち: 実プレイ(pnpm dev)での会話体感確認(応答9秒前後・フォールバック文が
+  出ないこと)。E2E実行時はゲームを開いたブラウザタブを閉じること(エントリ[18]の教訓)
+- 次にやること: 拡張フェーズ(/loop + BACKLOG.md)。仕様変更提案(1)(2)の採否は人間

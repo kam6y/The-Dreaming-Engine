@@ -16,6 +16,7 @@ import {
   createLiveDreamMaster,
   FLOW_DIVISION,
   FLOW_MODEL_TIER,
+  FLOW_THINKING_DISABLED,
   MockDreamMaster,
   resolveFlowSpec,
   type DreamMasterContext,
@@ -144,6 +145,16 @@ describe("resolveFlowSpec", () => {
       ["battleResult", "conversation", "dream", "questGeneration", "summary"].sort()
     );
     expect(Object.keys(FLOW_DIVISION).sort()).toEqual(Object.keys(FLOW_MODEL_TIER).sort());
+    expect(Object.keys(FLOW_THINKING_DISABLED).sort()).toEqual(Object.keys(FLOW_MODEL_TIER).sort());
+  });
+
+  it("thinking 無効化はリアルタイム待ちフロー(会話・依頼提案・戦果)のみ true", () => {
+    expect(resolveFlowSpec("conversation", config).thinkingDisabled).toBe(true);
+    expect(resolveFlowSpec("questGeneration", config).thinkingDisabled).toBe(true);
+    expect(resolveFlowSpec("battleResult", config).thinkingDisabled).toBe(true);
+    // 裏方GM処理は品質優先で思考を維持(false)
+    expect(resolveFlowSpec("dream", config).thinkingDisabled).toBe(false);
+    expect(resolveFlowSpec("summary", config).thinkingDisabled).toBe(false);
   });
 });
 

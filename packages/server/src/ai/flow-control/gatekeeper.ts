@@ -456,7 +456,10 @@ export class AiFlowGatekeeper {
         responseText: turn.responseText,
         toolCalls: [...turn.toolCallRecords],
         durationMs,
-        model: turn.model ?? "unknown"
+        model: turn.model ?? "unknown",
+        // 失敗種別・フォールバック有無を残す(表示系承認0件フォールバック等の事後診断のため)
+        failureKind: turn.failureKind,
+        usedFallback: turn.usedFallback
       });
     }
     // 縮退の発動を境界イベントとして記録
