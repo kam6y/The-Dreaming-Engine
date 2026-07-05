@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { TILESET_FRAME_CONFIG, TILESET_KEY, TILESET_PATH } from "../tile-frames.js";
 import { UI_FONT_FAMILY, waitForUiFont } from "../ui/font.js";
 
 /**
@@ -47,6 +48,11 @@ export class PreloadScene extends Phaser.Scene {
       // 個別アセットの欠落は致命ではない(各シーンがプレースホルダーへ退避する)
       console.warn(`[preload] アセット読み込み失敗: ${file.key}`);
     });
+
+    // CC0タイルセット(manifest対象外: assets/tiles/README.md が台帳)。
+    // 読み込み失敗時は FILE_LOAD_ERROR 警告のみで続行し、探索シーンが
+    // 単色プレースホルダー描画へ退避する
+    this.load.spritesheet(TILESET_KEY, TILESET_PATH, TILESET_FRAME_CONFIG);
 
     // まず台帳を読み、その完了時に全画像をキューへ積む(ロード中の追加は継続処理される)
     this.load.json("asset-manifest", "assets/manifest.json");
