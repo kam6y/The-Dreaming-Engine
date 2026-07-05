@@ -20,7 +20,7 @@ import type { AiUtteranceEvent } from "../net/game-client.js";
 
 import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
 import { getGameClient, type GameClient } from "../net/game-client.js";
-import { TILESET_KEY, TILESET_TILE_PX, tileFrame } from "../tile-frames.js";
+import { TILESET_KEY, TILESET_TILE_PX, tileFrame, tileTint } from "../tile-frames.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { ConversationOverlay } from "../ui/conversation-overlay.js";
 import { DialogBox } from "../ui/dialog-box.js";
@@ -653,10 +653,11 @@ export class ExplorationScene extends Phaser.Scene {
     this.drawTilesPlaceholder();
   }
 
-  /** CC0タイルセット(M7-2)による描画。フレーム割当は tile-frames.ts */
+  /** CC0タイルセット(M7-2)による描画。フレーム割当・トーンは tile-frames.ts */
   private drawTilesFromTileset(): void {
     // 16px→32pxの2倍表示のため、にじみ防止でNEARESTフィルタにする
     this.textures.get(TILESET_KEY).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    const tint = tileTint(this.map.id);
     for (let y = 0; y < this.map.height; y += 1) {
       for (let x = 0; x < this.map.width; x += 1) {
         const tile = tileTypeAt(this.map, { x, y });
@@ -666,7 +667,8 @@ export class ExplorationScene extends Phaser.Scene {
         const image = this.add
           .image(x * TILE_SIZE, y * TILE_SIZE, TILESET_KEY, tileFrame(this.map.id, tile))
           .setOrigin(0)
-          .setScale(TILE_SIZE / TILESET_TILE_PX);
+          .setScale(TILE_SIZE / TILESET_TILE_PX)
+          .setTint(tint);
         this.worldLayer.add(image);
       }
     }

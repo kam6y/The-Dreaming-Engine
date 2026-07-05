@@ -65,3 +65,20 @@ const TILE_FRAMES: Record<MapCategory, Record<TileType, number>> = {
 export function tileFrame(mapId: MapId, tile: TileType): number {
   return TILE_FRAMES[categoryOf(mapId)][tile];
 }
+
+/**
+ * マップ区分ごとの暗色トーン(乗算tint)。原色寄りのCC0タイルを
+ * ダークファンタジーの沈んだ色調(青灰と琥珀の対比: asset-pipeline.md)へ寄せる。
+ * 街=夕暮れの青灰、フィールド=くすんだ荒野、ダンジョン=冷たい青灰。
+ * 値はタイル合成プレビューの目視で選定(JOURNAL[27])。
+ */
+const TILE_TINTS: Record<MapCategory, number> = {
+  town: 0xaaa6b4,
+  field: 0x8f9480,
+  dungeon: 0x7d84a0
+};
+
+/** マップに応じたタイルの乗算tintを返す */
+export function tileTint(mapId: MapId): number {
+  return TILE_TINTS[categoryOf(mapId)];
+}
