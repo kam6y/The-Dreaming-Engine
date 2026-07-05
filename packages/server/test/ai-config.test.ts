@@ -13,7 +13,7 @@ const SPEC_DEFAULTS: AiConfig = {
     sonnet: "claude-sonnet-5"
   },
   limits: {
-    conversation: { maxTurns: 4, maxOutputTokens: 1000 },
+    conversation: { maxTurns: 6, maxOutputTokens: 1000 },
     gm: { maxTurns: 8, maxOutputTokens: 2000 }
   },
   timeouts: {

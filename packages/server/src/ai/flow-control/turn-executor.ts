@@ -38,6 +38,12 @@ import type { ConversationSession } from "./session.js";
 /** 縮退を発動する連続失敗回数(ai-integration.md 259「同一フローで3回連続の失敗」)。仕様固定値 */
 export const DEGRADE_CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
+/**
+ * 1トリガーあたりのリトライ上限(ai-integration.md「リトライ」。サブスク枠保護)。
+ * 初回に加えてこの回数まで DreamMaster を呼ぶ。失敗理由の組み合わせによらず超過しない。仕様固定値
+ */
+export const RETRY_LIMIT_PER_TRIGGER = 1;
+
 /** ターンの失敗種別。DreamMaster 失敗3種 + 検証由来2種 */
 export type AiTurnFailureKind =
   | DreamMasterFailureKind
@@ -82,6 +88,39 @@ export interface AiTurnResult {
   /** 監査ログ用: 各ツール呼び出しと検証結果 */
   readonly toolCallRecords: readonly ToolCallRecord[];
 }
+
+/**
+ * DreamMaster 1回の結果を評価した中間結果。**副作用は未確定**にしておき、
+ * リトライ判定(表示系承認0件・DreamMaster失敗はリトライ対象)のあと finalizeOutcome で
+ * 連続失敗カウントの記録・セッション状態の確定(commit)を行う。これにより、リトライする
+ * 初回試行の副作用(検証カウンタ・好感度変化・失敗カウント)が漏れて二重適用にならない。
+ */
+type TurnOutcome =
+  | {
+      /** 成功(表示系承認あり)。commit で連続失敗カウントのリセットとセッション確定を行う */
+      readonly kind: "success";
+      readonly result: AiTurnResult;
+      readonly commit: () => void;
+    }
+  | {
+      /** DreamMaster 失敗(タイムアウト/APIエラー)。リトライ対象 */
+      readonly kind: "dm_failure";
+      readonly failure: DreamMasterFailureKind;
+      readonly model: string;
+    }
+  | {
+      /** 成功したが表示系(speak/narrate)承認0件(dream/generic フロー)。リトライ対象 */
+      readonly kind: "display_zero";
+      readonly model: string;
+      readonly records: readonly ToolCallRecord[];
+    }
+  | {
+      /** summary フローの出力壁却下。**リトライ対象外**(即失敗確定) */
+      readonly kind: "summary_reject";
+      readonly responseText: string | null;
+      readonly model: string;
+      readonly records: readonly ToolCallRecord[];
+    };
 
 /** executeTurn の入力 */
 export interface AiTurnInput {
@@ -192,46 +231,104 @@ export class AiTurnExecutor {
       });
     }
 
-    // 初回呼び出し(セッション総数上限ゲート付き)
-    const first = await this.invokeWithLimit(input.dmContext);
-    if (first.blocked) {
-      return this.fallbackResult(flow, {
-        failedTurn: false,
-        failureKind: null,
-        degradationActivated: first.justActivated ? "session_limit" : null,
-        aiInvoked: false
-      });
-    }
-    let result: DreamMasterResult = first.result;
-
-    // リトライは失敗(タイムアウト/APIエラー)のみ1回
-    if (!result.ok) {
-      const second = await this.invokeWithLimit(input.dmContext);
-      if (second.blocked) {
-        // リトライがセッション上限で遮断。縮退へ移行(連続カウントは活性化でリセット済み)
+    // 初回 + リトライ最大1回(ai-integration.md「リトライ」)。リトライ対象は
+    // 「DreamMaster失敗(タイムアウト/APIエラー)」と「成功したが表示系承認0件」。
+    // 出力壁却下(summary)・成功はリトライしない。**1トリガーにつきリトライは最大1回**=
+    // 失敗理由の組み合わせによらず2回目のリトライはしない(例: 初回timeout→リトライ→
+    // 成功したが表示系0件、は display_approved_zero で確定し3回目を呼ばない: サブスク枠保護)。
+    // 表示系0件の初回試行は副作用(検証カウンタ・失敗カウント・セッションcommit)を確定させず、
+    // リトライは新しい turnState で再検証する(初回の副作用が漏れて二重適用にならない)。
+    for (let attempt = 0; attempt <= RETRY_LIMIT_PER_TRIGGER; attempt += 1) {
+      const invoked = await this.invokeWithLimit(input.dmContext);
+      if (invoked.blocked) {
+        // セッション総数上限で遮断(AIを呼ばないブロック=失敗に数えない)。
+        // 初回(attempt=0)はまだ1度も呼んでいない。リトライ(attempt>0)は初回で呼んでいる
         return this.fallbackResult(flow, {
           failedTurn: false,
           failureKind: null,
-          degradationActivated: second.justActivated ? "session_limit" : null,
-          aiInvoked: true
+          degradationActivated: invoked.justActivated ? "session_limit" : null,
+          aiInvoked: attempt > 0
         });
       }
-      result = second.result;
+      const outcome = this.evaluateResult(flow, input, invoked.result);
+      const retryable = outcome.kind === "dm_failure" || outcome.kind === "display_zero";
+      if (retryable && attempt < RETRY_LIMIT_PER_TRIGGER) {
+        // 副作用を確定させず次の試行へ(検証カウンタ・失敗カウント・セッションcommitは未確定)
+        continue;
+      }
+      return this.finalizeOutcome(flow, outcome);
     }
 
+    // ループは attempt=RETRY_LIMIT_PER_TRIGGER で必ず return する(到達しない。網羅性の保険)
+    return this.fallbackResult(flow, {
+      failedTurn: false,
+      failureKind: null,
+      degradationActivated: null,
+      aiInvoked: true
+    });
+  }
+
+  /** DreamMaster 結果を TurnOutcome へ評価する(副作用なし。確定は finalizeOutcome) */
+  private evaluateResult(
+    flow: ToolFlow,
+    input: AiTurnInput,
+    result: DreamMasterResult
+  ): TurnOutcome {
     if (!result.ok) {
-      // 初回+リトライの両方が失敗 → このトリガーを1失敗とする
-      const activated = this.recordConsecutiveFailure(flow);
-      return this.fallbackResult(flow, {
-        failedTurn: true,
-        failureKind: result.failure,
-        degradationActivated: activated,
-        aiInvoked: true,
-        model: result.meta.model
-      });
+      return { kind: "dm_failure", failure: result.failure, model: result.meta.model };
     }
-
     return this.handleSuccess(flow, input, result);
+  }
+
+  /**
+   * TurnOutcome をこのトリガーの最終試行として確定する。成功は commit(連続失敗カウント0+
+   * セッション確定)、失敗種別は連続失敗カウントを記録して定型フォールバックへ。
+   */
+  private finalizeOutcome(flow: ToolFlow, outcome: TurnOutcome): AiTurnResult {
+    switch (outcome.kind) {
+      case "success":
+        outcome.commit();
+        return outcome.result;
+      case "dm_failure": {
+        const activated = this.recordConsecutiveFailure(flow);
+        return this.fallbackResult(flow, {
+          failedTurn: true,
+          failureKind: outcome.failure,
+          degradationActivated: activated,
+          aiInvoked: true,
+          model: outcome.model
+        });
+      }
+      case "display_zero": {
+        const activated = this.recordConsecutiveFailure(flow);
+        return this.fallbackResult(flow, {
+          failedTurn: true,
+          failureKind: "display_approved_zero",
+          degradationActivated: activated,
+          aiInvoked: true,
+          model: outcome.model,
+          toolCallRecords: outcome.records
+        });
+      }
+      case "summary_reject": {
+        const activated = this.recordConsecutiveFailure("summary");
+        return {
+          flow: "summary",
+          displayText: "",
+          approvedEffects: [],
+          summaryText: null,
+          usedFallback: true,
+          failedTurn: true,
+          failureKind: "output_wall_rejected",
+          degraded: this.isDegraded(),
+          degradationActivated: activated,
+          aiInvoked: true,
+          responseText: outcome.responseText,
+          model: outcome.model,
+          toolCallRecords: outcome.records
+        };
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -263,14 +360,17 @@ export class AiTurnExecutor {
     flow: ToolFlow,
     input: AiTurnInput,
     result: DreamMasterSuccess
-  ): AiTurnResult {
+  ): TurnOutcome {
     if (flow === "summary") return this.handleSummarySuccess(result);
     if (flow === "dream") return this.handleDreamSuccess(input, result);
     return this.handleGenericSuccess(flow, input, result);
   }
 
-  /** 会話要約(ツールなし・テキスト出力に出力壁)。失敗はタイムアウト/エラー/出力壁却下の3種 */
-  private handleSummarySuccess(result: DreamMasterSuccess): AiTurnResult {
+  /**
+   * 会話要約(ツールなし・テキスト出力に出力壁)。失敗はタイムアウト/エラー/出力壁却下の3種。
+   * **出力壁却下はリトライ対象外**なので summary_reject として即失敗確定へ回す(表示系0件判定は非適用)。
+   */
+  private handleSummarySuccess(result: DreamMasterSuccess): TurnOutcome {
     const model = result.meta.model;
     const raw = result.text;
     const checked = raw !== null ? checkDisplayText(raw, { maxLength: SUMMARY_MAX_LENGTH }) : null;
@@ -283,44 +383,36 @@ export class AiTurnExecutor {
     }));
 
     if (checked === null || !checked.ok) {
-      const activated = this.recordConsecutiveFailure("summary");
-      return {
-        flow: "summary",
-        displayText: "",
-        approvedEffects: [],
-        summaryText: null,
-        usedFallback: true,
-        failedTurn: true,
-        failureKind: "output_wall_rejected",
-        degraded: this.isDegraded(),
-        degradationActivated: activated,
-        aiInvoked: true,
-        responseText: raw,
-        model,
-        toolCallRecords: records
-      };
+      return { kind: "summary_reject", responseText: raw, model, records };
     }
 
-    this.consecutiveFailures.summary = 0;
-    return {
+    const normalized = checked.normalized;
+    const outcome: AiTurnResult = {
       flow: "summary",
       displayText: "",
       approvedEffects: [],
-      summaryText: checked.normalized,
+      summaryText: normalized,
       usedFallback: false,
       failedTurn: false,
       failureKind: null,
       degraded: this.isDegraded(),
       degradationActivated: null,
       aiInvoked: true,
-      responseText: checked.normalized,
+      responseText: normalized,
       model,
       toolCallRecords: records
+    };
+    return {
+      kind: "success",
+      result: outcome,
+      commit: () => {
+        this.consecutiveFailures.summary = 0;
+      }
     };
   }
 
   /** 夢シーン(narrate + trigger_world_event)。世界変化は最大3件・解決規則をバッチ適用 */
-  private handleDreamSuccess(input: AiTurnInput, result: DreamMasterSuccess): AiTurnResult {
+  private handleDreamSuccess(input: AiTurnInput, result: DreamMasterSuccess): TurnOutcome {
     const model = result.meta.model;
     const records: ToolCallRecord[] = [];
     const narrateTexts: string[] = [];
@@ -369,22 +461,14 @@ export class AiTurnExecutor {
       });
     }
 
-    // 表示系(narrate)承認0件 → オール・オア・ナッシング破棄(世界変化なし)+1失敗
+    // 表示系(narrate)承認0件 → リトライ対象(display_zero)。確定は finalizeOutcome。
+    // 世界変化はオール・オア・ナッシングで破棄する(承認済み effect を採用しない)
     if (narrateTexts.length === 0) {
-      const activated = this.recordConsecutiveFailure("dream");
-      return this.fallbackResult("dream", {
-        failedTurn: true,
-        failureKind: "display_approved_zero",
-        degradationActivated: activated,
-        aiInvoked: true,
-        model,
-        toolCallRecords: records
-      });
+      return { kind: "display_zero", model, records };
     }
 
-    this.consecutiveFailures.dream = 0;
     const displayText = narrateTexts.join("\n");
-    return {
+    const outcome: AiTurnResult = {
       flow: "dream",
       displayText,
       approvedEffects: [dreamEvents.effect],
@@ -399,6 +483,13 @@ export class AiTurnExecutor {
       model,
       toolCallRecords: records
     };
+    return {
+      kind: "success",
+      result: outcome,
+      commit: () => {
+        this.consecutiveFailures.dream = 0;
+      }
+    };
   }
 
   /** 会話 / サブクエスト生成 / 戦果描写(逐次ツール検証。表示系0件でオール・オア・ナッシング) */
@@ -406,7 +497,7 @@ export class AiTurnExecutor {
     flow: ToolFlow,
     input: AiTurnInput,
     result: DreamMasterSuccess
-  ): AiTurnResult {
+  ): TurnOutcome {
     const model = result.meta.model;
     const session = input.session;
     const turn = this.initTurnState(input, session);
@@ -459,24 +550,15 @@ export class AiTurnExecutor {
       }
     }
 
-    // 表示系(speak/narrate)承認0件 → 承認済み状態変更も破棄 + 定型フォールバック + 1失敗
+    // 表示系(speak/narrate)承認0件 → リトライ対象(display_zero)。確定は finalizeOutcome。
+    // 承認済み状態変更(commits)はここでは実行せず破棄(オール・オア・ナッシング)。
+    // commits を実行しないため、リトライは新しい turnState で再検証され二重適用にならない
     if (displayTexts.length === 0) {
-      const activated = this.recordConsecutiveFailure(flow);
-      return this.fallbackResult(flow, {
-        failedTurn: true,
-        failureKind: "display_approved_zero",
-        degradationActivated: activated,
-        aiInvoked: true,
-        model,
-        toolCallRecords: records
-      });
+      return { kind: "display_zero", model, records };
     }
 
-    // 採用: セッションの会話内カウンタ・提案スロットを確定
-    for (const commit of commits) commit();
-    this.consecutiveFailures[flow] = 0;
     const displayText = displayTexts.join("\n");
-    return {
+    const outcome: AiTurnResult = {
       flow,
       displayText,
       approvedEffects: stateEffects,
@@ -490,6 +572,15 @@ export class AiTurnExecutor {
       responseText: displayText,
       model,
       toolCallRecords: records
+    };
+    return {
+      kind: "success",
+      result: outcome,
+      commit: () => {
+        // 採用: セッションの会話内カウンタ・提案スロットを確定
+        for (const commit of commits) commit();
+        this.consecutiveFailures[flow] = 0;
+      }
     };
   }
 

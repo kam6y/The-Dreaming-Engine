@@ -1,6 +1,7 @@
 import {
   CONVERSATION_FALLBACK_TEXT,
   DREAM_FALLBACK_TEXT,
+  SUMMARY_MAX_LENGTH,
   createDefaultAiDailyCounters,
   emptyInventory,
   initialDungeonSymbolCounts,
@@ -63,6 +64,35 @@ function speakSuccess(flow: ToolFlow, text = "「やあ、旅人さん」"): Dre
     ok: true,
     flow,
     toolCalls: [{ toolName: "speak", rawInput: { text } }],
+    text: null,
+    meta: META
+  };
+}
+
+/** speak を含まず adjust_affinity のみ(それ自体は検証を通るが表示系承認0件になる会話応答) */
+function adjustOnly(flow: ToolFlow, npcId: NpcId = "innkeeper"): DreamMasterResult {
+  return {
+    ok: true,
+    flow,
+    toolCalls: [{ toolName: "adjust_affinity", rawInput: { npcId, delta: 1, reason: "打ち解けた" } }],
+    text: null,
+    meta: META
+  };
+}
+
+/** speak + adjust_affinity(表示系承認あり=成功。状態変更を1回分だけ伴う) */
+function speakAndAdjust(
+  flow: ToolFlow,
+  npcId: NpcId = "innkeeper",
+  text = "「よく来たね、旅人さん」"
+): DreamMasterResult {
+  return {
+    ok: true,
+    flow,
+    toolCalls: [
+      { toolName: "speak", rawInput: { text } },
+      { toolName: "adjust_affinity", rawInput: { npcId, delta: 1, reason: "打ち解けた" } }
+    ],
     text: null,
     meta: META
   };
@@ -250,6 +280,123 @@ describe("AiTurnExecutor 表示系承認0件", () => {
     const rejected = r.toolCallRecords.filter((rec) => rec.result === "rejected");
     expect(rejected).toHaveLength(1);
     expect(rejected[0]?.name).toBe("adjust_affinity");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 表示系承認0件のリトライ(display_approved_zero もリトライ1回の対象)
+// ---------------------------------------------------------------------------
+
+describe("AiTurnExecutor 表示系0件リトライ", () => {
+  it("表示系0件 → リトライで成功 → 通常成功・失敗カウント0・aiInvoked=true", async () => {
+    const stub = new StubDreamMaster((call, ctx) =>
+      call === 0 ? adjustOnly(ctx.flow) : speakSuccess(ctx.flow)
+    );
+    const executor = newExecutor(stub);
+    const session = new ConversationSession("innkeeper", 30);
+    const r = await executor.executeTurn({
+      dmContext: { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "やあ" },
+      persistent: persistentBase(),
+      session
+    });
+
+    expect(stub.calls).toBe(2); // 初回(表示系0件) + リトライ(成功)
+    expect(r.aiInvoked).toBe(true);
+    expect(r.failedTurn).toBe(false);
+    expect(r.usedFallback).toBe(false);
+    expect(r.displayText).toContain("旅人");
+    expect(executor.getConsecutiveFailures("conversation")).toBe(0);
+  });
+
+  it("表示系0件 → リトライも表示系0件 → 1失敗(display_approved_zero)・フォールバック", async () => {
+    const stub = new StubDreamMaster((_call, ctx) => adjustOnly(ctx.flow));
+    const executor = newExecutor(stub);
+    const session = new ConversationSession("innkeeper", 30);
+    const r = await executor.executeTurn({
+      dmContext: { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "やあ" },
+      persistent: persistentBase(),
+      session
+    });
+
+    expect(stub.calls).toBe(2); // 初回 + リトライの両方が表示系0件
+    expect(r.failedTurn).toBe(true);
+    expect(r.failureKind).toBe("display_approved_zero");
+    expect(r.usedFallback).toBe(true);
+    expect(r.displayText).toBe(CONVERSATION_FALLBACK_TEXT);
+    expect(r.approvedEffects).toHaveLength(0);
+    // 破棄されたので会話内カウンタは進めない
+    expect(session.getAdjustAffinityCount()).toBe(0);
+    expect(executor.getConsecutiveFailures("conversation")).toBe(1);
+  });
+
+  it("timeout → リトライで成功したが表示系0件 → そのまま確定(3回目は呼ばない)", async () => {
+    const stub = new StubDreamMaster((call, ctx) =>
+      call === 0 ? apiError(ctx.flow) : adjustOnly(ctx.flow)
+    );
+    const executor = newExecutor(stub);
+    const session = new ConversationSession("innkeeper", 30);
+    const r = await executor.executeTurn({
+      dmContext: { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "やあ" },
+      persistent: persistentBase(),
+      session
+    });
+
+    // 1トリガーにつきリトライは最大1回: 初回timeout + リトライ0件で確定。3回目は無い
+    expect(stub.calls).toBe(2);
+    expect(r.failedTurn).toBe(true);
+    expect(r.failureKind).toBe("display_approved_zero");
+    expect(r.usedFallback).toBe(true);
+    expect(executor.getConsecutiveFailures("conversation")).toBe(1);
+  });
+
+  it("summary: 出力壁却下はリトライしない(表示系0件リトライの非適用・既存挙動の回帰)", async () => {
+    const longText = "あ".repeat(SUMMARY_MAX_LENGTH + 50); // 出力壁の文字数上限を超過
+    const stub = new StubDreamMaster((_call, ctx) => ({
+      ok: true,
+      flow: ctx.flow,
+      toolCalls: [],
+      text: longText,
+      meta: META
+    }));
+    const executor = newExecutor(stub);
+    const r = await executor.executeTurn({
+      dmContext: { flow: "summary", partnerNpcId: "priest", existingSummary: "", exchanges: [] },
+      persistent: persistentBase(),
+      session: null
+    });
+
+    expect(stub.calls).toBe(1); // 出力壁却下はリトライ対象外
+    expect(r.failedTurn).toBe(true);
+    expect(r.failureKind).toBe("output_wall_rejected");
+    expect(r.summaryText).toBeNull();
+    expect(executor.getConsecutiveFailures("summary")).toBe(1);
+  });
+
+  it("リトライ時にセッション/永続カウンタが二重適用されない(0件試行のadjustは漏れない)", async () => {
+    // 初回: adjust のみ(表示系0件で破棄) → リトライ: speak+adjust(成功)
+    const stub = new StubDreamMaster((call, ctx) =>
+      call === 0 ? adjustOnly(ctx.flow) : speakAndAdjust(ctx.flow)
+    );
+    const executor = newExecutor(stub);
+    const session = new ConversationSession("innkeeper", 30);
+    const r = await executor.executeTurn({
+      dmContext: { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "やあ" },
+      persistent: persistentBase(),
+      session
+    });
+
+    expect(stub.calls).toBe(2);
+    expect(r.failedTurn).toBe(false);
+    // 好感度変化はリトライ成功分の1回のみ(初回0件試行の adjust は commit されず漏れない)
+    expect(r.approvedEffects).toHaveLength(1);
+    expect(r.approvedEffects[0]).toMatchObject({
+      kind: "adjust_affinity",
+      npcId: "innkeeper",
+      delta: 1,
+      affinity: 31
+    });
+    expect(session.getAdjustAffinityCount()).toBe(1);
+    expect(executor.getSessionCallCount()).toBe(2);
   });
 });
 
