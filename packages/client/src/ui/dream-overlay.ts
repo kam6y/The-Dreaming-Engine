@@ -56,16 +56,6 @@ export class DreamOverlay {
       })
       .setOrigin(0.5);
 
-    const bodyWidth = Math.min(720, width * 0.72);
-    this.narration = new TypewriterText(scene, parentLayer, {
-      x: Math.round((width - bodyWidth) / 2),
-      y: Math.round(height * 0.34),
-      width: bodyWidth,
-      fontSize: "19px",
-      color: "#c7bfe0",
-      msPerChar: 32
-    });
-
     this.wakePrompt = scene.add
       .text(width / 2, height * 0.8, "▽ 目を覚ます(スペース)", {
         color: "#6f6890",
@@ -77,6 +67,19 @@ export class DreamOverlay {
 
     this.container = scene.add.container(0, 0, [veil, title, this.wakePrompt]);
     parentLayer.add(this.container);
+
+    // 本文は container(暗幕)より後に parentLayer へ足し、必ず暗幕の前面に描画する
+    // (TypewriterText は自身を parentLayer に add する=生成順が描画順。container より
+    // 先に生成すると暗幕が本文の上へ被り、ほぼ読めなくなる。conversation-overlay と同じ流儀)
+    const bodyWidth = Math.min(720, width * 0.72);
+    this.narration = new TypewriterText(scene, parentLayer, {
+      x: Math.round((width - bodyWidth) / 2),
+      y: Math.round(height * 0.34),
+      width: bodyWidth,
+      fontSize: "19px",
+      color: "#c7bfe0",
+      msPerChar: 32
+    });
 
     this.narration.play(options.text, () => {
       this.finished = true;
