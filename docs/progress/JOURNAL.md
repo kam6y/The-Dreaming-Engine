@@ -682,3 +682,32 @@
   narrateBattleがAI呼び出しの有無に関わらず narratedEnemies に記録するため、固有AI描写が
   出ないまま既見扱いになる(フレーバーのみ・進行阻害なし・窓は狭い)。修正は別論点を含むため見送り
 - 次にやること: 会話開始の即時画面切替(タスク#3。UI側は実装済み・未コミット)
+
+## [22] 2026-07-05 会話開始の即時画面切替(挨拶生成を待たずに会話画面へ)
+
+- やったこと(ユーザー要望): 話しかけた際、挨拶AI生成(liveで約10秒)完了まで探索画面が
+  固まるのを解消。**サーバー側=subagent(Opus)、クライアントUI=オーケストレーター自身**が実装
+  - **push機構(新設)**: GameSession に `setPushSender`/`push` を追加し、server.ts が
+    WS接続確立時に注入・切断時に解除(登録主のときのみ)。直列チェーンの外(AI完了ハンドラ)
+    から現接続へ自発配信する初の機構。切断中のpushは黙って破棄(再接続時は connect() の
+    snapshot再同期が正を配る)。送信例外は二重に握って無害化。sharedのWSスキーマ変更なし
+  - **openConversation の2段階化**(session.ts): 即時に会話interactionを張って snapshot
+    のみ返し(クライアントは会話画面へ即切替)、挨拶生成は fire-and-forget。完了ハンドラ
+    (同期のみ・世代印ガード)で「まだ同一NPCと会話中」のときのみ interaction 再構築+
+    [snapshot, ai-utterance(speak)] を push。待たずに立ち去ったら発話は破棄(承認effectの
+    好感度+1等はAIターンとして成立済みのため適用)。クールダウン定型・busy・フォールバック
+    も同経路(displayText を speak として必ず push する契約)
+  - **クライアント(オーケストレーター実装)**: ConversationOverlay に `awaitGreeting`
+    オプションを追加。第一声が未着なら「……(相手の言葉を待っている)」の待機表示で開き、
+    メニューは speak 到着(playUtterance/showMessage)で活性。既存の stashedSpeak 機構で
+    到着順ずれにも対応。フォールバック文も speak で届く契約のため待機で固まり続けない
+  - テスト: session-ai.test.ts へ5件(AI完了前に応答が返る/完了後にpush/完了前の立ち去りで
+    speak破棄/世代印で全破棄/切断中も安全)+ server-push.test.ts(WS統合: 接続→interact→
+    push配信)。unit 551
+- 検証: `pnpm check` 緑・`pnpm test:e2e` 10/10緑(情報屋の会話受注・会話後の移動を含む)
+- 既知の挙動(subagent申し送り): 挨拶生成中に同一NPCへ再度話しかけると古いspeakが
+  push され得る(世代印は同一のため)。クライアントは speak 到着までメニューを隠すため
+  実害なし。ガードは仕様外につき未追加
+- 人間確認待ち: 実プレイ(live)で (1)話しかけ→即会話画面+待機表示→挨拶表示、
+  (2)立ち去り→即移動可、の体感確認
+- 次にやること: 拡張フェーズ(/loop + BACKLOG.md)

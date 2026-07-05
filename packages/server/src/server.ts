@@ -87,6 +87,19 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     }
     activeSocket = socket;
 
+    // 直列チェーンの外(AI 完了ハンドラ)からの自発 push を現接続の socket へ配信する。
+    // 接続の置換時は新しい socket の sender で上書きされ、close 時は登録主のときのみ解除する。
+    // 送信例外はここで握って無害化する(GameSession.push 側でも握るが二重に安全側へ倒す)。
+    session.setPushSender((messages) => {
+      for (const message of messages) {
+        try {
+          sendJson(socket, message);
+        } catch (err: unknown) {
+          app.log.error(err);
+        }
+      }
+    });
+
     // 接続確立時: hello(セーブ有無)+ ゲーム進行中なら現スナップショットで再同期
     void session
       .connect()
@@ -129,8 +142,10 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     });
 
     socket.on("close", () => {
+      // この socket が現在の登録主のときのみ解除する(置換で別接続が主になっていれば触らない)
       if (activeSocket === socket) {
         activeSocket = undefined;
+        session.setPushSender(null);
       }
     });
   });

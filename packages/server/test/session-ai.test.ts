@@ -147,6 +147,41 @@ class FailingSummaryDreamMaster implements DreamMaster {
   }
 }
 
+/** 挨拶(会話 flow)を test 側が releaseGreeting() を呼ぶまで**保留**する DreamMaster。
+ *  話しかけの即時応答が挨拶生成を待たずに返ること・完了前の立ち去り/新規ゲームの検証に使う。
+ *  挨拶では speak + adjust_affinity(+1)を出し、承認 effect の適用有無を好感度で観測できるようにする。 */
+class DeferredGreetingDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  private resolveGreeting: (() => void) | null = null;
+  private started = false;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation") {
+      this.started = true;
+      return new Promise<DreamMasterResult>((resolve) => {
+        this.resolveGreeting = (): void =>
+          resolve(
+            okResult(ctx, [
+              { toolName: "speak", rawInput: { text: "「よく来たね、旅人さん」" } },
+              { toolName: "adjust_affinity", rawInput: { npcId: ctx.partnerNpcId, delta: 1, reason: "挨拶" } }
+            ])
+          );
+      });
+    }
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [], "語り合った。"));
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+  /** 挨拶生成が開始済みか(話しかけで gk.openConversation が走ったか) */
+  public get greetingStarted(): boolean {
+    return this.started;
+  }
+  /** 保留中の挨拶生成を完了させる */
+  public releaseGreeting(): void {
+    if (this.resolveGreeting === null) throw new Error("挨拶がまだ開始していない");
+    this.resolveGreeting();
+    this.resolveGreeting = null;
+  }
+}
+
 /** マイクロタスクを十分に流す(非同期要約の完了ハンドラ適用を待つ。gatekeeper.test の tick を踏襲) */
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -234,11 +269,18 @@ function mustView(session: GameSession): SnapshotView {
   return view;
 }
 
-/** 街の対象 NPC の正面へテレポートして話しかける */
+/**
+ * 街の対象 NPC の正面へテレポートして話しかける。**即時応答(挨拶待ち snapshot)を返す**。
+ * AI 会話 NPC(情報屋/rift-revealed 以降の司祭)の挨拶生成は非同期化されたため、続く送信/依頼が
+ * gatekeeper の inFlight に当たらないよう、返す前に tick() で挨拶生成の完了を待つ
+ * (クライアントが speak 到着でメニューを活性するのを模す。店/宿/司祭 arrival は即応答なので tick は無害)。
+ */
 async function talkTo(session: GameSession, npcId: NpcId): Promise<ServerMessage[]> {
   const approach = NPC_APPROACH[npcId];
   mustState(session).location = { mapId: "town", position: { ...approach.pos }, facing: approach.facing };
-  return session.handle({ type: "interact" });
+  const msgs = await session.handle({ type: "interact" });
+  await tick(); // 非同期の挨拶生成が完了するまで待つ(inFlight を跨ぐ)
+  return msgs;
 }
 
 function narrations(msgs: ServerMessage[]): string[] {
@@ -725,5 +767,115 @@ describe("会話終了の要約非同期化", () => {
     const priestAfter = mustState(session).npcs.priest.memory;
     expect(priestAfter).toEqual(priestBefore); // ロード後の memory は書き換わらない
     expect(priestAfter.summary).toBe(""); // 別ゲームに前ゲームの要約は焼き込まれない
+  });
+});
+
+// ===========================================================================
+// 話しかけの2段階化(挨拶生成を待たず会話画面へ切替え、挨拶は届き次第 push)
+// ===========================================================================
+
+describe("話しかけの挨拶生成非同期化(会話画面へ即切替え + 挨拶 push)", () => {
+  /** 情報屋カイの正面へテレポートする(話しかけの直前状態を作る。arrival ゲート等の無い NPC) */
+  function faceInformant(session: GameSession): void {
+    const approach = NPC_APPROACH.informant;
+    mustState(session).location = { mapId: "town", position: { ...approach.pos }, facing: approach.facing };
+  }
+
+  it("話しかけの応答は挨拶生成の完了前に返り、interaction=conversation の snapshot のみを含む(speak なし)", async () => {
+    // 挨拶生成を保留する DreamMaster を使い、応答時点で AI が未完了であることを保証する
+    const { session, dreamMaster } = makeAiSession({ dreamMaster: () => new DeferredGreetingDreamMaster() });
+    const dm = dreamMaster as DeferredGreetingDreamMaster;
+    await session.handle({ type: "new-game" });
+    faceInformant(session);
+
+    const msgs = await session.handle({ type: "interact" });
+
+    // 応答は snapshot 1件のみ(挨拶=speak は含まない=AI 完了を待たない)
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.type).toBe("snapshot");
+    expect(msgs.some((m) => m.type === "ai-utterance")).toBe(false);
+    // 会話画面へ即切替わっている(挨拶待ち表示)
+    const view = mustView(session);
+    expect(view.interaction?.kind).toBe("conversation");
+    if (view.interaction?.kind === "conversation") expect(view.interaction.npcId).toBe("informant");
+    // 挨拶生成は開始済みだが未完了
+    expect(dm.greetingStarted).toBe(true);
+  });
+
+  it("挨拶生成の完了後に pushSender へ [snapshot, ai-utterance(speak)] が届く", async () => {
+    const { session } = makeAiSession(); // 既定 MockDreamMaster(挨拶で speak を出す)
+    await session.handle({ type: "new-game" });
+    const pushed: ServerMessage[][] = [];
+    session.setPushSender((m) => pushed.push(m));
+    faceInformant(session);
+
+    await session.handle({ type: "interact" });
+    await tick(); // 挨拶生成の完了ハンドラが走る
+
+    expect(pushed).toHaveLength(1);
+    const batch = pushed[0];
+    if (batch === undefined) throw new Error("push が届いていない");
+    expect(batch[0]?.type).toBe("snapshot");
+    const speak = batch.find((m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance");
+    expect(speak).toBeDefined();
+    expect(speak?.channel).toBe("speak");
+    expect(speak?.npcId).toBe("informant");
+    expect((speak?.text.length ?? 0) > 0).toBe(true);
+  });
+
+  it("挨拶生成の完了前に会話終了(立ち去り)した場合、speak は push されず承認 effect は適用される", async () => {
+    const { session, dreamMaster } = makeAiSession({ dreamMaster: () => new DeferredGreetingDreamMaster() });
+    const dm = dreamMaster as DeferredGreetingDreamMaster;
+    await session.handle({ type: "new-game" });
+    const pushed: ServerMessage[][] = [];
+    session.setPushSender((m) => pushed.push(m));
+    faceInformant(session);
+    const beforeAffinity = mustState(session).npcs.informant.affinity;
+
+    await session.handle({ type: "interact" }); // 挨拶生成は保留中
+    expect(dm.greetingStarted).toBe(true);
+    // 挨拶到着前に会話終了(0往復なので要約はスキップされる)
+    await session.handle({ type: "conversation-end" });
+    expect(mustView(session).interaction).toBeUndefined();
+
+    dm.releaseGreeting(); // 挨拶生成が今ごろ完了
+    await tick();
+
+    expect(pushed).toHaveLength(0); // 会話は閉じているので speak は push されない(発話は破棄)
+    // 承認 effect(挨拶ターンの好感度+1)は AI ターンとして成立し、会話終了後でも適用される
+    expect(mustState(session).npcs.informant.affinity).toBe(beforeAffinity + 1);
+  });
+
+  it("挨拶生成の完了前に新規ゲームを始めた場合、世代印で push も effect 適用もされない", async () => {
+    const { session, dreamMaster } = makeAiSession({ dreamMaster: () => new DeferredGreetingDreamMaster() });
+    const dm = dreamMaster as DeferredGreetingDreamMaster;
+    await session.handle({ type: "new-game" });
+    const pushed: ServerMessage[][] = [];
+    session.setPushSender((m) => pushed.push(m));
+    faceInformant(session);
+
+    await session.handle({ type: "interact" }); // 挨拶生成は保留中
+    expect(dm.greetingStarted).toBe(true);
+    // 別ゲームを開始(世代印が進む)
+    await session.handle({ type: "new-game" });
+    const affinityAfterNew = mustState(session).npcs.informant.affinity;
+
+    dm.releaseGreeting(); // 前ゲームの挨拶が今ごろ完了
+    await tick();
+
+    expect(pushed).toHaveLength(0); // 別ゲームへは push しない
+    expect(mustState(session).npcs.informant.affinity).toBe(affinityAfterNew); // effect も適用されない
+  });
+
+  it("pushSender 未設定(切断中)でも挨拶完了でクラッシュせず、会話は開いたまま", async () => {
+    const { session } = makeAiSession(); // pushSender は設定しない
+    await session.handle({ type: "new-game" });
+    faceInformant(session);
+
+    await session.handle({ type: "interact" });
+    await tick(); // 挨拶完了 → push は破棄される(sender 未設定)
+
+    // クラッシュせず(ここまで到達)、会話は開いたまま(挨拶が反映されている)
+    expect(mustView(session).interaction?.kind).toBe("conversation");
   });
 });

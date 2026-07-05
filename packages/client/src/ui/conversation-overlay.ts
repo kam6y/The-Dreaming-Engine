@@ -33,6 +33,8 @@ export interface ConversationOverlayOptions {
   onQuestRequest: () => void;
   /** 会話の終了(要約フローへ)。overlay を閉じる */
   onEnd: () => void;
+  /** NPC の第一声(ai-utterance)待ちで開く(会話開始の即時画面切替)。*/
+  awaitGreeting?: boolean;
 }
 
 const PANEL_WIDTH = 880;
@@ -183,7 +185,15 @@ export class ConversationOverlay {
     });
 
     this.updateProposal();
-    this.rebuildMenu();
+    if (options.awaitGreeting === true) {
+      // 会話開始直後で NPC の第一声がまだ届いていない。メニューは組まず待機表示にする
+      // (解除は playUtterance / showMessage。フォールバック文も ai-utterance で届く契約
+      // なので、AI 失敗時もここで固まり続けることはない)
+      this.awaiting = true;
+      this.hintText.setText("……(相手の言葉を待っている)");
+    } else {
+      this.rebuildMenu();
+    }
   }
 
   /**

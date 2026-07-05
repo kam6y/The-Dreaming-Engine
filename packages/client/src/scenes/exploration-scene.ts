@@ -454,6 +454,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.conversationOverlay = new ConversationOverlay(this, this.uiLayer, {
       interaction,
       snapshot: view,
+      // 第一声(speak)が snapshot より先に届いていなければ挨拶待ちで開く
+      awaitGreeting: this.stashedSpeak === null,
       onSend: (text) => {
         this.client.send({ type: "conversation-send", text });
       },

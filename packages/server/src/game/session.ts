@@ -195,6 +195,13 @@ export class GameSession {
    */
   private gameGeneration = 0;
 
+  /**
+   * サーバー直列チェーンの外で走る完了ハンドラから、接続中の WS へ自発 push する送信手段。
+   * server.ts が WS 接続確立時に注入し、切断時に null へ戻す。未設定(切断中)の push は黙って破棄する
+   * (再接続時は connect() の snapshot 再同期が正を配るため、失われても不整合にならない)。
+   */
+  private pushSender: ((messages: ServerMessage[]) => void) | null = null;
+
   public constructor(deps: GameSessionDeps) {
     this.saveStore = deps.saveStore;
     this.clock = deps.clock ?? Date.now;
@@ -218,6 +225,29 @@ export class GameSession {
     const msgs: ServerMessage[] = [{ type: "hello", title: GAME_TITLE, hasSave }];
     if (this.state !== null) msgs.push(this.snapshotMsg());
     return msgs;
+  }
+
+  /**
+   * 自発 push の送信手段を登録/解除する(server.ts が WS 接続確立時に注入、切断時に null)。
+   * 直列チェーンの外(AI 完了ハンドラ)から現接続の socket へ配信するために使う。
+   */
+  public setPushSender(sender: ((messages: ServerMessage[]) => void) | null): void {
+    this.pushSender = sender;
+  }
+
+  /**
+   * 直列チェーンの外(挨拶生成の完了ハンドラ等)からクライアントへ自発 push する。
+   * sender 未設定(切断中)なら黙って破棄する。送信例外は握って無害化する
+   * (切断直後の送信等でプロセスを落とさない)。
+   */
+  private push(messages: ServerMessage[]): void {
+    const sender = this.pushSender;
+    if (sender === null) return;
+    try {
+      sender(messages);
+    } catch {
+      // 送信例外は握って無害化(切断直後の socket へ書いた等)
+    }
   }
 
   /** 操作イベントを処理し ServerMessage 列を返す(ping は server.ts が処理する) */
@@ -620,21 +650,52 @@ export class GameSession {
   // 会話フロー(AI。gatekeeper 注入時のみ)
   // =========================================================================
 
-  /** NPC へ話しかけて会話を開始する(挨拶=1ターン。クールダウン中は定型挨拶) */
-  private async openConversation(npcId: NpcId): Promise<ServerMessage[]> {
+  /**
+   * NPC へ話しかけて会話を開始する(挨拶=1ターン。クールダウン中は定型挨拶)。**2段階化**:
+   *
+   * - 即時: 会話 interaction を張って snapshot だけ返し、クライアントを会話画面(挨拶待ち表示)へ
+   *   即切替える。挨拶生成 AI(live で約10秒)の完了は**待たない**(探索画面での固着を防ぐ)。
+   * - 非同期: 挨拶生成の完了ハンドラ(サーバー直列チェーンの外で走る)で、まだ同一 NPC と会話中なら
+   *   options/提案を反映して interaction を再構築し、[snapshot, ai-utterance(speak)] を push する。
+   *   クールダウン定型挨拶・busy・フォールバックも同経路(displayText を speak として push する契約は共通)。
+   *
+   * 完了ハンドラは conversationEnd と同流儀で **await を挟まず同期のみ**・例外は握る:
+   * - 世代印(gameGeneration)が変わっていたら全破棄(リセット/ロード後の別ゲームを汚さない)
+   * - 承認 effect(挨拶ターンの好感度+1等)は AI ターンとして成立=会話が既に閉じられていても適用する
+   * - まだ同一 NPC と会話中のときのみ push する(待たずに立ち去っていたら発話は破棄)
+   */
+  private openConversation(npcId: NpcId): ServerMessage[] {
     const gk = this.requireGatekeeper();
     const npc = this.requireState().npcs[npcId];
-    const result = await gk.openConversation({
-      npcId,
-      affinityAtOpen: npc.affinity,
-      persistent: this.buildPersistentContext(),
-      ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
-      ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {})
-    });
-    // 挨拶ターンの承認 effect(Mock 通常は +1 好感度)を適用しカウンタを閉じる
-    this.applyApprovedEffects(result.approvedEffects);
+    // 完了時にゲームがリセット/ロードされていたら書き戻さないための世代印
+    const generation = this.gameGeneration;
+
+    // 挨拶生成 AI は await せずに開始する(話しかけには即応答)。完了ハンドラは同期のみ・例外は握る
+    void gk
+      .openConversation({
+        npcId,
+        affinityAtOpen: npc.affinity,
+        persistent: this.buildPersistentContext(),
+        ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
+        ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {})
+      })
+      .then((result) => {
+        if (this.gameGeneration !== generation || this.state === null) return; // リセット/ロード後: 破棄
+        // 挨拶ターンの承認 effect(Mock 通常は +1 好感度)を適用しカウンタを閉じる(会話終了後でも成立)
+        this.applyApprovedEffects(result.approvedEffects);
+        // まだ同一 NPC と会話中のときのみ options/提案を反映して再構築し、発話を push する
+        if (this.activeInteraction?.kind === "conversation" && this.activeInteraction.npcId === npcId) {
+          this.activeInteraction = this.buildConversationInteraction(npcId);
+          this.push([this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)]);
+        }
+      })
+      .catch(() => {
+        // 挨拶生成時の例外は握って無害化(unhandled rejection にしない・プロセスを落とさない)
+      });
+
+    // 即時: 会話画面へ切替え(挨拶待ち表示)。挨拶は上の完了ハンドラが届き次第 push する
     this.activeInteraction = this.buildConversationInteraction(npcId);
-    return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
+    return [this.snapshotMsg()];
   }
 
   /** 自由入力の送信 → NPC 応答。承認 effect を適用し、往復を(マスクして)会話記憶へ記録する */
