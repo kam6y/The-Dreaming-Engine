@@ -188,6 +188,13 @@ export class GameSession {
   /** 提案サブクエストの id 採番カウンタ(プロセス内で単調増加。ロード時に既存 id を跨いで補正) */
   private aiQuestSeq = 0;
 
+  /**
+   * ゲーム世代(new-game/continue のたびに +1)。非同期化した会話要約の完了ハンドラが、
+   * 立ち去り後にリセット/ロードされた**別のゲーム**の GameState へ誤って書き戻すのを防ぐ印。
+   * conversationEnd で控えた世代と、完了時点の世代が一致するときのみ memory を更新する。
+   */
+  private gameGeneration = 0;
+
   public constructor(deps: GameSessionDeps) {
     this.saveStore = deps.saveStore;
     this.clock = deps.clock ?? Date.now;
@@ -311,6 +318,10 @@ export class GameSession {
   }
 
   private resetRuntime(): void {
+    // 新規/ロードで世代を進める。進行中の非同期要約が完了しても、リセット/ロード後の
+    // 別ゲームへは書き戻さない(conversationEnd の完了ハンドラが世代不一致で破棄する)。
+    // 呼び出し元は newGame / continueGame のみ(いずれも新しいゲーム文脈の確立点)。
+    this.gameGeneration += 1;
     this.mode = "exploration";
     this.battle = null;
     this.battleSymbolIndex = null;
@@ -698,8 +709,20 @@ export class GameSession {
     ];
   }
 
-  /** 会話終了 → 要約フロー。要約成功時のみ memory を(マスクして)更新し、往復をクリアする */
-  private async conversationEnd(): Promise<ServerMessage[]> {
+  /**
+   * 会話終了 → 要約フロー(非同期化)。要約 AI(live で数秒〜数十秒)の完了を**待たず**に
+   * 即座に snapshot を返し、クライアントの awaiting をすぐ解除する(立ち去り直後の移動固着を防ぐ)。
+   *
+   * 要約は fire-and-forget で開始し、完了ハンドラ(サーバーの直列処理チェーンの外で走る)で
+   * memory を更新する。ハンドラは **await を挟まず同期のみ** で状態を読み書きし、次の点を守る:
+   * - 要約成功(summaryText != null)時のみ、**完了時点の**最新 memory の summary を差し替え、
+   *   要約に渡した先頭 N 往復(N=開始時スナップショットの件数)だけを除去する。要約中に積まれた
+   *   新しい往復は失わない(通常は空。同一NPC再会話は gatekeeper が要約完了まで待つため実際上0件)
+   * - 失敗(summaryText === null)なら memory 不変(既存仕様)
+   * - 立ち去り→即タイトル→ロード等でゲームがリセット/ロードされていたら世代印で破棄(別ゲームを汚さない)
+   * - 例外は握って無害化(unhandled rejection でプロセスを落とさない)
+   */
+  private conversationEnd(): ServerMessage[] {
     const guard = this.requireExploration();
     if (guard) return guard;
     if (this.activeInteraction?.kind !== "conversation") {
@@ -708,18 +731,32 @@ export class GameSession {
     const gk = this.requireGatekeeper();
     const npcId = this.activeInteraction.npcId;
     const memory = this.requireState().npcs[npcId].memory;
-    const result = await gk.summarizeConversation({
-      npcId,
-      persistent: this.buildPersistentContext(),
-      existingSummary: memory.summary,
-      exchanges: memory.recentExchanges
-    });
-    if (result.summaryText !== null) {
-      this.setNpcMemory(npcId, {
-        summary: maskSummaryForStorage(result.summaryText, this.maskEnv),
-        recentExchanges: []
+    // 要約入力のスナップショット(配列コピー)。要約に渡す往復数 N を控える
+    const exchangesSnapshot = [...memory.recentExchanges];
+    const summarizedCount = exchangesSnapshot.length;
+    const existingSummary = memory.summary;
+    const persistent = this.buildPersistentContext();
+    // 完了時にゲームがリセット/ロードされていたら書き戻さないための世代印
+    const generation = this.gameGeneration;
+
+    // 要約 AI は await せずに開始する(立ち去りには即応答)。完了ハンドラは同期のみ・例外は握る
+    void gk
+      .summarizeConversation({ npcId, persistent, existingSummary, exchanges: exchangesSnapshot })
+      .then((result) => {
+        if (result.summaryText === null) return; // 要約失敗/スキップ: memory 不変
+        const state = this.state;
+        if (this.gameGeneration !== generation || state === null) return; // リセット/ロード後: 破棄
+        const current = state.npcs[npcId].memory;
+        this.setNpcMemory(npcId, {
+          summary: maskSummaryForStorage(result.summaryText, this.maskEnv),
+          // 要約に渡した先頭 N 往復のみ除去(要約中に積まれた新しい往復は残す。通常は空になる)
+          recentExchanges: current.recentExchanges.slice(summarizedCount)
+        });
+      })
+      .catch(() => {
+        // 要約実行時の例外は握って無害化(プロセスを落とさない・unhandled rejection にしない)
       });
-    }
+
     gk.closeConversation();
     this.activeInteraction = null;
     return [this.snapshotMsg()];

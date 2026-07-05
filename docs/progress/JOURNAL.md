@@ -662,3 +662,23 @@
   適用される(区分の構造上不可避。battleResult は無害な余裕、summary はテキストのみで影響なし)
 - 次にやること: 会話立ち去り後のフリーズ解消(要約非同期化)→ 会話開始の即時画面切替
   (本セッションのタスク#2/#3)
+
+## [21] 2026-07-05 会話立ち去り後のフリーズ解消(要約AIの非同期化)
+
+- やったこと(ユーザー要望): 立ち去り後に要約AI(summaryフロー。liveで数秒〜数十秒)の完了を
+  待って画面が固まるのを解消。実装はsubagent=Opus、検収はオーケストレーター
+  - session.ts `conversationEnd` を同期メソッド化: 要約を fire-and-forget で開始し、
+    closeConversation+interaction解除+snapshot を**即座に**返す(クライアントのawaitingが
+    すぐ解除され立ち去り直後に移動可能)
+  - 完了ハンドラは**同期のみ・awaitなし**(直列処理チェーン外での状態read-writeをアトミックに):
+    要約成功時のみ最新memoryのsummaryを差し替え、`recentExchanges.slice(N)`(N=要約に渡した
+    往復数)で**要約中に積まれた新往復を保持**。失敗時はmemory不変。例外はcatchで無害化
+  - 新フィールド `gameGeneration`(newGame/continueで+1): 立ち去り→即タイトル→ロード後に
+    要約が完了しても**別ゲームのmemoryを汚さない**(世代不一致で破棄)
+  - gatekeeper既存ガード(inFlight・同一NPC要約完了待ち)は不変更。テスト6件追加(unit 545)
+- 検証: `pnpm check` 緑・`pnpm test:e2e` 10/10緑
+- 既知の問題(subagent申し送り→BACKLOG相当): 要約がinFlightスロットを応答後も短時間保持する
+  ため、その窓で発火したAIフローがbusy定型文に落ちる。特に**初見敵の即時撃破**では
+  narrateBattleがAI呼び出しの有無に関わらず narratedEnemies に記録するため、固有AI描写が
+  出ないまま既見扱いになる(フレーバーのみ・進行阻害なし・窓は狭い)。修正は別論点を含むため見送り
+- 次にやること: 会話開始の即時画面切替(タスク#3。UI側は実装済み・未コミット)

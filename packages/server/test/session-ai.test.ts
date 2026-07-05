@@ -104,6 +104,52 @@ class CountingDreamMaster implements DreamMaster {
   }
 }
 
+/** 要約完了非同期化の検証で使う要約テキスト(マスク後も同一の平文) */
+const DEFERRED_SUMMARY_TEXT = "旅人と司祭は静かに語り合った。";
+
+/**
+ * 会話は即応答(speak)、要約(summary)は test 側が releaseSummary() を呼ぶまで**保留**する
+ * DreamMaster。会話終了の snapshot が要約完了を待たずに返ることの検証に使う。
+ */
+class DeferredSummaryDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public summaryStarted = false;
+  private resolveSummary: (() => void) | null = null;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "summary") {
+      this.summaryStarted = true;
+      return new Promise<DreamMasterResult>((resolve) => {
+        this.resolveSummary = () => resolve(okResult(ctx, [], DEFERRED_SUMMARY_TEXT));
+      });
+    }
+    if (ctx.flow === "conversation") {
+      return Promise.resolve(okResult(ctx, [{ toolName: "speak", rawInput: { text: "「……なるほど、旅人さん」" } }]));
+    }
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+  /** 保留中の要約を完了させる */
+  public releaseSummary(): void {
+    if (this.resolveSummary === null) throw new Error("要約がまだ開始していない");
+    this.resolveSummary();
+    this.resolveSummary = null;
+  }
+}
+
+/** 会話は即応答、要約は text=null(出力壁却下 → summaryText null)を返す DreamMaster(要約失敗の検証用) */
+class FailingSummaryDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [])); // text=null → 出力壁却下
+    if (ctx.flow === "conversation") {
+      return Promise.resolve(okResult(ctx, [{ toolName: "speak", rawInput: { text: "「……はい」" } }]));
+    }
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+}
+
+/** マイクロタスクを十分に流す(非同期要約の完了ハンドラ適用を待つ。gatekeeper.test の tick を踏襲) */
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 class FakeSaveStore implements SaveStore {
   public saved: GameState[] = [];
   public loadResult: LoadResult = { ok: false, reason: "missing" };
@@ -546,5 +592,138 @@ describe("メインクエスト・司祭(スクリプトと AI 会話の併存)"
     if (view.interaction?.kind === "conversation") {
       expect(view.interaction.npcId).toBe("priest");
     }
+  });
+});
+
+// ===========================================================================
+// 会話終了の要約非同期化(立ち去り直後の移動固着を防ぐ)
+// ===========================================================================
+
+describe("会話終了の要約非同期化", () => {
+  /** 司祭(rift-revealed)と AI 会話を開き、1往復送る(memory.recentExchanges が1件になる) */
+  async function priestConversationWithOneExchange(session: GameSession): Promise<void> {
+    mustState(session).mainQuestStage = "rift-revealed";
+    await talkTo(session, "priest"); // 挨拶(0往復)
+    advanceClock(session, 3001); // 送信レートを跨ぐ
+    await session.handle({ type: "conversation-send", text: "この街のことを教えてくれ" });
+  }
+
+  it("会話終了の snapshot は要約完了を待たずに即返る(要約は開始済みだが memory 未更新)", async () => {
+    const { session, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredSummaryDreamMaster()
+    });
+    const dm = dreamMaster as DeferredSummaryDreamMaster;
+    await session.handle({ type: "new-game" });
+    await priestConversationWithOneExchange(session);
+    expect(mustState(session).npcs.priest.memory.recentExchanges).toHaveLength(1);
+
+    const msgs = await session.handle({ type: "conversation-end" });
+
+    // 応答は snapshot 1件のみで即返る(要約 AI の完了を待たない)
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.type).toBe("snapshot");
+    expect(mustView(session).interaction).toBeUndefined(); // 会話 overlay は閉じた
+    // 要約は開始済み(fire-and-forget)だが未完了 → memory はまだ更新されていない
+    expect(dm.summaryStarted).toBe(true);
+    expect(mustState(session).npcs.priest.memory.summary).toBe("");
+    expect(mustState(session).npcs.priest.memory.recentExchanges).toHaveLength(1);
+  });
+
+  it("要約完了後に memory が更新される(summary 差し替え + 渡した往復の除去)", async () => {
+    const { session, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredSummaryDreamMaster()
+    });
+    const dm = dreamMaster as DeferredSummaryDreamMaster;
+    await session.handle({ type: "new-game" });
+    await priestConversationWithOneExchange(session);
+    await session.handle({ type: "conversation-end" });
+
+    dm.releaseSummary();
+    await tick();
+
+    const memory = mustState(session).npcs.priest.memory;
+    expect(memory.summary).toContain("語り合った");
+    expect(memory.recentExchanges).toHaveLength(0);
+  });
+
+  it("[防御的] 要約中に積まれた新しい往復は完了時に失われない(先頭 N 件のみ除去)", async () => {
+    // 実際は同一NPC再会話を gatekeeper が要約完了までブロックするため到達しない経路。
+    // 完了ハンドラの slice(N) が「渡した先頭 N 件だけを除く」ことを直接検証する防御テスト。
+    const { session, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredSummaryDreamMaster()
+    });
+    const dm = dreamMaster as DeferredSummaryDreamMaster;
+    await session.handle({ type: "new-game" });
+    await priestConversationWithOneExchange(session); // N=1
+    await session.handle({ type: "conversation-end" });
+
+    // 要約完了前に新しい往復が memory へ積まれた状況を模擬(直接差し替え)
+    const before = mustState(session).npcs.priest.memory;
+    const injected = { player: "要約中に届いた発言", npc: "「うむ」" };
+    mustState(session).npcs.priest.memory = {
+      summary: before.summary,
+      recentExchanges: [...before.recentExchanges, injected]
+    };
+
+    dm.releaseSummary();
+    await tick();
+
+    const memory = mustState(session).npcs.priest.memory;
+    expect(memory.summary).toContain("語り合った"); // 要約は反映される
+    expect(memory.recentExchanges).toEqual([injected]); // 先頭1件(要約済み)のみ除去、新往復は残る
+  });
+
+  it("要約失敗(summaryText null)時は memory 不変", async () => {
+    const { session } = makeAiSession({ dreamMaster: () => new FailingSummaryDreamMaster() });
+    await session.handle({ type: "new-game" });
+    await priestConversationWithOneExchange(session);
+    const before = structuredClone(mustState(session).npcs.priest.memory);
+
+    await session.handle({ type: "conversation-end" });
+    await tick();
+
+    const memory = mustState(session).npcs.priest.memory;
+    expect(memory.summary).toBe(before.summary); // ""(不変)
+    expect(memory.recentExchanges).toEqual(before.recentExchanges); // 往復は残る(要約されていない)
+  });
+
+  it("0往復(送信なし)で会話終了すると要約 AI を呼ばず memory 不変", async () => {
+    const { session, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredSummaryDreamMaster()
+    });
+    const dm = dreamMaster as DeferredSummaryDreamMaster;
+    await session.handle({ type: "new-game" });
+    mustState(session).mainQuestStage = "rift-revealed";
+    await talkTo(session, "priest"); // 挨拶のみ(0往復)
+
+    await session.handle({ type: "conversation-end" });
+    await tick();
+
+    expect(dm.summaryStarted).toBe(false); // 要約 AI は呼ばれない(0往復スキップ)
+    expect(mustState(session).npcs.priest.memory.summary).toBe("");
+    expect(mustState(session).npcs.priest.memory.recentExchanges).toHaveLength(0);
+    expect(mustView(session).interaction).toBeUndefined(); // 会話は閉じる
+  });
+
+  it("立ち去り→ロードでゲームが替わった後に要約が完了しても別ゲームの memory を汚さない", async () => {
+    const { session, store, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredSummaryDreamMaster()
+    });
+    const dm = dreamMaster as DeferredSummaryDreamMaster;
+    await session.handle({ type: "new-game" });
+    await priestConversationWithOneExchange(session);
+    await session.handle({ type: "conversation-end" }); // 要約は保留のまま
+
+    // 別のセーブをロード(ゲーム世代が進む)。ロード先の司祭 memory は既定(空)
+    store.loadResult = { ok: true, state: fieldState() };
+    await session.handle({ type: "continue" });
+    const priestBefore = structuredClone(mustState(session).npcs.priest.memory);
+
+    dm.releaseSummary(); // 前ゲームの要約が今ごろ完了
+    await tick();
+
+    const priestAfter = mustState(session).npcs.priest.memory;
+    expect(priestAfter).toEqual(priestBefore); // ロード後の memory は書き換わらない
+    expect(priestAfter.summary).toBe(""); // 別ゲームに前ゲームの要約は焼き込まれない
   });
 });
