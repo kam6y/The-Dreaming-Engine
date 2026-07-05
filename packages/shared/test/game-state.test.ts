@@ -5,6 +5,7 @@ import {
   createDefaultAiDailyCounters,
   createDefaultNpcStates,
   createDefaultWorldState,
+  createEmptyEquipment,
   createNewGameState,
   DEFAULT_NPC_TOPICS,
   gameStateSchema,
@@ -24,6 +25,7 @@ describe("createNewGameState(新フィールドの既定値)", () => {
     expect(s.world).toEqual(createDefaultWorldState());
     expect(s.narratedEnemies).toEqual([]);
     expect(s.aiDaily).toEqual(createDefaultAiDailyCounters());
+    expect(s.equipment).toEqual(createEmptyEquipment());
   });
 });
 
@@ -90,7 +92,7 @@ describe("hasNarratedEnemy / recordNarratedEnemy(戦果描写済み記録)", () 
 });
 
 describe("後方互換(M3 形式セーブの読み込み)", () => {
-  it("npcs/subQuests/world/narratedEnemies/aiDaily を持たないセーブをデフォルト補完で読める", () => {
+  it("npcs/subQuests/world/narratedEnemies/aiDaily/equipment を持たないセーブをデフォルト補完で読める", () => {
     const full = createNewGameState();
     // M3 形式: version 1 だが M4 追加フィールドを含まない
     const m3Save = {
@@ -115,6 +117,7 @@ describe("後方互換(M3 形式セーブの読み込み)", () => {
       expect(result.data.world).toEqual(createDefaultWorldState());
       expect(result.data.narratedEnemies).toEqual([]);
       expect(result.data.aiDaily).toEqual(createDefaultAiDailyCounters());
+      expect(result.data.equipment).toEqual(createEmptyEquipment());
     }
   });
 });

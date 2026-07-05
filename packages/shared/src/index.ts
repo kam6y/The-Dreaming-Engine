@@ -6,6 +6,7 @@ export * from "./maps/index.js";
 export * from "./rng.js";
 export * from "./combat/index.js";
 export * from "./inventory.js";
+export * from "./equipment.js";
 export * from "./shop.js";
 export * from "./loot.js";
 export * from "./game-state.js";

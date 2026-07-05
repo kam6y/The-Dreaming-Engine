@@ -7,6 +7,7 @@ import {
   weatherSchema
 } from "./ai/world-event.js";
 import { playerProgressSchema, statsForLevel } from "./combat/index.js";
+import { createEmptyEquipment, equipmentSchema } from "./equipment.js";
 import { directionSchema, positionSchema } from "./geometry.js";
 import { enemyIdSchema } from "./ids.js";
 import type { EnemyId } from "./ids.js";
@@ -143,6 +144,8 @@ export const gameStateSchema = z.object({
   location: gameLocationSchema,
   /** インベントリ(通常アイテム + クエスト用アイテム別枠) */
   inventory: inventorySchema,
+  /** 装備スロット(武器・防具)。M8-1 追加。旧セーブは空装備で補完(GAME_STATE_VERSION 据え置き) */
+  equipment: equipmentSchema.default(createEmptyEquipment),
   /** ゲーム内日付(1日目からの通し番号)。宿泊と全滅帰還でのみ +1(game-design.md「ゲーム内時間」) */
   day: z.number().int().positive(),
   /** プレイ時間(秒。サーバーで計測しセーブに含める) */
@@ -183,6 +186,7 @@ export function createNewGameState(): GameState {
       facing: NEW_GAME_START.facing
     },
     inventory,
+    equipment: createEmptyEquipment(),
     day: 1,
     playtimeSeconds: 0,
     gimmicks: [],

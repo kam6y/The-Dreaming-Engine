@@ -12,14 +12,38 @@ import type { StatusId } from "./status.js";
  * - ore         : 鉱石。採取ポイントで得る素材(売却用)。将来のfetchクエスト対象候補。
  * - old-key     : 古びた鍵。クエスト用アイテム(売却・破棄不可・所持上限対象外の別枠)。
  *                 M3では入手経路を持たない構造定義(別枠ロジックの検証・M6の仕掛け用の器)。
+ * - worn-blade  : 錆びた片刃。初級の武器(weapon スロット。M8-1)。
+ * - amber-blade : 琥珀刃。上級の武器(weapon スロット。M8-1)。
+ * - worn-cloak  : 擦り切れた外套。初級の防具(armor スロット。M8-1)。
+ * - warded-mail : 灯守りの帷子。上級の防具(armor スロット。M8-1)。
  */
+
+/** 装備スロット(武器・防具の2種。game-design.md「装備(拡張: M8)」) */
+export const equipmentSlotSchema = z.enum(["weapon", "armor"]);
+export type EquipmentSlot = z.infer<typeof equipmentSlotSchema>;
+
+/** 武器スロットに装備できるアイテム ID(初級 → 上級) */
+export const WEAPON_ITEM_IDS = ["worn-blade", "amber-blade"] as const;
+/** 防具スロットに装備できるアイテム ID(初級 → 上級) */
+export const ARMOR_ITEM_IDS = ["worn-cloak", "warded-mail"] as const;
+/** 装備可能アイテム ID の全体(武器 + 防具)。equipment.ts のスロット別スキーマで使う */
+export const EQUIPMENT_ITEM_IDS = [...WEAPON_ITEM_IDS, ...ARMOR_ITEM_IDS] as const;
+
+export const equipmentItemIdSchema = z.enum(EQUIPMENT_ITEM_IDS);
+/** 装備可能アイテムの ID(itemIdSchema の部分集合) */
+export type EquipmentItemId = z.infer<typeof equipmentItemIdSchema>;
+
 export const itemIdSchema = z.enum([
   "potion-small",
   "potion-mid",
   "antidote",
   "herb",
   "ore",
-  "old-key"
+  "old-key",
+  "worn-blade",
+  "amber-blade",
+  "worn-cloak",
+  "warded-mail"
 ]);
 export type ItemId = z.infer<typeof itemIdSchema>;
 
@@ -44,6 +68,15 @@ export interface ItemDefinition {
   questItem: boolean;
   /** 戦闘中に使える効果。持たないアイテムは戦闘コマンド「どうぐ」で選べない */
   battleEffect?: ItemBattleEffect;
+  /**
+   * 装備スロット(weapon/armor)。定義されている品のみ装備できる(M8-1)。
+   * weapon は atkBonus を、armor は defBonus を持つ(game-design.md「装備(拡張: M8)」)。
+   */
+  slot?: EquipmentSlot;
+  /** 武器の攻撃ボーナス(実効攻撃力 = レベル基礎攻撃力 + atkBonus)。weapon スロットのみ */
+  atkBonus?: number;
+  /** 防具の防御ボーナス(実効防御力 = レベル基礎防御力 + defBonus)。armor スロットのみ */
+  defBonus?: number;
 }
 
 /** アイテム定義表(識別子 → 定義)。効果値・価格はClaude Codeの裁量。 */
@@ -94,6 +127,42 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
     description: "誰かが握りしめたまま忘れていったような、錆びた鍵。手放してはいけない気がする。",
     buyPrice: 0,
     questItem: true
+  },
+  "worn-blade": {
+    id: "worn-blade",
+    name: "錆びた片刃",
+    description: "青灰の錆を刃に浮かべた、名もなき誰かの得物。切れ味は鈍いが、握れば少しだけ心強い。",
+    buyPrice: 60,
+    questItem: false,
+    slot: "weapon",
+    atkBonus: 3
+  },
+  "amber-blade": {
+    id: "amber-blade",
+    name: "琥珀刃",
+    description: "刀身に琥珀色の灯を宿した刃。振るうたび、忘れられた願いがひとつ、静かに燃える。",
+    buyPrice: 180,
+    questItem: false,
+    slot: "weapon",
+    atkBonus: 7
+  },
+  "worn-cloak": {
+    id: "worn-cloak",
+    name: "擦り切れた外套",
+    description: "幾人もの旅人が羽織り、置いていった外套。青灰の埃を吸って重いが、夜風は防いでくれる。",
+    buyPrice: 50,
+    questItem: false,
+    slot: "armor",
+    defBonus: 2
+  },
+  "warded-mail": {
+    id: "warded-mail",
+    name: "灯守りの帷子",
+    description: "灯守堂に伝わる、まどろみを弾く帷子。琥珀の環が縫い込まれ、悪夢の牙をわずかに遠ざける。",
+    buyPrice: 150,
+    questItem: false,
+    slot: "armor",
+    defBonus: 5
   }
 };
 
@@ -120,4 +189,14 @@ export function sellPriceOf(id: ItemId): number {
 /** 売却可能なアイテムか(クエスト用アイテムは不可) */
 export function isSellable(id: ItemId): boolean {
   return !ITEMS[id].questItem;
+}
+
+/** 装備品か(slot を持つか)。true なら装備スロットへ装備できる(M8-1) */
+export function isEquipment(id: ItemId): id is EquipmentItemId {
+  return ITEMS[id].slot !== undefined;
+}
+
+/** 装備先スロット。装備品でなければ undefined(M8-1) */
+export function equipmentSlotOf(id: ItemId): EquipmentSlot | undefined {
+  return ITEMS[id].slot;
 }

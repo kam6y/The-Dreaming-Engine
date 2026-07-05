@@ -834,3 +834,29 @@
 - 次にやること: BACKLOG次点「装備システム(武器・防具のスロット、攻防への反映、
   店での売買)」をM8として展開してから着手。ゲームロジック中心のため
   subagent(Opus)への委譲が主体になる見込み(UI=装備画面のみオーケストレーター)
+
+## [28] 2026-07-05 M8展開+M8-1: 装備システムの仕様骨子とsharedデータモデル
+
+- やったこと(BACKLOG「装備システム」をM8として4分割で展開し、M8-1を完了。
+  実装はsubagent=Opus、事前調査=Explore、検収・コミット=オーケストレーター):
+  - 仕様骨子: game-design.mdへ「装備(拡張: M8)」節を新設(スロット2つ=武器/防具、
+    実効攻防=レベル基礎値+装備ボーナス(ダメージ式の構造不変)、装備・解除は
+    インベントリとの授受(解除は満杯不可・入れ替えは満杯でも常に成功)、入手は店)。
+    「セーブ/ロード」保存内容列挙へ「装備スロット」を追記(列挙更新は仕様書自身の指示)
+  - shared: items.tsへ装備4種(worn-blade 錆びた片刃 攻+3 60G / amber-blade 琥珀刃
+    攻+7 180G / worn-cloak 擦り切れた外套 防+2 50G / warded-mail 灯守りの帷子 防+5 150G)
+    とslot/atkBonus/defBonusフィールド・ID部分集合(WEAPON/ARMOR_ITEM_IDS)を追加。
+    equipment.ts新設(スロット別enumのequipmentSchema・equipItem/unequipItem純ロジック・
+    effectiveStats)。gameStateSchemaへ equipment を .default() 付きで追加
+    (GAME_STATE_VERSION=1据え置き=旧セーブ互換)
+  - テスト18件+既存互換テスト拡張(unit 561→579)。バランス根拠: Lv1基礎攻8/防5、
+    価格はポーション小20G・ボス報酬100G等の経済と整合(subagent報告に詳細)
+- 検証: `pnpm check` 緑(unit 579)・`pnpm test:e2e` 10/10緑(検収時に再実行)。
+  battle.ts・server・clientは不変更(effectiveStatsの組み込みはM8-2)
+- 次にやること: M8-2(サーバー統合)をsubagentへ委譲。申し送り:
+  (1) createBattle/applyLevelUps を effectiveStats(level, equipment) 差し替え
+  (equipmentをBattleStateへ渡す経路が必要)、(2) equip/unequip のWSメッセージ+
+  session.tsリデューサー(shopBuy/useItemが雛形、handle switchは254-288行)、
+  (3) buildView(session.ts:1193)へ装備ビュー+実効ステータス反映、
+  (4) セーブは追加実装不要(.default()補完)。探索中のuseItem(session.ts:933)と
+  buildViewのstatsForLevel直呼びも effectiveStats へ統一すること
