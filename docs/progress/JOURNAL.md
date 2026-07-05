@@ -758,3 +758,27 @@
 - 次にやること: 拡張フェーズ。BACKLOG.md 最上位の未完了項目「タイルマップの
   グラフィック改善(Kenney等CC0素材への置換、またはオートタイル実装)」を
   M7+としてROADMAP末尾へ分割展開してから着手する
+
+## [25] 2026-07-05 M7展開+M7-1: CC0タイルセット(Kenney Roguelike/RPG pack)の同梱
+
+- やったこと(拡張フェーズ1件目。BACKLOG最上位「タイルマップのグラフィック改善」を
+  ROADMAP末尾へM7として3分割で展開し、M7-1を完了):
+  - 事前調査(Explore subagent): 現行タイル描画は exploration-scene.ts の drawTiles
+    (647-670行)が単一Graphicsへ単色矩形+グリッド線を手描き。タイル5種
+    (floor/wall/water/road/grass)の定義と通行可否はshared(map.ts)にあり
+    サーバー権威のため、**描画置換は純粋な見た目変更**。E2Eは座標クリック・
+    画像比較・タイル見た目への依存が一切なく安全
+  - Kenney「Roguelike/RPG pack」(CC0 1.0)を kenney.nl から取得し、透過版
+    スプライトシートを `assets/tiles/roguelike-sheet-transparent.png` として同梱
+    (LICENSE.txt・出典README付き)。検収は機械検証: PNG署名一致、
+    968x526px=16pxタイル+1px間隔(外周マージンなし)で57列x31行=1767タイル
+  - asset-pipeline.md「タイルマップの方針」へ展開済みの注記を追記
+    (BACKLOG展開に伴う骨子追記=CLAUDE.mdが許可する類の更新。既存要件の変更なし)
+- 裁量で決めたこと: タイル素材はcodex台帳 manifest.json の対象外とし
+  assets/tiles/README.md を台帳とする(フォント[24]と同じ扱い。manifestは
+  preloadが全エントリをload.imageする画像台帳のため、スプライトシートを混ぜない)
+- 検証: `pnpm check` 緑・`pnpm test:e2e` 10/10緑(コード変更なし・アセット+ドキュメントのみ)
+- 次にやること: M7-2(タイル描画のタイルセット参照化)。クライアント描画=UI作業のため
+  オーケストレーター自身が実装する。Phaser読み込みは
+  `frameWidth:16, frameHeight:16, margin:0, spacing:1`、32pxグリッドへはNEARESTで2倍。
+  5種タイル×マップ種別のフレーム割当はスプライトシートを目視してから決める

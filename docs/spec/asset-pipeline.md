@@ -58,6 +58,10 @@ consistent game asset style, no text, no watermark
   透過・アニメフレーム一貫性が保証できないため)
 - 縦切りではコード生成のプレースホルダータイル(単色+簡易パターン)を使う
 - 拡張フェーズでCC0素材(Kenney等)への置換をBACKLOGで扱う
+  (2026-07-05 展開済み=ROADMAP M7。Kenney「Roguelike/RPG pack」(CC0)を
+  `assets/tiles/` に同梱。出典・検収記録は同ディレクトリのREADME。
+  CC0タイル素材は codex 台帳 `manifest.json` の対象外とし、
+  `assets/tiles/README.md` を台帳とする)
 - プレイヤー・NPCのマップ上の見た目も同様にプレースホルダー
   (色付き矩形+向き表示)から開始してよい。立ち絵と会話で世界観を担保する
 
