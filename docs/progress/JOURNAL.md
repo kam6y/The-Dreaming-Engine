@@ -883,3 +883,24 @@
 - 次にやること: M8-3(店の売買対応)をsubagentへ委譲。申し送り: SHOP_STOCK/
   shopStockEntries(shared/src/shop.ts)へ装備4種を追加すれば既存の shopBuy/shopSell が
   そのまま動く(装備固有の分岐不要)。E2Eの店スモークが在庫一覧に依存していないか確認する
+
+## [30] 2026-07-06 M8-3: 店の装備売買対応
+
+- やったこと(実装はsubagent=Opus、検収・コミットはオーケストレーター):
+  - shop.ts の SHOP_STOCK へ装備4種を追加(並び=消耗品→武器(初級→上級)→防具(同)。
+    順序は WEAPON/ARMOR_ITEM_IDS のspreadで一元化)。game-design.md 装備節の入手経路へ1行追記
+  - shopBuy/shopSell は**無修正で動作**を確認(売却は state.inventory のみを対象とするため、
+    装備中の品はスロットにあり構造的に売却対象外=誤売却なし)
+  - テスト8件追加(在庫・並び順・価格/購入・満杯ブロック・売却・装備中売却不可。unit 600)
+- 検証: `pnpm check` 緑(unit 600)・`pnpm test:e2e` 10/10緑(検収時に再実行)
+- 運用メモ(subagent発見): `pnpm check` は test を build より先に実行するため、
+  shared 変更後に古い dist が残っていると server テストが stale dist で落ちることがある
+  (fresh checkout や clean 後は先に `pnpm build`)。今回の初回失敗もこれで、テスト自体は健全
+- 次にやること: M8-4(装備画面UI+E2Eスモーク1本)。**UI作業のためオーケストレーター自身が実装**。
+  申し送り: (1) snapshot.view.player.equipment.{weapon,armor}(null or {itemId,name,bonus})と
+  effectiveAttack/effectiveDefense が利用可能、(2) 送信は {type:"equip",itemId} /
+  {type:"unequip",slot}、失敗コード not-owned/not-equipped/inventory-full、
+  (3) 探索中のみ有効(戦闘中は invalid-mode)、(4) 店の買い/売りリストに装備の
+  ボーナス値が出ない(shop-overlay.ts buildBuyItems。ITEMS[id].atkBonus/defBonus 参照で
+  ラベル拡張を検討)、(5) InventoryOverlay(Escで開く)への統合か新規オーバーレイかは
+  実装時に判断(game-design.md:31 の将来像はEscメニュー集約)

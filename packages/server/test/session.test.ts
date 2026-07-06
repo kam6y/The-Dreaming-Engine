@@ -12,6 +12,7 @@ import {
   emptyInventory,
   gameStateSchema,
   samePosition,
+  sellPriceOf,
   statsForLevel
 } from "@dreaming-engine/shared";
 import type {
@@ -1021,6 +1022,61 @@ describe("店", () => {
       await session.handle({ type: "shop-sell", itemId: "ore", quantity: 1 }),
       "not-owned"
     );
+  });
+
+  // --- 装備品の売買(M8-3。分岐は消耗品と共通。装備固有の観点を検証) ---
+
+  it("装備品の購入でゴールドが減り、インベントリに入る(店は開いたまま)", async () => {
+    const { session } = await shopSession();
+    mustState(session).player.gold = 200; // 装備は 50〜180G。INITIAL_GOLD(30)では買えないため補充
+    const msgs = await session.handle({ type: "shop-buy", itemId: "worn-blade", quantity: 1 });
+    expect(msgs).toHaveLength(1); // snapshot のみ
+    const view = firstSnapshot(msgs);
+    expect(view.player.gold).toBe(200 - 60); // worn-blade 60G
+    expect(countOf(mustState(session).inventory, "worn-blade")).toBe(1);
+    expect(view.interaction?.kind).toBe("shop"); // 開いたまま
+  });
+
+  it("装備品の購入は容量不足で inventory-full ブロック(資金は足りてもゴールドは引かれない)", async () => {
+    const { session } = await shopSession();
+    const state = mustState(session);
+    state.player.gold = 200; // 資金は十分(ゴールドチェックを先に通し、容量分岐に到達させる)
+    state.inventory = addItem(emptyInventory(), "herb", INVENTORY_CAPACITY).inventory; // 満杯
+    expectError(
+      await session.handle({ type: "shop-buy", itemId: "warded-mail", quantity: 1 }),
+      "inventory-full"
+    );
+    expect(mustState(session).player.gold).toBe(200); // 一切引かれていない
+    expect(countOf(mustState(session).inventory, "warded-mail")).toBe(0);
+  });
+
+  it("装備品の売却で sellPrice ぶんゴールドが増え、インベントリから減る", async () => {
+    const { session } = await shopSession();
+    const state = mustState(session);
+    state.inventory = addItem(state.inventory, "amber-blade", 1).inventory;
+    const goldBefore = state.player.gold;
+    const msgs = await session.handle({ type: "shop-sell", itemId: "amber-blade", quantity: 1 });
+    expect(msgs).toHaveLength(1);
+    expect(firstSnapshot(msgs).player.gold).toBe(goldBefore + sellPriceOf("amber-blade")); // 180/2 = 90
+    expect(countOf(mustState(session).inventory, "amber-blade")).toBe(0);
+  });
+
+  it("装備中の品はスロットにありインベントリに無いため売却できない(not-owned・装備は外れない)", async () => {
+    const { session } = await shopSession();
+    const state = mustState(session);
+    // 唯一の1個を装備 → インベントリの worn-blade は 0 になる(スロットへ移る)
+    state.inventory = addItem(state.inventory, "worn-blade", 1).inventory;
+    await session.handle({ type: "equip", itemId: "worn-blade" });
+    expect(countOf(mustState(session).inventory, "worn-blade")).toBe(0);
+    expect(mustState(session).equipment.weapon).toBe("worn-blade");
+    const goldBefore = mustState(session).player.gold;
+    // 装備スロットの品は売却対象にならない(誤ってスロットから売れない)
+    expectError(
+      await session.handle({ type: "shop-sell", itemId: "worn-blade", quantity: 1 }),
+      "not-owned"
+    );
+    expect(mustState(session).equipment.weapon).toBe("worn-blade"); // 外れていない
+    expect(mustState(session).player.gold).toBe(goldBefore); // 増えていない
   });
 });
 

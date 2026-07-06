@@ -112,6 +112,41 @@ describe("店(在庫・価格)", () => {
     expect(sellPriceOf("herb")).toBe(5);
     expect(sellPriceOf("ore")).toBe(12);
   });
+
+  it("在庫に装備4種(武器2・防具2)を含む(M8-3)", () => {
+    expect(SHOP_STOCK).toContain("worn-blade");
+    expect(SHOP_STOCK).toContain("amber-blade");
+    expect(SHOP_STOCK).toContain("worn-cloak");
+    expect(SHOP_STOCK).toContain("warded-mail");
+  });
+
+  it("在庫の並び順は 消耗品 → 武器(初級→上級)→ 防具(初級→上級)", () => {
+    expect(SHOP_STOCK).toEqual([
+      "potion-small",
+      "potion-mid",
+      "antidote",
+      "worn-blade",
+      "amber-blade",
+      "worn-cloak",
+      "warded-mail"
+    ]);
+  });
+
+  it("shopStockEntries は装備の名称・購入価格を返す(M8-3)", () => {
+    const entries = shopStockEntries();
+    const byId = new Map(entries.map((e) => [e.itemId, e]));
+    expect(byId.get("worn-blade")).toEqual({ itemId: "worn-blade", name: "錆びた片刃", buyPrice: 60 });
+    expect(byId.get("amber-blade")).toEqual({ itemId: "amber-blade", name: "琥珀刃", buyPrice: 180 });
+    expect(byId.get("worn-cloak")).toEqual({ itemId: "worn-cloak", name: "擦り切れた外套", buyPrice: 50 });
+    expect(byId.get("warded-mail")).toEqual({ itemId: "warded-mail", name: "灯守りの帷子", buyPrice: 150 });
+  });
+
+  it("装備の売却価格は明示値がなければ購入価格の半額(切り捨て)", () => {
+    expect(sellPriceOf("worn-blade")).toBe(30); // 60 / 2
+    expect(sellPriceOf("amber-blade")).toBe(90); // 180 / 2
+    expect(sellPriceOf("worn-cloak")).toBe(25); // 50 / 2
+    expect(sellPriceOf("warded-mail")).toBe(75); // 150 / 2
+  });
 });
 
 describe("ルートテーブル(宝箱・採取)", () => {
