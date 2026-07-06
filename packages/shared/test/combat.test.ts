@@ -4,12 +4,15 @@ import {
   computeDamage,
   createBattle,
   fleeChance,
+  MAX_LEVEL,
   poisonTickDamage,
   resolveTurn,
+  SKILLS,
+  skillsForLevel,
   statsForLevel,
   turnOrder
 } from "../src/index.js";
-import type { BattleCommand, BattleEvent, BattleState, Equipment, PlayerProgress, Rng } from "../src/index.js";
+import type { BattleCommand, BattleEvent, BattleState, Equipment, PlayerProgress, Rng, SkillId } from "../src/index.js";
 
 // --- テスト用の決定論的な偽Rng(next()の戻り値を列で制御する) ---
 function fakeRng(queue: number[]): Rng {
@@ -159,6 +162,87 @@ describe("コマンド拒否", () => {
     const res = resolveTurn(state, { kind: "attack" });
     expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "battle-over" });
     expect(res.state).toBe(state);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// スキル習得の導出(skillsForLevel。M9: レベルから純粋に導出。習得状態は非保存)
+// ---------------------------------------------------------------------------
+
+describe("skillsForLevel(習得スキル導出)", () => {
+  const allSkillIds = Object.keys(SKILLS) as SkillId[];
+
+  it("Lv1で既存2種を習得している(定義順)", () => {
+    expect(skillsForLevel(1)).toEqual(["ember-strike", "soothing-light"]);
+  });
+
+  it("境界: learnLevel-1では含まれず、learnLevelちょうどで含まれる(全スキル)", () => {
+    for (const id of allSkillIds) {
+      const learnLevel = SKILLS[id].learnLevel;
+      expect(skillsForLevel(learnLevel)).toContain(id);
+      // Lv1習得スキルなら skillsForLevel(0)=空 で「含まれない」を満たす
+      expect(skillsForLevel(learnLevel - 1)).not.toContain(id);
+    }
+  });
+
+  it("MAX_LEVELで全種を習得している", () => {
+    const learned = skillsForLevel(MAX_LEVEL);
+    expect(new Set(learned)).toEqual(new Set(allSkillIds));
+    expect(learned).toHaveLength(allSkillIds.length);
+  });
+
+  it("習得済み一覧はレベルに対し単調(下位レベルの集合は上位レベルの部分集合)", () => {
+    for (let level = 0; level < MAX_LEVEL; level += 1) {
+      const lower = skillsForLevel(level);
+      const higher = skillsForLevel(level + 1);
+      for (const id of lower) expect(higher).toContain(id);
+    }
+  });
+
+  it("習得レベル昇順にソートされる(同レベルは定義順)", () => {
+    const learned = skillsForLevel(MAX_LEVEL);
+    const levels = learned.map((id) => SKILLS[id].learnLevel);
+    const sorted = [...levels].sort((a, b) => a - b);
+    expect(levels).toEqual(sorted);
+  });
+
+  it("レベル0以下でも例外を投げず空配列を返す(範囲外に寛容)", () => {
+    expect(skillsForLevel(0)).toEqual([]);
+    expect(skillsForLevel(-5)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// コマンド拒否(未習得スキル: skill-not-learned。M9)
+// ---------------------------------------------------------------------------
+
+describe("コマンド拒否(未習得スキル)", () => {
+  it("習得レベル未満のスキルは skill-not-learned で拒否され、ラウンドが進まない(状態不変)", () => {
+    const state = createBattle(lv(1), "mist-wolf", 1);
+    state.player.level = 0; // ember-strike(learnLevel 1)を未習得の状態へ落とす
+    const res = resolveTurn(state, { kind: "skill", skillId: "ember-strike" });
+    expect(res.events).toHaveLength(1);
+    expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "skill-not-learned" });
+    expect(res.state).toBe(state); // 参照ごと不変(ラウンドは進まない)
+    expect(res.state.turn).toBe(0);
+  });
+
+  it("習得済みスキルは従来どおり実行される(未習得拒否されない)", () => {
+    const state = createBattle(lv(1), "mist-wolf", 1); // Lv1で ember-strike 習得済み・MP十分
+    const res = resolveTurn(state, { kind: "skill", skillId: "ember-strike" });
+    expect(res.state.turn).toBe(1);
+    expect(res.events.some((e) => e.type === "command-rejected")).toBe(false);
+    expect(
+      res.events.some((e) => e.type === "action" && e.actor === "player" && e.actionKind === "skill")
+    ).toBe(true);
+  });
+
+  it("未習得かつMP不足でも未習得(skill-not-learned)を優先して拒否する", () => {
+    const state = createBattle(lv(1), "mist-wolf", 1);
+    state.player.level = 0;
+    state.player.mp = 0;
+    const res = resolveTurn(state, { kind: "skill", skillId: "ember-strike" });
+    expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "skill-not-learned" });
   });
 });
 

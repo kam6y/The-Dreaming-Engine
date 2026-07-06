@@ -933,3 +933,33 @@
 - 次にやること: BACKLOG次点「スキル拡充(主人公のスキルツリーまたは
   レベル習得スキル5種以上)」をM9として展開してから着手(ゲームロジック中心=
   subagent委譲が主体。スキル選択UIの拡張のみオーケストレーター)
+
+## [32] 2026-07-06 M9展開+M9-1: スキルのレベル習得機構
+
+- やったこと(BACKLOG「スキル拡充」をM9として3分割で展開し、M9-1を完了。
+  実装はsubagent=Opus、事前調査=Explore、検収・コミットはオーケストレーター):
+  - 仕様骨子: game-design.mdへ「スキル(拡張: M9)」節を新設し**5種の仕様表を確定**:
+    焔の一閃(Lv1・攻×1.8・MP4)/安らぎの灯(Lv1・回復45・MP5)/
+    澱み斬り murk-cleave(Lv3・攻×1.3+毒付与・MP5)/灯守りの構え warding-stance
+    (Lv4・防御+8を3ターン・MP6)/焔尽くし blaze-ender(Lv6・攻×3.0・MP12)。
+    習得はレベルから純粋導出(セーブ非保存を明記)
+  - shared: skills.ts へ learnLevel・SKILL_ORDER(enum宣言順に自動追随)・
+    isSkillLearned・skillsForLevel(習得Lv昇順→同Lvは定義順。範囲外は例外でなく空)。
+    INITIAL_SKILL_IDS は skillsForLevel(1) へ整理
+  - battle.ts: validateCommand へ未習得拒否(判定順: 未知ID→未習得→MP不足)。
+    reject理由 skill-not-learned を union/zod/文言(「その術は、まだ会得していない。」)へ追加
+  - battle-scene: スキルメニューを skillsForLevel(view.player.level) 導出へ
+    (viewBattleSchema.player.level が既存。ラベル・レイアウト不変=M9-3の範囲)
+  - テスト10件追加(skillsForLevelの境界・未習得拒否でラウンド不進行等。unit 611)。
+    既存の combat-balance.test は無改変で緑(既存2種Lv1習得のため挙動不変)
+- 検証: `pnpm check` 緑(unit 611)・`pnpm test:e2e` 11/11緑(検収時に再実行)
+- 次にやること: M9-2(新スキル3種+新効果種の戦闘エンジン拡張)をsubagentへ委譲。
+  申し送り: (1) skillIdSchema へ3ID追加+SKILLS 3定義(skillsForLevel/検証は一般形で不変)、
+  (2) 毒付与攻撃= AttackSkillDefinition に任意 inflicts、executePlayerCommand で
+  dealDamage 後に inflictStatus(next,"enemy",...)(target対応済み)、
+  (3) 防御バフが唯一の新機構= BattlePlayerState にバフ状態(残ターン)、
+  tickStatuses の毒専用処理の一般化、dealDamage の実効防御へ加算、
+  (4) inflictStatus/tickStatuses は duration・文言が毒ハードコード(battle.ts:520,527,558)
+  なので一般化が必要、(5) combat-balance.test の bossPolicy(58-69行)は2スキル前提=
+  新スキル込みの方策更新+勝率閾値の再検証、(6) BattleEvent へバフ演出イベント追加時は
+  手書き型とzodの一致規約に注意

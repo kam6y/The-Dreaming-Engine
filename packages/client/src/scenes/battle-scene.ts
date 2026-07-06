@@ -1,12 +1,12 @@
 import Phaser from "phaser";
 
 import {
-  INITIAL_SKILL_IDS,
   ITEMS,
   SKILLS,
   battleCommandSchema,
   encounterMessage,
   isBattleUsable,
+  skillsForLevel,
   type BattleCommand,
   type EnemyId,
   type SnapshotView,
@@ -471,7 +471,8 @@ export class BattleScene extends Phaser.Scene {
 
   private openSkillMenu(): void {
     this.commandMenu.deactivate();
-    const items = INITIAL_SKILL_IDS.map((skillId) => {
+    // 習得済みスキルをレベルから導出(戦闘ビューの player.level が正)。習得レベル未満は列挙しない
+    const items = skillsForLevel(this.view.player.level).map((skillId) => {
       const skill = SKILLS[skillId];
       return {
         id: skillId,

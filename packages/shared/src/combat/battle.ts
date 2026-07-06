@@ -11,7 +11,7 @@ import type { EnemyBehaviorPhase } from "./enemies.js";
 import { ITEMS } from "./items.js";
 import { itemIdSchema } from "./items.js";
 import type { ItemId } from "./items.js";
-import { SKILLS } from "./skills.js";
+import { isSkillLearned, SKILLS } from "./skills.js";
 import { skillIdSchema } from "./skills.js";
 import { statsForLevel, xpToNext, MAX_LEVEL } from "./stats.js";
 import { POISON_DURATION, poisonTickDamage, STATUS_DISPLAY_NAMES, statusIdSchema, statusStateSchema } from "./status.js";
@@ -103,7 +103,8 @@ export type CommandRejectReason =
   | "not-enough-mp" // MP不足
   | "flee-not-allowed" // ボス戦は逃走不可
   | "unusable-item" // 戦闘で使えないアイテム
-  | "unknown-skill"; // 未知のスキルID
+  | "unknown-skill" // 未知のスキルID
+  | "skill-not-learned"; // 習得レベル未満のスキル(未習得。M9)
 
 export type BattleEvent =
   | { type: "action"; actor: Combatant; actionKind: "attack" | "skill"; actionName: string; mpCost?: number; message: string }
@@ -138,7 +139,8 @@ export const commandRejectReasonSchema = z.enum([
   "not-enough-mp",
   "flee-not-allowed",
   "unusable-item",
-  "unknown-skill"
+  "unknown-skill",
+  "skill-not-learned"
 ]);
 
 export const battleEventSchema = z.discriminatedUnion("type", [
@@ -382,6 +384,8 @@ function validateCommand(state: BattleState, command: BattleCommand): CommandRej
     case "skill": {
       const skill = SKILLS[command.skillId];
       if (!skill) return "unknown-skill";
+      // 判定順: 未知ID → 未習得(習得レベル未満)→ MP不足(未習得・MP不足なら未習得を優先)
+      if (!isSkillLearned(command.skillId, state.player.level)) return "skill-not-learned";
       if (state.player.mp < skill.mpCost) return "not-enough-mp";
       return null;
     }
@@ -408,6 +412,8 @@ function rejectMessage(reason: CommandRejectReason): string {
       return "それは今、使えそうにない。";
     case "unknown-skill":
       return "そのような術は知らない。";
+    case "skill-not-learned":
+      return "その術は、まだ会得していない。";
   }
 }
 
