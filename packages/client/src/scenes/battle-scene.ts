@@ -414,7 +414,10 @@ export class BattleScene extends Phaser.Scene {
       case "status-inflicted":
       case "status-cured":
       case "status-expired":
+      case "buff-applied":
+      case "buff-expired":
       case "command-rejected":
+        // これらは message 表示のみ(ゲージ演出なし)。バフの視覚表現の作り込みはM9-3の範囲。
         break;
     }
   }

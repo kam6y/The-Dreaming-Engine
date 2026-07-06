@@ -963,3 +963,31 @@
   なので一般化が必要、(5) combat-balance.test の bossPolicy(58-69行)は2スキル前提=
   新スキル込みの方策更新+勝率閾値の再検証、(6) BattleEvent へバフ演出イベント追加時は
   手書き型とzodの一致規約に注意
+
+## [33] 2026-07-06 M9-2: 新スキル3種と新効果種(毒付与・防御バフ・強撃)
+
+- やったこと(実装はsubagent=Opus、検収・コミットはオーケストレーター):
+  - 新スキル3種を仕様表どおり実装: 澱み斬り(攻×1.3+敵へ毒付与。撃破時は付与しない)/
+    灯守りの構え(防御+8を3ターン。付与ラウンドを1ターン目と数える。重ねがけは
+    上書きリセット)/焔尽くし(攻×3.0の強撃)
+  - バフ機構の一般化: BattlePlayerState.defenseBuff {amount, remainingTurns}。
+    被ダメは playerEffectiveDefense(基礎+バフ)で計算し、ラウンド終端の tickBuffs で
+    減衰・失効(buff-applied/buff-expired イベントを union+zod 両方へ追加)
+  - 毒ハードコードの一般化: STATUS_DEFS(status.ts)へ duration・tickダメージ・
+    文言を集約し、inflictStatus/tickStatuses が表から引く形に(文言・数値は従来と同一)
+  - クライアントは最小対応(新イベントは message を持ち既存の逐次表示に乗る。
+    applyEventToView へ no-op 2ケース追加)
+  - テスト16件追加(unit 622)。combat-balance の bossPolicy を新スキル込みへ更新し
+    **全閾値を緩めずクリア**(Lv5勝率85.7%・Lv6 100%)
+- 検証: `pnpm check` 緑(unit 622)・`pnpm test:e2e` 11/11緑(検収時に再実行)
+- subagentの正直な所見(記録): warding-stance はボス戦の削り合い(Lv5)では
+  net-negative(1回使うと勝率85.7%→30.3%)のため、bossPolicy は Lv7-8 の余力時のみ
+  使用する方策とした。バフの挙動担保はユニットテスト側(被ダメ-4・3ターン失効・上書き)。
+  スキル数値・閾値は不変更
+- 次にやること: M9-3(UI対応+E2Eスモーク)。**UI作業のためオーケストレーター自身が実装**。
+  申し送り: (1) スキルサブメニューは5種でMenuList高さ174px・原点 y=height-264 固定のため
+  レイアウト確認と必要なら位置調整(battle-scene.ts:507-531付近)、(2) 防御バフは
+  battleUnitViewSchema(hp/maxHp/statuses)に載らずイベントでのみ伝わる=常設表示を
+  出すならビュー拡張が必要(毒アイコンは statuses で常設)、(3) E2Eスモークは
+  スキル選択→効果反映(startLevel加速でLv3+にして澱み斬り→毒付与を data 属性で観測が
+  一案。battle-scene の data 属性は現状 data-scene/data-battle-enemy のみ=属性追加が要る)

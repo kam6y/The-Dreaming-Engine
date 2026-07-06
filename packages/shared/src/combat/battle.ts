@@ -13,8 +13,9 @@ import { itemIdSchema } from "./items.js";
 import type { ItemId } from "./items.js";
 import { isSkillLearned, SKILLS } from "./skills.js";
 import { skillIdSchema } from "./skills.js";
+import type { BuffSkillDefinition } from "./skills.js";
 import { statsForLevel, xpToNext, MAX_LEVEL } from "./stats.js";
-import { POISON_DURATION, poisonTickDamage, STATUS_DISPLAY_NAMES, statusIdSchema, statusStateSchema } from "./status.js";
+import { STATUS_DEFS, STATUS_DISPLAY_NAMES, statusIdSchema, statusStateSchema } from "./status.js";
 import type { StatusId, StatusState } from "./status.js";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,19 @@ export type BattleCommand = z.infer<typeof battleCommandSchema>;
 export type Combatant = "player" | "enemy";
 export type BattleOutcome = "ongoing" | "victory" | "defeat" | "fled";
 
+/** バフ種別。縦切りでは防御バフのみ(灯守りの構え)。将来種を足す場合はここへ追加する。 */
+export type BuffKind = "defense";
+
+/**
+ * 一時的な防御バフの状態(灯守りの構え。BattlePlayerState が保持)。
+ * 実効防御へ amount を加算し、ラウンド終端の tickBuffs で remainingTurns を1減らす。
+ * remainingTurns が0になると失効する(buff-expired イベント)。付与ラウンドを1ターン目として数える。
+ */
+export interface DefenseBuffState {
+  amount: number;
+  remainingTurns: number;
+}
+
 export interface BattlePlayerState {
   level: number;
   xp: number;
@@ -62,6 +76,8 @@ export interface BattlePlayerState {
   defense: number;
   speed: number;
   statuses: StatusState[];
+  /** 発動中の防御バフ(なければ null)。実効防御へ加算される(M9-2 灯守りの構え) */
+  defenseBuff: DefenseBuffState | null;
 }
 
 export interface BattleEnemyState {
@@ -115,6 +131,8 @@ export type BattleEvent =
   | { type: "status-tick"; target: Combatant; status: StatusId; amount: number; remainingHp: number; message: string }
   | { type: "status-cured"; target: Combatant; status: StatusId; message: string }
   | { type: "status-expired"; target: Combatant; status: StatusId; message: string }
+  | { type: "buff-applied"; target: Combatant; buff: BuffKind; amount: number; remainingTurns: number; message: string }
+  | { type: "buff-expired"; target: Combatant; buff: BuffKind; message: string }
   | { type: "phase-change"; enemyId: EnemyId; phaseIndex: number; message: string }
   | { type: "flee"; success: boolean; message: string }
   | { type: "victory"; xpGained: number; goldGained: number; drops: ItemId[]; message: string }
@@ -134,6 +152,7 @@ export interface ResolveTurnResult {
 
 export const combatantSchema = z.enum(["player", "enemy"]);
 export const battleOutcomeSchema = z.enum(["ongoing", "victory", "defeat", "fled"]);
+export const buffKindSchema = z.enum(["defense"]);
 export const commandRejectReasonSchema = z.enum([
   "battle-over",
   "not-enough-mp",
@@ -178,6 +197,15 @@ export const battleEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("status-cured"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
   z.object({ type: z.literal("status-expired"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
+  z.object({
+    type: z.literal("buff-applied"),
+    target: combatantSchema,
+    buff: buffKindSchema,
+    amount: z.number().int(),
+    remainingTurns: z.number().int(),
+    message: z.string()
+  }),
+  z.object({ type: z.literal("buff-expired"), target: combatantSchema, buff: buffKindSchema, message: z.string() }),
   z.object({ type: z.literal("phase-change"), enemyId: enemyIdSchema, phaseIndex: z.number().int(), message: z.string() }),
   z.object({ type: z.literal("flee"), success: z.boolean(), message: z.string() }),
   z.object({
@@ -259,7 +287,8 @@ export function createBattle(
     attack: stats.attack,
     defense: stats.defense,
     speed: stats.speed,
-    statuses: []
+    statuses: [],
+    defenseBuff: null
   };
 
   const enemy: BattleEnemyState = {
@@ -309,6 +338,11 @@ function findStatus(statuses: StatusState[], id: StatusId): StatusState | undefi
 
 function combatantName(target: Combatant, enemyId: EnemyId): string {
   return target === "player" ? "旅人" : ENEMY_DISPLAY_NAMES[enemyId];
+}
+
+/** プレイヤーの実効防御(基礎防御 + 発動中の防御バフ)。被ダメージ計算はこの値を使う。 */
+function playerEffectiveDefense(player: BattlePlayerState): number {
+  return player.defense + (player.defenseBuff ? player.defenseBuff.amount : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -365,11 +399,12 @@ export function resolveTurn(state: BattleState, command: BattleCommand): Resolve
     }
   }
 
-  // --- 状態異常tick(ラウンド終端。戦闘続行時のみ) ---
+  // --- 状態異常tick + バフ減衰(ラウンド終端。戦闘続行時のみ) ---
   if (next.outcome === "ongoing") {
     tickStatuses(next, events);
     if (next.enemy.hp <= 0) resolveVictory(next, rng, events);
     else if (next.player.hp <= 0) resolveDefeat(next, events);
+    else tickBuffs(next, events); // 戦闘続行時のみ減衰(勝敗確定後のバフは無意味)
   }
 
   next.rngState = rng.state();
@@ -436,10 +471,20 @@ function executePlayerCommand(next: BattleState, command: BattleCommand, rng: Rn
         mpCost: skill.mpCost,
         message: `旅人は${skill.name}を放った。`
       });
-      if (skill.kind === "attack") {
-        dealDamage(next, "enemy", next.player.attack, next.enemy.defense, skill.power, rng, events);
-      } else {
-        healTarget(next, "player", skill.healAmount, events, "安らぎの灯が、旅人の傷をそっと照らした。");
+      switch (skill.kind) {
+        case "attack":
+          dealDamage(next, "enemy", next.player.attack, next.enemy.defense, skill.power, rng, events);
+          // 命中後、敵が生存していれば付随の状態異常を付与(倒しきった相手には付与しない)
+          if (skill.inflicts && next.enemy.hp > 0) {
+            inflictStatus(next, "enemy", skill.inflicts, events);
+          }
+          break;
+        case "heal":
+          healTarget(next, "player", skill.healAmount, events, "安らぎの灯が、旅人の傷をそっと照らした。");
+          break;
+        case "buff":
+          applyDefenseBuff(next, skill, events);
+          break;
       }
       return false;
     }
@@ -483,7 +528,8 @@ function executeEnemyAction(next: BattleState, rng: Rng, events: BattleEvent[]):
 
   const enemyName = ENEMY_DISPLAY_NAMES[next.enemy.enemyId];
   events.push({ type: "action", actor: "enemy", actionKind: "attack", actionName: move.id, message: `${enemyName}${move.flavor}` });
-  dealDamage(next, "player", next.enemy.attack, next.player.defense, move.powerMultiplier, rng, events);
+  // 被ダメージには実効防御(基礎 + 灯守りの構えのバフ)を用いる
+  dealDamage(next, "player", next.enemy.attack, playerEffectiveDefense(next.player), move.powerMultiplier, rng, events);
   if (move.inflicts && next.player.hp > 0) {
     inflictStatus(next, "player", move.inflicts, events);
   }
@@ -522,16 +568,30 @@ function healTarget(next: BattleState, target: Combatant, amount: number, events
 
 function inflictStatus(next: BattleState, target: Combatant, status: StatusId, events: BattleEvent[]): void {
   const unit = target === "player" ? next.player : next.enemy;
+  const def = STATUS_DEFS[status];
   const existing = findStatus(unit.statuses, status);
-  const duration = POISON_DURATION;
   if (existing) {
-    existing.remainingTurns = duration; // 再付与は継続ラウンドをリセット
+    existing.remainingTurns = def.duration; // 再付与は継続ラウンドを定義値へリセット
   } else {
-    unit.statuses.push({ id: status, remainingTurns: duration });
+    unit.statuses.push({ id: status, remainingTurns: def.duration });
   }
   const name = combatantName(target, next.enemy.enemyId);
-  const message = status === "poison" ? `澱んだ靄が${name}の傷に染み入る。(${STATUS_DISPLAY_NAMES[status]})` : `${name}は${STATUS_DISPLAY_NAMES[status]}に冒された。`;
-  events.push({ type: "status-inflicted", target, status, message });
+  events.push({ type: "status-inflicted", target, status, message: def.inflictMessage(name) });
+}
+
+/** 自身に防御バフを付与する(灯守りの構え)。再使用は量・残ターンを定義値へリセット(スタックしない)。 */
+function applyDefenseBuff(next: BattleState, skill: BuffSkillDefinition, events: BattleEvent[]): void {
+  // 重ねがけ(裁量): amount を加算せず、amount と remainingTurns を毎回定義値へ上書きする。
+  // 付与ラウンドを1ターン目として数える(remainingTurns=durationTurns)。tickBuffs で減衰・失効。
+  next.player.defenseBuff = { amount: skill.defenseBonus, remainingTurns: skill.durationTurns };
+  events.push({
+    type: "buff-applied",
+    target: "player",
+    buff: "defense",
+    amount: skill.defenseBonus,
+    remainingTurns: skill.durationTurns,
+    message: `旅人の周りに守りの帳が満ちる。(防御+${skill.defenseBonus})`
+  });
 }
 
 function applyItem(next: BattleState, itemId: ItemId, events: BattleEvent[]): void {
@@ -553,7 +613,10 @@ function applyItem(next: BattleState, itemId: ItemId, events: BattleEvent[]): vo
   }
 }
 
-/** ラウンド終端の状態異常tick(毒ダメージ)。両戦闘員の生存分に適用し、継続を1減らす。 */
+/**
+ * ラウンド終端の状態異常tick(継続ダメージ)。両戦闘員の生存分に適用し、継続を1減らす。
+ * 効果値・文言は STATUS_DEFS(status.ts)から引く一般形(毒を決め打ちしない)。
+ */
 function tickStatuses(next: BattleState, events: BattleEvent[]): void {
   const targets: Combatant[] = ["player", "enemy"];
   for (const target of targets) {
@@ -561,28 +624,49 @@ function tickStatuses(next: BattleState, events: BattleEvent[]): void {
     if (unit.hp <= 0) continue;
     const remaining: StatusState[] = [];
     for (const status of unit.statuses) {
-      if (status.id === "poison" && unit.hp > 0) {
-        const dmg = poisonTickDamage(unit.maxHP);
-        unit.hp = Math.max(0, unit.hp - dmg);
-        const name = combatantName(target, next.enemy.enemyId);
-        events.push({
-          type: "status-tick",
-          target,
-          status: "poison",
-          amount: dmg,
-          remainingHp: unit.hp,
-          message: `毒が${name}の身を静かに蝕む。${dmg}の痛手。`
-        });
+      const def = STATUS_DEFS[status.id];
+      // 先行tickで倒れた場合は以降のtickを適用しない(生存判定を各tickで見る)
+      if (unit.hp > 0) {
+        const dmg = def.tickDamage(unit.maxHP);
+        if (dmg > 0) {
+          unit.hp = Math.max(0, unit.hp - dmg);
+          const name = combatantName(target, next.enemy.enemyId);
+          events.push({
+            type: "status-tick",
+            target,
+            status: status.id,
+            amount: dmg,
+            remainingHp: unit.hp,
+            message: def.tickMessage(name, dmg)
+          });
+        }
       }
       const left = status.remainingTurns - 1;
       if (left > 0) {
         remaining.push({ id: status.id, remainingTurns: left });
       } else {
         const name = combatantName(target, next.enemy.enemyId);
-        events.push({ type: "status-expired", target, status: status.id, message: `${name}の${STATUS_DISPLAY_NAMES[status.id]}が引いていった。` });
+        events.push({ type: "status-expired", target, status: status.id, message: def.expireMessage(name) });
       }
     }
     unit.statuses = remaining;
+  }
+}
+
+/**
+ * ラウンド終端のバフ減衰(戦闘続行時のみ呼ぶ)。残ターンを1減らし、0で失効イベントを出す。
+ * 付与ラウンドを1ターン目として数えるため、durationTurns=3 なら付与ラウンド+続く2ラウンドの
+ * 被ダメージを軽減し、3ラウンド目の終端で失効する(game-design.md「スキル(拡張: M9)」注記)。
+ */
+function tickBuffs(next: BattleState, events: BattleEvent[]): void {
+  const buff = next.player.defenseBuff;
+  if (!buff) return;
+  const left = buff.remainingTurns - 1;
+  if (left > 0) {
+    next.player.defenseBuff = { amount: buff.amount, remainingTurns: left };
+  } else {
+    next.player.defenseBuff = null;
+    events.push({ type: "buff-expired", target: "player", buff: "defense", message: "守りの帳が、静かにほどけて消えた。" });
   }
 }
 

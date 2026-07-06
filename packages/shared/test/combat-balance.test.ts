@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyPartyWipe,
   createBattle,
+  isSkillLearned,
   resolveTurn,
   statsForLevel,
   SKILLS,
@@ -10,7 +11,7 @@ import {
   LEVEL_STATS,
   MAX_LEVEL
 } from "../src/index.js";
-import type { BattleCommand, BattleEvent, BattleOutcome, BattleState, PlayerProgress } from "../src/index.js";
+import type { BattleCommand, BattleEvent, BattleOutcome, BattleState, PlayerProgress, SkillId } from "../src/index.js";
 
 // --- シミュレーション基盤(固定シード集合で統計的に検証する) ---
 
@@ -50,21 +51,58 @@ function simulate(
 const attackPolicy: Policy = () => ({ kind: "attack" });
 
 /**
- * ボス用ヒューリスティック(competent-but-not-optimal な人間プレイヤーの近似):
- * - このターンの攻撃スキルで倒しきれるなら、回復せず攻撃で決める
+ * ボス用ヒューリスティック(competent-but-not-optimal な人間プレイヤーの近似。M9-2で新スキル対応):
+ * - 倒しきれるなら、習得済みで最も強い一撃(blaze-ender ×3.0 > ember-strike ×1.8)で決める
  * - HPが4割以下でMPがあれば回復
- * - MPがあれば攻撃スキル、なければ通常攻撃
+ * - 灯守りの構え(Lv4習得)は、ボスが第2形態(HP50%以下・攻撃激化)に入りバフが切れているときだけ張り直す
+ *   (前半から張ると火力を落として非最適になりすぎるため後半限定の防御的立ち回りに留める)
+ * - 主力は習得済み最大powerの攻撃スキル、無ければ通常攻撃
+ * 注: murk-cleave(×1.3)は ember-strike(×1.8)にダメージで劣位(dominated)のため主力に選ばない。
+ *     これにより Lv3(新スキルは murk-cleave のみ)の挙動は従来と実質同一に保たれる。
+ *     方策が返すコマンドは必ず「習得済み かつ MP充足」であること(simulate は command-rejected で
+ *     ループを中断するため、未習得/MP不足を返すと勝率計測が壊れる)。
  */
 const bossPolicy: Policy = (state) => {
   const p = state.player;
   const heal = SKILLS["soothing-light"];
-  const ember = SKILLS["ember-strike"];
-  // 攻撃スキルの概算ダメージ(下限側): floor(atk*power*0.9) - floor(def/2)
-  const emberMin = Math.max(1, Math.floor(p.attack * ember.power * 0.9) - Math.floor(state.enemy.defense / 2));
-  const canFinish = p.mp >= ember.mpCost && state.enemy.hp <= emberMin;
-  if (canFinish) return { kind: "skill", skillId: "ember-strike" };
+  const warding = SKILLS["warding-stance"];
+  // 使える攻撃スキルを power 降順で(finisher・主力の選定に使う)。blaze-ender は Lv6+ のみ
+  const attackIds: SkillId[] = ["blaze-ender", "ember-strike"];
+  const usableAttacks = attackIds.filter((id) => isSkillLearned(id, p.level) && p.mp >= SKILLS[id].mpCost);
+
+  // このターンで倒しきれる最強の一撃があれば即決める(最小ダメージ=variance下端0.9で保証)
+  for (const id of usableAttacks) {
+    const s = SKILLS[id];
+    if (s.kind !== "attack") continue;
+    const minDmg = Math.max(1, Math.floor(p.attack * s.power * 0.9) - Math.floor(state.enemy.defense / 2));
+    if (state.enemy.hp <= minDmg) return { kind: "skill", skillId: id };
+  }
+
+  // HPが4割以下でMPがあれば回復
   if (p.hp <= p.maxHP * 0.4 && p.mp >= heal.mpCost) return { kind: "skill", skillId: "soothing-light" };
-  if (p.mp >= ember.mpCost) return { kind: "skill", skillId: "ember-strike" };
+
+  // 灯守りの構え: ボスが第2形態へ移る「攻撃が激化する節目」で一度だけ身構える。
+  // ただし発動は「攻めの余力がある」= blaze-ender(×3.0の大火力・Lv6習得)を持つときに限る。
+  // 火力に余裕のない Lv5 以下では、1ターンでも攻撃を止めると夢喰いの削り合いに負ける(net-negative)ため
+  // 身構えず攻め切る。ボスHPは単調減少するので、HP割合が突入直後の狭い窓(0.42〜0.5)のときだけ
+  // 発動 → 事実上1回のブレースに留める(competent-but-not-optimal な立ち回り)。
+  const buffDown = p.defenseBuff === null || p.defenseBuff.remainingTurns <= 0;
+  const bossHpRatio = state.enemy.hp / state.enemy.maxHP;
+  const braceMoment = bossHpRatio <= 0.5 && bossHpRatio >= 0.42;
+  const hasOffensiveSlack = isSkillLearned("blaze-ender", p.level);
+  if (
+    braceMoment &&
+    buffDown &&
+    hasOffensiveSlack &&
+    isSkillLearned("warding-stance", p.level) &&
+    p.mp >= warding.mpCost
+  ) {
+    return { kind: "skill", skillId: "warding-stance" };
+  }
+
+  // 主力: 使える最大powerの攻撃スキル、無ければ通常攻撃
+  const primary = usableAttacks[0];
+  if (primary !== undefined) return { kind: "skill", skillId: primary };
   return { kind: "attack" };
 };
 

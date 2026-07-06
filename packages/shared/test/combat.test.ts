@@ -467,3 +467,176 @@ describe("createBattle(装備反映)", () => {
     expect(state.player.maxHP).toBe(base2.maxHP); // 装備は maxHP に影響しない
   });
 });
+
+// ---------------------------------------------------------------------------
+// M9-2 新スキル(澱み斬り=毒付与つき攻撃 / 灯守りの構え=防御バフ / 焔尽くし=強撃)
+// ---------------------------------------------------------------------------
+
+/** イベント列から特定 type の1件を取り出すヘルパー(見つからなければ undefined) */
+function findEvent<T extends BattleEvent["type"]>(
+  events: BattleEvent[],
+  type: T
+): Extract<BattleEvent, { type: T }> | undefined {
+  return events.find((e): e is Extract<BattleEvent, { type: T }> => e.type === type);
+}
+
+describe("澱み斬り(murk-cleave: 攻撃+毒付与)", () => {
+  it("生存している敵にダメージ+毒を付与し、同ラウンド終端に毒がtickする", () => {
+    // Lv3 で murk-cleave 習得済み・MP十分。creaking-doll(HP48)は一撃で倒れず、プレイヤーが先手(速9>6)
+    const state = createBattle(lv(3), "creaking-doll", 1);
+    const hpBefore = state.enemy.hp;
+    const res = resolveTurn(state, { kind: "skill", skillId: "murk-cleave" });
+    // ダメージが入っている
+    const dmg = findEvent(res.events, "damage");
+    expect(dmg).toBeDefined();
+    expect(res.state.enemy.hp).toBeLessThan(hpBefore);
+    // 毒が敵へ付与された
+    const inflicted = findEvent(res.events, "status-inflicted");
+    expect(inflicted).toMatchObject({ type: "status-inflicted", target: "enemy", status: "poison" });
+    // 付与ラウンドの終端で毒がtickする(敵の毒付与技と同じ扱い)
+    const tick = res.events.find(
+      (e): e is Extract<BattleEvent, { type: "status-tick" }> => e.type === "status-tick" && e.target === "enemy"
+    );
+    expect(tick).toBeDefined();
+    expect(tick?.status).toBe("poison");
+    expect(res.state.enemy.statuses.some((s) => s.id === "poison")).toBe(true);
+  });
+
+  it("この一撃で敵を倒しきった場合は毒を付与しない(status-inflicted なし・勝利)", () => {
+    const state = createBattle(lv(3), "mist-wolf", 1);
+    state.enemy.hp = 1; // 確実に倒しきる
+    const res = resolveTurn(state, { kind: "skill", skillId: "murk-cleave" });
+    expect(res.state.enemy.hp).toBe(0);
+    expect(findEvent(res.events, "status-inflicted")).toBeUndefined();
+    expect(findEvent(res.events, "victory")).toBeDefined();
+  });
+});
+
+describe("灯守りの構え(warding-stance: 防御バフ)", () => {
+  it("バフ中は被ダメージが実効防御+8分だけ軽減される(同seed・同行動で比較)", () => {
+    // 同一シード・同一行動(たたかう)で、バフ有無のみを変えて被ダメージを比較する。
+    // 乱数消費は両者同一のため、敵→旅人の raw ダメージは等しく、差は防御+8(floor(8/2)=4)ぶんになる。
+    const buffed = createBattle(lv(4), "dream-eater", 77);
+    const plain = createBattle(lv(4), "dream-eater", 77);
+    buffed.player.defenseBuff = { amount: 8, remainingTurns: 3 };
+    const rBuffed = resolveTurn(buffed, { kind: "attack" });
+    const rPlain = resolveTurn(plain, { kind: "attack" });
+    const dmgBuffed = rBuffed.events.find(
+      (e): e is Extract<BattleEvent, { type: "damage" }> => e.type === "damage" && e.target === "player"
+    );
+    const dmgPlain = rPlain.events.find(
+      (e): e is Extract<BattleEvent, { type: "damage" }> => e.type === "damage" && e.target === "player"
+    );
+    expect(dmgBuffed).toBeDefined();
+    expect(dmgPlain).toBeDefined();
+    // 防御+8 → floor(実効防御/2) が4増える。最低1保証込みで厳密一致する
+    expect(dmgBuffed?.amount).toBe(Math.max(1, (dmgPlain?.amount ?? 0) - 4));
+    expect(dmgBuffed?.amount).toBeLessThan(dmgPlain?.amount ?? 0);
+  });
+
+  it("付与ラウンドを1ターン目として数え、3ラウンド目終端で失効する(buff-applied→…→buff-expired)", () => {
+    // Lv6 vs 夢喰い(HP150・ボス)。プレイヤー先手・双方3ラウンドは生存する組み合わせ
+    let state = createBattle(lv(6), "dream-eater", 3);
+    // 1ラウンド目: 構えを張る
+    let res = resolveTurn(state, { kind: "skill", skillId: "warding-stance" });
+    state = res.state;
+    expect(findEvent(res.events, "buff-applied")).toMatchObject({ type: "buff-applied", target: "player", buff: "defense", amount: 8 });
+    expect(state.player.defenseBuff?.remainingTurns).toBe(2); // 付与時3 → 終端で2
+    // 2ラウンド目: まだ有効(残1へ)
+    res = resolveTurn(state, { kind: "attack" });
+    state = res.state;
+    expect(findEvent(res.events, "buff-expired")).toBeUndefined();
+    expect(state.player.defenseBuff?.remainingTurns).toBe(1);
+    // 3ラウンド目終端で失効
+    res = resolveTurn(state, { kind: "attack" });
+    state = res.state;
+    expect(findEvent(res.events, "buff-expired")).toMatchObject({ type: "buff-expired", target: "player", buff: "defense" });
+    expect(state.player.defenseBuff).toBeNull();
+  });
+
+  it("重ねがけは失敗せず、量は加算されず定義値へリセットされる(スタックしない)", () => {
+    let state = createBattle(lv(6), "dream-eater", 5);
+    // 1回目
+    let res = resolveTurn(state, { kind: "skill", skillId: "warding-stance" });
+    state = res.state;
+    expect(state.player.defenseBuff?.remainingTurns).toBe(2);
+    // 2回目(再付与): 拒否されず、量は8のまま・残ターンは定義値3へリセット→終端で2
+    res = resolveTurn(state, { kind: "skill", skillId: "warding-stance" });
+    state = res.state;
+    expect(res.events.some((e) => e.type === "command-rejected")).toBe(false);
+    expect(findEvent(res.events, "buff-applied")).toBeDefined();
+    expect(state.player.defenseBuff?.amount).toBe(8); // 16 に加算されない
+    expect(state.player.defenseBuff?.remainingTurns).toBe(2);
+  });
+});
+
+describe("焔尽くし(blaze-ender: 高倍率の強撃)", () => {
+  it("同seed・同条件で ember-strike(×1.8)より大きいダメージを与える(×3.0)", () => {
+    const blaze = createBattle(lv(6), "dream-eater", 9);
+    const ember = createBattle(lv(6), "dream-eater", 9);
+    const rBlaze = resolveTurn(blaze, { kind: "skill", skillId: "blaze-ender" });
+    const rEmber = resolveTurn(ember, { kind: "skill", skillId: "ember-strike" });
+    const dmgBlaze = rBlaze.events.find(
+      (e): e is Extract<BattleEvent, { type: "damage" }> => e.type === "damage" && e.target === "enemy"
+    );
+    const dmgEmber = rEmber.events.find(
+      (e): e is Extract<BattleEvent, { type: "damage" }> => e.type === "damage" && e.target === "enemy"
+    );
+    expect(dmgBlaze?.amount).toBeGreaterThan(dmgEmber?.amount ?? 0);
+  });
+
+  it("MP不足なら not-enough-mp で拒否される(状態不変)", () => {
+    const state = createBattle(lv(6), "dream-eater", 1);
+    state.player.mp = SKILLS["blaze-ender"].mpCost - 1; // 11(12未満)
+    const res = resolveTurn(state, { kind: "skill", skillId: "blaze-ender" });
+    expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "not-enough-mp" });
+    expect(res.state.turn).toBe(0);
+  });
+});
+
+describe("未習得レベルでの新スキル拒否(skill-not-learned)", () => {
+  it("murk-cleave(Lv3習得)は Lv2 で拒否される", () => {
+    const state = createBattle(lv(2), "mist-wolf", 1);
+    const res = resolveTurn(state, { kind: "skill", skillId: "murk-cleave" });
+    expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "skill-not-learned" });
+    expect(res.state.turn).toBe(0);
+  });
+
+  it("warding-stance(Lv4習得)は Lv3 で拒否される", () => {
+    const state = createBattle(lv(3), "mist-wolf", 1);
+    const res = resolveTurn(state, { kind: "skill", skillId: "warding-stance" });
+    expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "skill-not-learned" });
+  });
+
+  it("blaze-ender(Lv6習得)は Lv5 で拒否される", () => {
+    const state = createBattle(lv(5), "mist-wolf", 1);
+    const res = resolveTurn(state, { kind: "skill", skillId: "blaze-ender" });
+    expect(res.events[0]).toMatchObject({ type: "command-rejected", reason: "skill-not-learned" });
+  });
+});
+
+describe("決定論性(新スキル込み)", () => {
+  it("murk-cleave/warding-stance/blaze-ender を含む列でも同一再現する", () => {
+    const commands: BattleCommand[] = [
+      { kind: "skill", skillId: "murk-cleave" },
+      { kind: "skill", skillId: "warding-stance" },
+      { kind: "skill", skillId: "blaze-ender" },
+      { kind: "attack" }
+    ];
+    function run(): { events: BattleEvent[]; final: BattleState } {
+      let state = createBattle(lv(6), "dream-eater", 24680); // Lv6 maxMP26 ≥ 5+6+12
+      const events: BattleEvent[] = [];
+      for (const cmd of commands) {
+        if (state.outcome !== "ongoing") break;
+        const res = resolveTurn(state, cmd);
+        events.push(...res.events);
+        state = res.state;
+      }
+      return { events, final: state };
+    }
+    const a = run();
+    const b = run();
+    expect(a.events).toEqual(b.events);
+    expect(a.final).toEqual(b.final);
+  });
+});
