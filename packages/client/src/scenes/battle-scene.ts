@@ -400,17 +400,18 @@ export class BattleScene extends Phaser.Scene {
           this.playerMpBar.setValue(this.currentMp);
         }
         break;
-      case "phase-change":
-        // 形態変化: 靄が剥がれる暗示として一瞬白く明滅させ、第2形態グラフィックへ差し替える
-        if (
-          this.enemySprite instanceof Phaser.GameObjects.Image &&
-          this.textures.exists("dream-eater-phase2")
-        ) {
-          this.enemySprite.setTexture("dream-eater-phase2");
+      case "phase-change": {
+        // 形態変化: 靄が剥がれる暗示として一瞬白く明滅させ、第2形態グラフィックへ差し替える。
+        // テクスチャは「<敵ID>-phase2」の規約で引く(dream-eater固定だと、形態変化を持つ
+        // 別の敵(紡ぎ損ない等)で夢喰いの画像へ化けてしまう。M10-2で一般化)
+        const phase2Key = `${this.view.enemyId}-phase2`;
+        if (this.enemySprite instanceof Phaser.GameObjects.Image && this.textures.exists(phase2Key)) {
+          this.enemySprite.setTexture(phase2Key);
         }
         this.flash(this.enemySprite);
         this.cameras.main.flash(300, 40, 24, 32);
         break;
+      }
       case "victory":
       case "level-up":
       case "defeat":

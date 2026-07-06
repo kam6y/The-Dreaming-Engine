@@ -310,5 +310,65 @@
     "promptFile": "assets/prompts/window-frame.md",
     "createdAt": "2026-07-03",
     "note": "背景透過"
+  },
+  {
+    "id": "wisp-flame",
+    "path": "assets/enemies/wisp-flame.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/wisp-flame.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "whisper-mask",
+    "path": "assets/enemies/whisper-mask.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/whisper-mask.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "rust-eater",
+    "path": "assets/enemies/rust-eater.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/rust-eater.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "failing-spinner",
+    "path": "assets/enemies/failing-spinner.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/failing-spinner.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "failing-spinner-phase2",
+    "path": "assets/enemies/failing-spinner-phase2.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/failing-spinner-phase2.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過。紡ぎ損ない第2形態用"
   }
 ]

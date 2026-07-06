@@ -181,10 +181,11 @@ JOURNALへ「仕様変更提案」として記録する)。
       (グラフィックは未着手=既存のプレースホルダー退避描画で進む)
       (迷い火/囁き仮面/錆喰い+中ボス紡ぎ損ない(d2側室(17,8)固定・gimmicks撃破記録・
       エンディング非誘発)。JOURNAL[35])
-- [ ] M10-2: codex委譲で敵グラフィック4種を生成(asset-pipeline.md準拠:
+- [x] M10-2: codex委譲で敵グラフィック4種を生成(asset-pipeline.md準拠:
       スタイルガイド+world-lore外見典拠を依頼に含める。自作しない)
       + manifest/prompts整備+検収+戦闘シーンでの表示確認。
       完了時にBACKLOG側へチェック
+      (5枚納品=紡ぎ損ないは2形態。phase2切替の敵ID汎用化も修正。JOURNAL[36])
 
 完了条件: 新敵4種が定義・出現し(中ボス含む)、グラフィックが戦闘で表示され、
 `pnpm check`+`pnpm test:e2e`緑(M10完了時は`pnpm test:e2e:full`も)。
