@@ -991,3 +991,33 @@
   出すならビュー拡張が必要(毒アイコンは statuses で常設)、(3) E2Eスモークは
   スキル選択→効果反映(startLevel加速でLv3+にして澱み斬り→毒付与を data 属性で観測が
   一案。battle-scene の data 属性は現状 data-scene/data-battle-enemy のみ=属性追加が要る)
+
+## [34] 2026-07-06 M9-3: スキルUI調整+E2Eスモーク(M9完了)
+
+- やったこと(UI作業のためオーケストレーター自身が実装):
+  - サブメニューのレイアウト修正: スキル5種で高さ174pxとなり固定位置(y=height-264)では
+    メッセージ窓(上端 height-112)に22px重なるため、項目数に応じて窓の上へ下詰め配置に変更
+    (menu-list.ts へ menuListHeight(itemCount) を公開し、内部定数と一致を保つ)。
+    Lv6実プレイで5種表示がどうする?窓に重ならないことをスクリーンショット確認
+  - E2E同期点: battle-scene の syncDomState へ data-player-mp / data-enemy-status /
+    data-battle-mode を追加し、コマンド入力フェーズ毎(openCommandMenu)に更新
+  - E2Eスモーク skill.spec.ts(12本目): seed=42+startLevel=3 で霧狼(HP20)へ
+    澱み斬り(Lv3ダメージ13-16=確実に生存)→ MP15→10 と毒付与を data 属性で検証。
+    メッセージ送りの Space が「たたかう」を誤発火しないよう data-battle-mode を
+    「確認してから1回押す」方式で使用
+  - **E2E順序依存バグの修正**: save-load.spec がテスト専用セーブを消さずに残し、
+    直後に新規開始する spec(新設の skill.spec が初該当)が上書き確認ダイアログで詰まる
+    問題を再現・特定。dream.spec の既存流儀(「後続スペックのため必ず消す」afterEach)を
+    save-load.spec にも適用し、skill.spec 側も先行セーブ残留に耐える開始処理にした
+  - 習得レベル表示は見送り(メニューは習得済みのみ列挙するため表示する意味が薄い。
+    未習得のグレー表示が欲しくなったら再検討)
+- 検証: `pnpm check` 緑(unit 622)・`pnpm test:e2e` **12/12緑**・
+  `pnpm test:e2e:full` 2/2緑(M9完了のマイルストーンゲート)。
+  実プレイ(Lv6)で5種メニューのレイアウトをスクリーンショット確認
+- 既知の観察: E2Eスモーク全体が5.8分(仕様の「数分以内」の上限近く)。
+  次にspecを足す際は所要時間の再点検を(必要なら分割・短縮を検討)
+- **M9完了**: BACKLOG「スキル拡充」にチェック
+- 次にやること: BACKLOG次点「敵バリエーション追加(雑魚+3種、中ボス1種。
+  codex委譲でグラフィックも生成)」をM10として展開してから着手
+  (敵定義・行動・配置=subagent、グラフィック=codex委譲(asset-pipeline.md)、
+  検収・コミット=オーケストレーター)

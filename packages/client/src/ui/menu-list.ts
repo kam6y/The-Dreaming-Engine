@@ -22,6 +22,11 @@ export interface MenuListOptions {
 const ROW_HEIGHT = 30;
 const PADDING = 12;
 
+/** 項目数に対するメニューの描画高さ(px)。呼び出し側の配置計算用(内部定数と一致を保つ) */
+export function menuListHeight(itemCount: number): number {
+  return itemCount * ROW_HEIGHT + PADDING * 2;
+}
+
 /**
  * カーソル選択式の縦メニュー(戦闘コマンド・スキル/どうぐ選択・タイトル等で共用)。
  * 上下キーでカーソル移動、スペース/Enterで決定、Escでキャンセル。

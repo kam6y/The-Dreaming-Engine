@@ -17,7 +17,7 @@ import { getGameClient, type BattleEventsPayload, type GameClient } from "../net
 import { fitContain, fitCover } from "../ui/cover-image.js";
 import { UI_FONT_FAMILY } from "../ui/font.js";
 import { GaugeBar } from "../ui/gauge-bar.js";
-import { MenuList } from "../ui/menu-list.js";
+import { MenuList, menuListHeight } from "../ui/menu-list.js";
 
 /** 敵種別のプレースホルダーカラー(敵グラフィック未整備時のフォールバック) */
 const ENEMY_COLORS: Record<EnemyId, number> = {
@@ -450,6 +450,7 @@ export class BattleScene extends Phaser.Scene {
     this.mode = "command";
     this.advanceHint.setVisible(false);
     this.messageText.setText("どうする?");
+    this.syncDomState(); // ラウンド確定後の MP・状態異常を data 属性へ反映(E2E の同期点)
     this.commandMenu.activate();
   }
 
@@ -512,10 +513,13 @@ export class BattleScene extends Phaser.Scene {
     items: { id: string; label: string; disabled?: boolean }[],
     onSelect: (id: string) => void
   ): void {
+    // メッセージ窓(下端余白16+高さ96=上端 height-112)に重ならないよう、
+    // 項目数に応じて窓の上へ下詰めで配置する(スキル5種=高さ174pxで固定位置だと重なる。M9-3)
+    const y = this.scale.height - 112 - menuListHeight(items.length) - 8;
     this.subMenu = new MenuList(this, this.uiLayer, {
       items,
       x: 236,
-      y: this.scale.height - 264,
+      y,
       width: 260,
       onSelect: (id) => {
         this.closeSubMenu();
@@ -606,6 +610,12 @@ export class BattleScene extends Phaser.Scene {
     if (game !== null) {
       game.dataset["scene"] = "battle";
       game.dataset["battleEnemy"] = this.view.enemyId;
+      // E2E 用: スキル効果の観測(MP消費・敵の状態異常。コマンド入力フェーズ毎に更新される。M9-3)
+      game.dataset["playerMp"] = String(this.view.player.mp);
+      game.dataset["enemyStatus"] = this.view.enemy.statuses.map((status) => status.id).join(",");
+      // E2E 用: コマンド入力フェーズの検出(メッセージ送りの Space がコマンド決定を
+      // 誤発火しないよう、E2E は command になるまで「確認してから1回押す」方式を取る)
+      game.dataset["battleMode"] = this.mode;
     }
   }
 }

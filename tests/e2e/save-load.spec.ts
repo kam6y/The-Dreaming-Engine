@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -39,6 +40,13 @@ async function stepTo(page: Page, key: string, x: number, y: number): Promise<vo
   await page.keyboard.press(key);
   await expect.poll(() => readPositionKey(page), { timeout: 10_000 }).toBe(`${x},${y}`);
 }
+
+// 本スペックはテスト専用セーブを書く。後続スペックの新規開始が上書き確認ダイアログに
+// 塞がれないよう、必ず消す(失敗時も走るよう afterEach。dream.spec と同じ流儀)
+test.afterEach(async () => {
+  await rm(E2E_SAVE_FILE, { force: true });
+  await rm(`${E2E_SAVE_FILE}.bak`, { force: true });
+});
 
 test("宿泊でセーブし、リロード→つづきからで状態が復元される", async ({ page }) => {
   test.setTimeout(60_000);
