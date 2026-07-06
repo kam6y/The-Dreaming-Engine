@@ -860,3 +860,26 @@
   (3) buildView(session.ts:1193)へ装備ビュー+実効ステータス反映、
   (4) セーブは追加実装不要(.default()補完)。探索中のuseItem(session.ts:933)と
   buildViewのstatsForLevel直呼びも effectiveStats へ統一すること
+
+## [29] 2026-07-06 M8-2: 装備のサーバー統合(WSメッセージ・戦闘反映・ビュー公開)
+
+- やったこと(実装はsubagent=Opus、検収・コミットはオーケストレーター):
+  - WSメッセージ: `equip`(itemIdは装備可能4種にzod限定)と `unequip`(slot)を
+    clientMessageSchema へ追加。viewPlayerSchema へ `equipment.{weapon,armor}`
+    (null または {itemId,name,bonus})と `effectiveAttack`/`effectiveDefense` を追加
+    (既存フィールド不変=現行UIは無改修で動作)
+  - session.ts: equip/unequip リデューサー(sharedの純ロジックを呼び snapshot 返却。
+    失敗は shopBuy の error+code 流儀: not-owned/not-equipped/inventory-full。
+    探索中限定ガードは useItem と同じ requireExploration)。buildView へ装備ビュー+実効攻防
+  - battle.ts: createBattle に**任意引数** equipment(省略=空装備で従来と完全同値=
+    既存バランステスト無改変)。BattleState.equipment を保持し、applyLevelUps も
+    effectiveStats で再導出(装備ボーナスがレベルアップで消えない)。
+    beginBattle/beginBossBattle が state.equipment を渡す。useItem の maxHP 参照は
+    基礎値のまま(装備は maxHP に影響せず同値。意図コメントあり)
+  - テスト13件相当を追加(装備リデューサー・戦闘反映・旧セーブ互換の一連。unit 579→592)
+- 検証: `pnpm check` 緑(unit 592)・`pnpm test:e2e` 10/10緑(検収時に再実行)
+- 裁量(subagent): unequip失敗を空スロット(not-equipped)と満杯(inventory-full)で
+  別コード化。エラー文言は地の文の流儀で新規(「そこには、何も帯びていない。」等)
+- 次にやること: M8-3(店の売買対応)をsubagentへ委譲。申し送り: SHOP_STOCK/
+  shopStockEntries(shared/src/shop.ts)へ装備4種を追加すれば既存の shopBuy/shopSell が
+  そのまま動く(装備固有の分岐不要)。E2Eの店スモークが在庫一覧に依存していないか確認する

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { createEmptyEquipment, effectiveStats } from "../equipment.js";
+import type { Equipment } from "../equipment.js";
 import { ENEMY_DISPLAY_NAMES, enemyIdSchema } from "../ids.js";
 import type { EnemyId } from "../ids.js";
 import { createRng, rngFromState } from "../rng.js";
@@ -83,6 +85,11 @@ export interface BattleState {
   turn: number;
   isBoss: boolean;
   outcome: BattleOutcome;
+  /**
+   * 戦闘開始時のプレイヤー装備(M8-2)。戦闘中は不変。レベルアップ時に実効攻撃力・
+   * 実効防御力を装備込みで再導出する(applyLevelUps)ために保持する。
+   */
+  equipment: Equipment;
   player: BattlePlayerState;
   enemy: BattleEnemyState;
 }
@@ -222,13 +229,21 @@ export function turnOrder(playerSpeed: number, enemySpeed: number, rng: Rng): Co
 // ---------------------------------------------------------------------------
 
 /**
- * 1対1の戦闘を生成する(パーティは主人公1人)。プレイヤーのステータスはレベルから導出し、
- * HP/MP は progress の値を最大値でクランプする。
+ * 1対1の戦闘を生成する(パーティは主人公1人)。プレイヤーのステータスはレベル基礎値に
+ * 装備ボーナスを加えた実効値(effectiveStats)から導出し、HP/MP は progress の値を最大値で
+ * クランプする。equipment 省略時は空装備扱いで、実効値は statsForLevel と完全同値になる
+ * (装備なしなら従来と同じ挙動: game-design.md「装備(拡張: M8)」)。
  */
-export function createBattle(progress: PlayerProgress, enemyId: EnemyId, seed: number): BattleState {
+export function createBattle(
+  progress: PlayerProgress,
+  enemyId: EnemyId,
+  seed: number,
+  equipment: Equipment = createEmptyEquipment()
+): BattleState {
   const parsed = playerProgressSchema.parse(progress);
   const def = ENEMIES[enemyId];
-  const stats = statsForLevel(parsed.level);
+  // 実効ステータス(装備込み)。maxHP/maxMP/speed は装備の影響を受けず基礎値と同値。
+  const stats = effectiveStats(parsed.level, equipment);
   const rng = createRng(seed);
 
   const player: BattlePlayerState = {
@@ -263,6 +278,7 @@ export function createBattle(progress: PlayerProgress, enemyId: EnemyId, seed: n
     turn: 0,
     isBoss: def.isBoss,
     outcome: "ongoing",
+    equipment,
     player,
     enemy
   };
@@ -604,7 +620,9 @@ function applyLevelUps(next: BattleState, events: BattleEvent[]): void {
     p.level += 1;
     const oldMaxHP = p.maxHP;
     const oldMaxMP = p.maxMP;
-    const stats = statsForLevel(p.level);
+    // 装備込みの実効値で再導出(装備ボーナスがレベルアップで消えないようにする)。
+    // maxHP/maxMP/speed は装備の影響を受けず基礎値と同値なので、実質 attack/defense のみ影響。
+    const stats = effectiveStats(p.level, next.equipment);
     p.maxHP = stats.maxHP;
     p.maxMP = stats.maxMP;
     p.attack = stats.attack;

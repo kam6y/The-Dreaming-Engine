@@ -7,8 +7,10 @@ import {
   TOWN_WAKE_POINT,
   addItem,
   countOf,
+  createEmptyEquipment,
   createNewGameState,
   emptyInventory,
+  gameStateSchema,
   samePosition,
   statsForLevel
 } from "@dreaming-engine/shared";
@@ -1019,6 +1021,147 @@ describe("店", () => {
       await session.handle({ type: "shop-sell", itemId: "ore", quantity: 1 }),
       "not-owned"
     );
+  });
+});
+
+// ===========================================================================
+// 装備・解除(M8-2。探索中のみ・スナップショット反映・戦闘への反映・旧セーブ互換)
+// ===========================================================================
+
+describe("装備", () => {
+  /** 武器・防具を所持した新規ゲーム(街・探索中)を用意する */
+  async function equipReady(): Promise<SessionContext> {
+    const ctx = createSession();
+    await ctx.session.handle({ type: "new-game" });
+    const state = mustState(ctx.session);
+    state.inventory = addItem(state.inventory, "worn-blade", 1).inventory;
+    state.inventory = addItem(state.inventory, "amber-blade", 1).inventory;
+    state.inventory = addItem(state.inventory, "worn-cloak", 1).inventory;
+    return ctx;
+  }
+
+  /** battle-events から「敵への damage」イベントの与ダメージ量を取り出す */
+  function enemyDamageDealt(msgs: ServerMessage[]): number {
+    const ev = battleEventsOf(msgs).events.find((e) => e.type === "damage" && e.target === "enemy");
+    if (ev === undefined || ev.type !== "damage") throw new Error("敵への damage イベントが無い");
+    return ev.amount;
+  }
+
+  it("装備成功でスナップショットに反映され、実効攻撃力が上がりインベントリが減る", async () => {
+    const { session } = await equipReady();
+    const before = mustView(session).player;
+    const view = firstSnapshot(await session.handle({ type: "equip", itemId: "worn-blade" }));
+    expect(view.player.equipment.weapon).toEqual({ itemId: "worn-blade", name: "錆びた片刃", bonus: 3 });
+    expect(view.player.equipment.armor).toBeNull();
+    expect(view.player.effectiveAttack).toBe(before.effectiveAttack + 3);
+    expect(view.player.effectiveDefense).toBe(before.effectiveDefense); // 武器は防御に影響しない
+    expect(countOf(mustState(session).inventory, "worn-blade")).toBe(0); // 1個消費
+    expect(mustState(session).equipment.weapon).toBe("worn-blade");
+  });
+
+  it("防具も同様に装備でき、実効防御力が上がる", async () => {
+    const { session } = await equipReady();
+    const before = mustView(session).player;
+    const view = firstSnapshot(await session.handle({ type: "equip", itemId: "worn-cloak" }));
+    expect(view.player.equipment.armor).toEqual({ itemId: "worn-cloak", name: "擦り切れた外套", bonus: 2 });
+    expect(view.player.effectiveDefense).toBe(before.effectiveDefense + 2);
+    expect(view.player.effectiveAttack).toBe(before.effectiveAttack);
+  });
+
+  it("未所持の装備は not-owned で失敗し、状態は不変", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    expectError(await session.handle({ type: "equip", itemId: "amber-blade" }), "not-owned");
+    expect(mustState(session).equipment.weapon).toBeNull();
+  });
+
+  it("入れ替え: 装備中に別武器を装備すると旧武器がインベントリへ戻る", async () => {
+    const { session } = await equipReady();
+    await session.handle({ type: "equip", itemId: "worn-blade" });
+    const view = firstSnapshot(await session.handle({ type: "equip", itemId: "amber-blade" }));
+    expect(view.player.equipment.weapon?.itemId).toBe("amber-blade");
+    expect(countOf(mustState(session).inventory, "worn-blade")).toBe(1); // 旧武器が戻る
+    expect(countOf(mustState(session).inventory, "amber-blade")).toBe(0); // 新武器は消費
+  });
+
+  it("解除でインベントリへ戻り、スロットが空になる", async () => {
+    const { session } = await equipReady();
+    await session.handle({ type: "equip", itemId: "worn-cloak" });
+    const view = firstSnapshot(await session.handle({ type: "unequip", slot: "armor" }));
+    expect(view.player.equipment.armor).toBeNull();
+    expect(view.player.effectiveDefense).toBe(statsForLevel(1).defense); // 基礎値へ戻る
+    expect(countOf(mustState(session).inventory, "worn-cloak")).toBe(1);
+  });
+
+  it("空スロットの解除は not-equipped で失敗", async () => {
+    const { session } = await equipReady();
+    expectError(await session.handle({ type: "unequip", slot: "weapon" }), "not-equipped");
+  });
+
+  it("インベントリ満杯だと解除は inventory-full で失敗し、装備は外れない", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    const state = mustState(session);
+    state.equipment = { weapon: "worn-blade", armor: null };
+    state.inventory = addItem(emptyInventory(), "herb", INVENTORY_CAPACITY).inventory; // 満杯
+    expectError(await session.handle({ type: "unequip", slot: "weapon" }), "inventory-full");
+    expect(mustState(session).equipment.weapon).toBe("worn-blade"); // 不変
+  });
+
+  it("戦闘中は装備・解除できない(invalid-mode)", async () => {
+    const { session } = await sessionInBattle();
+    expectError(await session.handle({ type: "equip", itemId: "worn-blade" }), "invalid-mode");
+    expectError(await session.handle({ type: "unequip", slot: "weapon" }), "invalid-mode");
+    expect(mustView(session).mode).toBe("battle");
+  });
+
+  it("戦闘開始時に装備込みの攻撃力が使われる(同条件で武器ありは素手より大ダメージ)", async () => {
+    // 同一シード・同一状況。装備の有無だけが差(装備は this.rng を消費しないため戦闘シードは一致)
+    const armed = createSession({ seed: 1, noSymbols: false });
+    const bare = createSession({ seed: 1, noSymbols: false });
+    const armedState = fieldState();
+    armedState.equipment = { weapon: "amber-blade", armor: null };
+    armed.store.loadResult = { ok: true, state: armedState };
+    bare.store.loadResult = { ok: true, state: fieldState() };
+    await armed.session.handle({ type: "continue" });
+    await bare.session.handle({ type: "continue" });
+    await engageBattle(armed.session);
+    await engageBattle(bare.session);
+    const dmgArmed = enemyDamageDealt(
+      await armed.session.handle({ type: "battle-command", command: { kind: "attack" } })
+    );
+    const dmgBare = enemyDamageDealt(
+      await bare.session.handle({ type: "battle-command", command: { kind: "attack" } })
+    );
+    expect(dmgArmed).toBeGreaterThan(dmgBare);
+  });
+
+  it("装備フィールドを持たない旧セーブをロード→装備→宿泊セーブの一連が通る", async () => {
+    const { session, store } = createSession();
+    const base = createNewGameState();
+    // 旧セーブ相当(equipment 欠落)を default 補完で読み込む(game-state.test の互換流儀)
+    const legacy = gameStateSchema.parse({
+      version: base.version,
+      player: base.player,
+      location: { mapId: "town", position: { x: 4, y: 5 }, facing: "up" }, // 宿屋の主人の前
+      inventory: addItem(base.inventory, "worn-blade", 1).inventory,
+      day: base.day,
+      playtimeSeconds: base.playtimeSeconds,
+      gimmicks: base.gimmicks
+    });
+    expect(legacy.equipment).toEqual(createEmptyEquipment()); // 欠落は空装備で補完
+    store.loadResult = { ok: true, state: legacy };
+    await session.handle({ type: "continue" });
+
+    // 装備 → スナップショットに反映
+    const equipView = firstSnapshot(await session.handle({ type: "equip", itemId: "worn-blade" }));
+    expect(equipView.player.equipment.weapon?.itemId).toBe("worn-blade");
+
+    // 宿泊してセーブ(equipment 込みで永続化される)
+    await session.handle({ type: "interact" }); // 宿を開く
+    await session.handle({ type: "rest" });
+    const saved = store.saved[store.saved.length - 1];
+    expect(saved?.equipment.weapon).toBe("worn-blade");
   });
 });
 

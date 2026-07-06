@@ -132,7 +132,10 @@ function sampleView(): SnapshotView {
       maxHp: state.player.hp,
       mp: state.player.mp,
       maxMp: state.player.mp,
-      gold: state.player.gold
+      gold: state.player.gold,
+      equipment: { weapon: null, armor: null },
+      effectiveAttack: 8,
+      effectiveDefense: 5
     },
     day: state.day,
     playtimeSeconds: 0,

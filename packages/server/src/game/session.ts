@@ -18,6 +18,8 @@ import {
   createBattle,
   createNewGameState,
   createRng,
+  effectiveStats,
+  equipItem,
   freeSpace,
   hasNarratedEnemy,
   interactionTarget,
@@ -37,6 +39,7 @@ import {
   toPlayerProgress,
   transitionAt,
   tryMove,
+  unequipItem,
   usedSpace,
   xpToNext,
   type ActiveInteraction,
@@ -49,6 +52,8 @@ import {
   type Direction,
   type EnemyId,
   type EnemySymbolPlacement,
+  type EquipmentItemId,
+  type EquipmentSlot,
   type GameState,
   type ItemId,
   type LootEntry,
@@ -61,6 +66,7 @@ import {
   type SnapshotView,
   type SubQuest,
   type ViewBattle,
+  type ViewEquipmentSlot,
   type ViewItemStack
 } from "@dreaming-engine/shared";
 
@@ -269,6 +275,10 @@ export class GameSession {
         return this.useItem(message.itemId);
       case "discard-item":
         return this.discardItem(message.itemId, message.quantity);
+      case "equip":
+        return this.equip(message.itemId);
+      case "unequip":
+        return this.unequip(message.slot);
       case "shop-buy":
         return this.shopBuy(message.itemId, message.quantity);
       case "shop-sell":
@@ -417,7 +427,7 @@ export class GameSession {
     const symbol = this.symbols[symbolIndex];
     if (symbol === undefined) return;
     const seed = this.rng.int(0, 0x7fffffff);
-    this.battle = createBattle(state.player, symbol.enemyId, seed);
+    this.battle = createBattle(state.player, symbol.enemyId, seed, state.equipment);
     this.battleSymbolIndex = symbolIndex;
     this.mode = "battle";
     this.activeInteraction = null;
@@ -444,7 +454,7 @@ export class GameSession {
   private beginBossBattle(enemyId: EnemyId): void {
     const state = this.requireState();
     const seed = this.rng.int(0, 0x7fffffff);
-    this.battle = createBattle(state.player, enemyId, seed);
+    this.battle = createBattle(state.player, enemyId, seed, state.equipment);
     this.battleSymbolIndex = null;
     this.mode = "battle";
     this.activeInteraction = null;
@@ -930,6 +940,8 @@ export class GameSession {
     if (!effect || effect.kind !== "heal-hp") {
       return this.errorMsgs("unusable-here", "それは今、使っても意味がない。");
     }
+    // HP 回復の上限に使うのは maxHP のみ。装備は maxHP に影響しないため基礎値(statsForLevel)で正しい
+    // (effectiveStats を使っても maxHP は同値)。
     const stats = statsForLevel(state.player.level);
     if (state.player.hp >= stats.maxHP) return this.errorMsgs("hp-full", "これ以上、癒せる傷はない。");
     state.player.hp = Math.min(stats.maxHP, state.player.hp + effect.amount);
@@ -950,6 +962,53 @@ export class GameSession {
     state.inventory = removeItem(state.inventory, itemId, quantity).inventory;
     const label = quantity > 1 ? `${ITEMS[itemId].name}×${quantity}` : ITEMS[itemId].name;
     return [this.snapshotMsg(), this.dialogMsg(null, `${label}を手放した。`)];
+  }
+
+  // =========================================================================
+  // 装備・解除(探索中。game-design.md「装備(拡張: M8)」)
+  // =========================================================================
+
+  /**
+   * 装備品をスロットへ装備する(探索中のみ)。shared の純ロジック equipItem を使い、
+   * 成功時は inventory/equipment を差し替えてスナップショットを返す。
+   * 失敗(未所持)は shopBuy のブロック流儀に合わせて error+code を返す
+   * (itemId は zod で装備可能 ID に限定済みなので、失敗は未所持のみ)。
+   */
+  private equip(itemId: EquipmentItemId): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    const result = equipItem(state.inventory, state.equipment, itemId);
+    if (!result.ok) {
+      // 装備不可 ID は zod で弾かれるため、ここに来る失敗は未所持のみ
+      return this.errorMsgs("not-owned", "それは持っていない。");
+    }
+    state.inventory = result.inventory;
+    state.equipment = result.equipment;
+    return [this.snapshotMsg()];
+  }
+
+  /**
+   * スロットの装備を解除してインベントリへ戻す(探索中のみ)。
+   * 失敗は 2 種を区別して error+code を返す:
+   * - 空スロット: not-equipped(何も帯びていない)
+   * - インベントリ満杯で戻せない: inventory-full(shopBuy と同じ流儀・文言)
+   */
+  private unequip(slot: EquipmentSlot): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (state.equipment[slot] === null) {
+      return this.errorMsgs("not-equipped", "そこには、何も帯びていない。");
+    }
+    const result = unequipItem(state.inventory, state.equipment, slot);
+    if (!result.ok) {
+      // 空スロットは上で弾いているため、ここに来る失敗は満杯で戻せない場合のみ
+      return this.errorMsgs("inventory-full", "そんなに持ちきれない。");
+    }
+    state.inventory = result.inventory;
+    state.equipment = result.equipment;
+    return [this.snapshotMsg()];
   }
 
   // =========================================================================
@@ -1193,6 +1252,16 @@ export class GameSession {
   private buildView(): SnapshotView {
     const state = this.requireState();
     const stats = statsForLevel(state.player.level);
+    // 実効ステータス(装備込み)。maxHP/maxMP は装備の影響を受けないため、下の player.maxHp/maxMp は
+    // 基礎値(stats)のままで正しい(effectiveStats の maxHP/maxMP と同値。基礎値であることを明示する)。
+    const effective = effectiveStats(state.player.level, state.equipment);
+    const equipmentSlotView = (slot: EquipmentSlot): ViewEquipmentSlot | null => {
+      const id = state.equipment[slot];
+      if (id === null) return null;
+      const def = ITEMS[id];
+      const bonus = slot === "weapon" ? def.atkBonus ?? 0 : def.defBonus ?? 0;
+      return { itemId: id, name: def.name, bonus };
+    };
     const toView = (s: { itemId: ItemId; count: number }): ViewItemStack => ({
       itemId: s.itemId,
       name: ITEMS[s.itemId].name,
@@ -1211,7 +1280,13 @@ export class GameSession {
         maxHp: stats.maxHP,
         mp: state.player.mp,
         maxMp: stats.maxMP,
-        gold: state.player.gold
+        gold: state.player.gold,
+        equipment: {
+          weapon: equipmentSlotView("weapon"),
+          armor: equipmentSlotView("armor")
+        },
+        effectiveAttack: effective.attack,
+        effectiveDefense: effective.defense
       },
       day: state.day,
       playtimeSeconds: this.currentPlaytimeSeconds(),

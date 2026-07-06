@@ -8,7 +8,7 @@ import {
   battleUnitViewSchema
 } from "./combat/battle.js";
 import { enemySymbolPlacementSchema } from "./combat/encounter.js";
-import { itemIdSchema } from "./combat/items.js";
+import { equipmentItemIdSchema, equipmentSlotSchema, itemIdSchema } from "./combat/items.js";
 import { MAX_LEVEL } from "./combat/stats.js";
 import { statusStateSchema } from "./combat/status.js";
 import { gameLocationSchema } from "./game-state.js";
@@ -35,6 +35,17 @@ export const viewItemStackSchema = z.object({
 });
 export type ViewItemStack = z.infer<typeof viewItemStackSchema>;
 
+/**
+ * 装備スロット1つの表示情報(装備品の id・表示名・ボーナス値)。空スロットは null で表す。
+ * bonus は武器なら攻撃ボーナス(atkBonus)、防具なら防御ボーナス(defBonus)(M8-2)。
+ */
+export const viewEquipmentSlotSchema = z.object({
+  itemId: equipmentItemIdSchema,
+  name: z.string(),
+  bonus: z.number().int()
+});
+export type ViewEquipmentSlot = z.infer<typeof viewEquipmentSlotSchema>;
+
 /** プレイヤー状態のビュー */
 export const viewPlayerSchema = z.object({
   level: z.number().int(),
@@ -45,7 +56,19 @@ export const viewPlayerSchema = z.object({
   maxHp: z.number().int(),
   mp: z.number().int(),
   maxMp: z.number().int(),
-  gold: z.number().int()
+  gold: z.number().int(),
+  /**
+   * 装備スロット(武器・防具)。各スロットは装備品の表示情報、空なら null(M8-2 追加)。
+   * 既存の探索表示を壊さないため、装備 UI(M8-4)未対応でも無視できる純追加フィールド。
+   */
+  equipment: z.object({
+    weapon: viewEquipmentSlotSchema.nullable(),
+    armor: viewEquipmentSlotSchema.nullable()
+  }),
+  /** 実効攻撃力(レベル基礎攻撃力 + 武器ボーナス)(M8-2 追加) */
+  effectiveAttack: z.number().int(),
+  /** 実効防御力(レベル基礎防御力 + 防具ボーナス)(M8-2 追加) */
+  effectiveDefense: z.number().int()
 });
 export type ViewPlayer = z.infer<typeof viewPlayerSchema>;
 
@@ -233,6 +256,18 @@ export const clientDiscardItemMessageSchema = z.object({
   quantity: z.number().int().positive().default(1)
 });
 
+/** 装備(探索中)。itemId は装備可能 ID に限定する(装備先スロットは ID から一意に定まる) */
+export const clientEquipMessageSchema = z.object({
+  type: z.literal("equip"),
+  itemId: equipmentItemIdSchema
+});
+
+/** 装備解除(探索中)。対象スロット(weapon|armor)を指定する */
+export const clientUnequipMessageSchema = z.object({
+  type: z.literal("unequip"),
+  slot: equipmentSlotSchema
+});
+
 export const clientShopBuyMessageSchema = z.object({
   type: z.literal("shop-buy"),
   itemId: itemIdSchema,
@@ -285,6 +320,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   clientBattleCommandMessageSchema,
   clientUseItemMessageSchema,
   clientDiscardItemMessageSchema,
+  clientEquipMessageSchema,
+  clientUnequipMessageSchema,
   clientShopBuyMessageSchema,
   clientShopSellMessageSchema,
   clientRestMessageSchema,

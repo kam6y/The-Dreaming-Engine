@@ -9,7 +9,7 @@ import {
   statsForLevel,
   turnOrder
 } from "../src/index.js";
-import type { BattleCommand, BattleEvent, BattleState, PlayerProgress, Rng } from "../src/index.js";
+import type { BattleCommand, BattleEvent, BattleState, Equipment, PlayerProgress, Rng } from "../src/index.js";
 
 // --- テスト用の決定論的な偽Rng(next()の戻り値を列で制御する) ---
 function fakeRng(queue: number[]): Rng {
@@ -332,5 +332,54 @@ describe("決定論性", () => {
     const snapshot = structuredClone(state);
     resolveTurn(state, { kind: "attack" });
     expect(state).toEqual(snapshot);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createBattle の装備反映(M8-2。ダメージ式の構造は不変・装備なしは従来同値)
+// ---------------------------------------------------------------------------
+
+describe("createBattle(装備反映)", () => {
+  it("装備省略時は従来どおり statsForLevel と同値(回帰。空装備を保持する)", () => {
+    const base = statsForLevel(5);
+    const state = createBattle(lv(5), "mist-wolf", 1);
+    expect(state.player.attack).toBe(base.attack);
+    expect(state.player.defense).toBe(base.defense);
+    expect(state.player.maxHP).toBe(base.maxHP);
+    expect(state.player.maxMP).toBe(base.maxMP);
+    expect(state.player.speed).toBe(base.speed);
+    expect(state.equipment).toEqual({ weapon: null, armor: null });
+  });
+
+  it("武器の atkBonus・防具の defBonus が attack/defense に乗る(maxHP 等は不変)", () => {
+    const base = statsForLevel(5);
+    const equipment: Equipment = { weapon: "amber-blade", armor: "warded-mail" };
+    const state = createBattle(lv(5), "mist-wolf", 1, equipment);
+    expect(state.player.attack).toBe(base.attack + 7); // amber-blade +7
+    expect(state.player.defense).toBe(base.defense + 5); // warded-mail +5
+    // maxHP/maxMP/speed は装備の影響を受けない
+    expect(state.player.maxHP).toBe(base.maxHP);
+    expect(state.player.maxMP).toBe(base.maxMP);
+    expect(state.player.speed).toBe(base.speed);
+    expect(state.equipment).toEqual(equipment);
+  });
+
+  it("レベルアップを跨いでも装備ボーナスが attack/defense に維持される", () => {
+    const equipment: Equipment = { weapon: "amber-blade", armor: "warded-mail" };
+    // Lv1 で次レベルまであと 1XP(必要8・現在7)。1体撃破(mist-wolf XP4)で必ず Lv2 へ上がる
+    const progress: PlayerProgress = { level: 1, xp: 7, hp: 30, mp: 10, gold: 0 };
+    let state = createBattle(progress, "mist-wolf", 1, equipment);
+    let rounds = 0;
+    while (state.outcome === "ongoing" && rounds < 20) {
+      state = resolveTurn(state, { kind: "attack" }).state;
+      rounds += 1;
+    }
+    expect(state.outcome).toBe("victory");
+    expect(state.player.level).toBe(2);
+    const base2 = statsForLevel(2);
+    // レベルアップ後も装備込みの実効値(基礎値 + ボーナス)を保つ
+    expect(state.player.attack).toBe(base2.attack + 7);
+    expect(state.player.defense).toBe(base2.defense + 5);
+    expect(state.player.maxHP).toBe(base2.maxHP); // 装備は maxHP に影響しない
   });
 });
