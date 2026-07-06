@@ -13,6 +13,21 @@ import { MenuList } from "./menu-list.js";
 
 type ShopInteraction = Extract<ActiveInteraction, { kind: "shop" }>;
 
+/**
+ * 装備品のボーナス表記(武器=攻、防具=防)。装備品以外は空文字(M8-4)。
+ * 購入前に性能を確認できるよう、売買リストのラベルに付ける。
+ */
+function equipmentBonusLabel(itemId: ItemId): string {
+  const def = ITEMS[itemId];
+  if (def.slot === "weapon") {
+    return `(攻+${def.atkBonus ?? 0})`;
+  }
+  if (def.slot === "armor") {
+    return `(防+${def.defBonus ?? 0})`;
+  }
+  return "";
+}
+
 export interface ShopOverlayOptions {
   interaction: ShopInteraction;
   snapshot: SnapshotView;
@@ -229,7 +244,7 @@ export class ShopOverlay {
       const owned = this.snapshot.inventory.find((s) => s.itemId === entry.itemId)?.count ?? 0;
       return {
         id: entry.itemId,
-        label: `${entry.name}  ${entry.buyPrice}G(所持${owned})`
+        label: `${entry.name}${equipmentBonusLabel(entry.itemId)}  ${entry.buyPrice}G(所持${owned})`
       };
     });
   }
@@ -238,7 +253,7 @@ export class ShopOverlay {
     // クエスト用アイテムは別枠(questItems)のためここには現れない=売却対象は inventory 全件
     return this.snapshot.inventory.map((stack) => ({
       id: stack.itemId,
-      label: `${ITEMS[stack.itemId].name} ×${stack.count}  売値${sellPriceOf(stack.itemId)}G`
+      label: `${ITEMS[stack.itemId].name}${equipmentBonusLabel(stack.itemId)} ×${stack.count}  売値${sellPriceOf(stack.itemId)}G`
     }));
   }
 }

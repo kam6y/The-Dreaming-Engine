@@ -2,6 +2,7 @@ import Phaser from "phaser";
 
 import {
   ENEMY_DISPLAY_NAMES,
+  isEquipment,
   MAPS,
   NPC_DISPLAY_NAMES,
   samePosition,
@@ -448,6 +449,7 @@ export class ExplorationScene extends Phaser.Scene {
   private closeInventoryOverlay(): void {
     this.inventoryOverlay?.destroy();
     this.inventoryOverlay = null;
+    this.syncDomState(); // data-menu=none を反映(snapshot を伴わない開閉のため)
   }
 
   /** 会話 overlay を開く(interaction===conversation を受けたとき) */
@@ -588,10 +590,21 @@ export class ExplorationScene extends Phaser.Scene {
       onDiscard: (itemId: ItemId) => {
         this.awaiting = this.client.send({ type: "discard-item", itemId, quantity: 1 });
       },
+      onEquip: (itemId: ItemId) => {
+        // オーバーレイ側で装備品にのみ「そうびする」が出るが、型の絞り込みを兼ねてガードする
+        if (!isEquipment(itemId)) {
+          return;
+        }
+        this.awaiting = this.client.send({ type: "equip", itemId });
+      },
+      onUnequip: (slot) => {
+        this.awaiting = this.client.send({ type: "unequip", slot });
+      },
       onClose: () => {
         this.closeInventoryOverlay();
       }
     });
+    this.syncDomState(); // data-menu=inventory を反映(E2E が開閉を観測する)
   }
 
   private openInnConfirm(inn: { npcName: string; costGold: number }): void {
@@ -1046,12 +1059,17 @@ export class ExplorationScene extends Phaser.Scene {
     game.dataset["gold"] = String(view.player.gold);
     game.dataset["level"] = String(view.player.level);
     game.dataset["hp"] = String(view.player.hp);
+    // E2E 用: 装備込みの実効攻防(装備スモークが装備の反映を観測する。M8-4)
+    game.dataset["atk"] = String(view.player.effectiveAttack);
+    game.dataset["def"] = String(view.player.effectiveDefense);
     // E2E 用: 現在の対話種別(shop/inn/conversation/none)と受注中クエスト数
     game.dataset["interaction"] = view.interaction?.kind ?? "none";
     game.dataset["questCount"] = String(view.subQuests.length);
     // E2E 用: 地の文/NPC ダイアログの開閉(dialog-only 応答は snapshot を伴わないため
     // これで開閉を観測して移動可否の回帰を決定論的にテストする)
     game.dataset["dialog"] = this.dialog.isOpen ? "open" : "closed";
+    // E2E 用: もちものオーバーレイの開閉(装備スモークがメニュー操作の同期点に使う。M8-4)
+    game.dataset["menu"] = this.inventoryOverlay !== null ? "inventory" : "none";
     delete game.dataset["battleEnemy"];
   }
 }

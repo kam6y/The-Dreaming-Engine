@@ -347,6 +347,21 @@ describe("startLevel 加速フラグ", () => {
   });
 });
 
+describe("startGold 加速フラグ(M8-4: 装備購入スモーク用)", () => {
+  it("mock では開始ゴールドを指定値にする(レベル等は通常どおり)", async () => {
+    const { session } = createSession(); // 既定 aiMode=mock
+    const view = firstSnapshot(await session.handle({ type: "new-game", options: { startGold: 999 } }));
+    expect(view.player.gold).toBe(999);
+    expect(view.player.level).toBe(1);
+  });
+
+  it("live では startGold を無視して初期ゴールドを守る", async () => {
+    const { session } = createSession({ aiMode: "live" });
+    const view = firstSnapshot(await session.handle({ type: "new-game", options: { startGold: 999 } }));
+    expect(view.player.gold).toBe(INITIAL_GOLD);
+  });
+});
+
 // ===========================================================================
 // 移動(検証・遷移)
 // ===========================================================================

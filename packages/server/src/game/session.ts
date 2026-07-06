@@ -306,14 +306,19 @@ export class GameSession {
     seed?: number | undefined;
     noSymbols?: boolean | undefined;
     startLevel?: number | undefined;
+    startGold?: number | undefined;
   }): ServerMessage[] {
     const seed = options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0);
     this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
     this.rng = createRng(seed);
     this.state = createNewGameState();
-    // テスト加速: startLevel(mock 限定)。live では無視して通常の Lv1 開始を守る
+    // テスト加速: startLevel / startGold(mock 限定)。live では無視して通常の開始を守る
     if (options?.startLevel !== undefined && this.aiMode !== "live") {
       this.applyStartLevel(options.startLevel);
+    }
+    if (options?.startGold !== undefined && this.aiMode !== "live") {
+      // 装備購入スモーク(M8-4)等の資金確保。startLevel と同じテスト加速の扱い
+      this.state.player.gold = options.startGold;
     }
     this.syncQuestSeq();
     this.resetRuntime();

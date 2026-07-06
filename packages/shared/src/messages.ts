@@ -216,14 +216,16 @@ export const clientPingMessageSchema = z.object({
 });
 
 /**
- * 新規ゲーム開始オプション(E2E/デバッグ用のシード固定・シンボル無効化・開始レベル)。
- * startLevel はテスト加速用で、サーバーは mock(非 live)時のみ尊重する
- * (通しプレイ E2E がボス(推奨 Lv5-6)へ到達して勝つための加速。live では無視)。
+ * 新規ゲーム開始オプション(E2E/デバッグ用のシード固定・シンボル無効化・開始レベル・開始ゴールド)。
+ * startLevel / startGold はテスト加速用で、サーバーは mock(非 live)時のみ尊重する
+ * (通しプレイ E2E がボス(推奨 Lv5-6)へ到達して勝つための加速と、
+ * 装備購入スモーク(M8-4)の資金確保。live では無視)。
  */
 export const newGameOptionsSchema = z.object({
   seed: z.number().int().optional(),
   noSymbols: z.boolean().optional(),
-  startLevel: z.number().int().min(1).max(MAX_LEVEL).optional()
+  startLevel: z.number().int().min(1).max(MAX_LEVEL).optional(),
+  startGold: z.number().int().min(0).max(99999).optional()
 });
 
 export const clientNewGameMessageSchema = z.object({

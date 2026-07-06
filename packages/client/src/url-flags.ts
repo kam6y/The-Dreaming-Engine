@@ -7,6 +7,7 @@ type NewGameOptions = NonNullable<Extract<ClientMessage, { type: "new-game" }>["
  * - ?seed=N: 敵シンボル/戦闘シードの固定(再現用)
  * - ?noSymbols=1: 敵シンボルの無効化(移動スモークの安定化用)
  * - ?startLevel=N: 開始レベルの加速(通しプレイ E2E 用。サーバーは mock 時のみ尊重)
+ * - ?startGold=N: 開始ゴールドの加速(装備購入スモーク用。サーバーは mock 時のみ尊重)
  * サーバー正本化後もフラグの入口はURLのまま維持する(既存E2Eとの互換)。
  */
 export function newGameOptionsFromUrl(): NewGameOptions {
@@ -21,10 +22,16 @@ export function newGameOptionsFromUrl(): NewGameOptions {
     startLevelRaw !== null && startLevelRaw !== "" && Number.isInteger(Number(startLevelRaw))
       ? Number(startLevelRaw)
       : undefined;
+  const startGoldRaw = params.get("startGold");
+  const startGold =
+    startGoldRaw !== null && startGoldRaw !== "" && Number.isInteger(Number(startGoldRaw))
+      ? Number(startGoldRaw)
+      : undefined;
   return {
     ...(seed !== undefined ? { seed } : {}),
     ...(params.has("noSymbols") ? { noSymbols: true } : {}),
-    ...(startLevel !== undefined ? { startLevel } : {})
+    ...(startLevel !== undefined ? { startLevel } : {}),
+    ...(startGold !== undefined ? { startGold } : {})
   };
 }
 

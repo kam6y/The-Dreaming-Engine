@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
-import type { ItemId, SnapshotView } from "@dreaming-engine/shared";
+import { ITEMS, isEquipment } from "@dreaming-engine/shared";
+import type { EquipmentSlot, ItemId, SnapshotView, ViewEquipmentSlot } from "@dreaming-engine/shared";
 
 import { UI_FONT_FAMILY } from "./font.js";
 import { MenuList } from "./menu-list.js";
@@ -11,19 +12,47 @@ export interface InventoryOverlayOptions {
   onUse: (itemId: ItemId) => void;
   /** 破棄要求(1個) */
   onDiscard: (itemId: ItemId) => void;
+  /** 装備要求(M8-4)。結果は snapshot / server-error で返る */
+  onEquip: (itemId: ItemId) => void;
+  /** 装備解除要求(M8-4) */
+  onUnequip: (slot: EquipmentSlot) => void;
   /** Esc / とじる で閉じる */
   onClose: () => void;
+}
+
+/** 装備品のボーナス表記(武器=攻、防具=防)。装備品以外は空文字 */
+function bonusLabelOf(itemId: ItemId): string {
+  const def = ITEMS[itemId];
+  if (def.slot === "weapon") {
+    return `(攻+${def.atkBonus ?? 0})`;
+  }
+  if (def.slot === "armor") {
+    return `(防+${def.defBonus ?? 0})`;
+  }
+  return "";
+}
+
+/** 装備スロット行のラベル(空スロットは「(なし)」) */
+function slotRowLabel(prefix: string, equipped: ViewEquipmentSlot | null): string {
+  if (equipped === null) {
+    return `${prefix} (なし)`;
+  }
+  return `${prefix} ${equipped.name}${bonusLabelOf(equipped.itemId)}`;
 }
 
 const PANEL_WIDTH = 560;
 const PANEL_HEIGHT = 400;
 const LIST_WIDTH = 340;
+/** リスト上端(パネル相対)。ヘッダー2行(所持枠/実効攻防)の下から始める */
+const LIST_TOP = 104;
 
 /**
  * もちものオーバーレイ(Escで開閉)。
  * - 所持品はサーバー正本(snapshot)の inventory / questItems を表示する
  * - 「使う」「すてる」は1個ずつサーバーへ要求し、結果の snapshot で表示を更新する
  * - クエスト用アイテムは別枠表示で、使う/すてるの対象にならない(選択不可)
+ * - 装備(M8-4): リスト先頭に武器・防具のスロット行を置く(選択で「はずす」)。
+ *   装備品アイテムのアクションには「そうびする」が付く。ヘッダーに実効攻防を表示する
  */
 export class InventoryOverlay {
   private readonly scene: Phaser.Scene;
@@ -128,8 +157,10 @@ export class InventoryOverlay {
 
   private updateHeader(): void {
     const view = this.snapshot;
+    // 1行目: 所持枠と所持金 / 2行目: 実効攻防(装備込み。M8-4)
     this.headerText.setText(
-      `持ち物 ${view.inventoryUsed}/${view.inventoryCapacity}    所持金 ${view.player.gold}G`
+      `持ち物 ${view.inventoryUsed}/${view.inventoryCapacity}    所持金 ${view.player.gold}G\n` +
+        `攻撃 ${view.player.effectiveAttack}    防御 ${view.player.effectiveDefense}`
     );
   }
 
@@ -138,10 +169,22 @@ export class InventoryOverlay {
     const keepIndex = this.listMenu?.currentIndex ?? 0;
     this.listMenu?.destroy();
 
+    const equipment = this.snapshot.player.equipment;
     const stacks = [
+      // 装備スロット行(M8-4)。選択で「はずす」。空スロットは選択不可
+      {
+        id: "slot:weapon",
+        label: slotRowLabel("[武器]", equipment.weapon),
+        disabled: equipment.weapon === null
+      },
+      {
+        id: "slot:armor",
+        label: slotRowLabel("[防具]", equipment.armor),
+        disabled: equipment.armor === null
+      },
       ...this.snapshot.inventory.map((stack) => ({
         id: stack.itemId,
-        label: `${stack.name} ×${stack.count}`
+        label: `${stack.name}${bonusLabelOf(stack.itemId)} ×${stack.count}`
       })),
       // クエスト用アイテムは別枠(使う/すてる不可)。存在の確認用に表示だけする
       ...this.snapshot.questItems.map((stack) => ({
@@ -150,18 +193,25 @@ export class InventoryOverlay {
         disabled: true
       }))
     ];
-    const items =
-      stacks.length > 0
-        ? stacks
-        : [{ id: "empty", label: "(何も持っていない)", disabled: true }];
+    if (this.snapshot.inventory.length === 0 && this.snapshot.questItems.length === 0) {
+      stacks.push({ id: "empty", label: "(何も持っていない)", disabled: true });
+    }
 
     this.listMenu = new MenuList(this.scene, this.parentLayer, {
-      items,
+      items: stacks,
       x: this.panelX + 20,
-      y: this.panelY + 80,
+      y: this.panelY + LIST_TOP,
       width: LIST_WIDTH,
       initialIndex: keepIndex,
       onSelect: (id) => {
+        if (id === "slot:weapon") {
+          this.openSlotActionMenu("weapon");
+          return;
+        }
+        if (id === "slot:armor") {
+          this.openSlotActionMenu("armor");
+          return;
+        }
         this.openActionMenu(id as ItemId);
       },
       onCancel: () => {
@@ -176,24 +226,61 @@ export class InventoryOverlay {
     });
   }
 
-  /** 使う/すてる/やめる のアクション選択 */
+  /** アイテムのアクション選択(装備品は「そうびする」、消耗品は「使う」が先頭) */
   private openActionMenu(itemId: ItemId): void {
     this.listMenu?.deactivate();
+    const actions = isEquipment(itemId)
+      ? [
+          { id: "equip", label: "そうびする" },
+          { id: "discard", label: "すてる" },
+          { id: "cancel", label: "やめる" }
+        ]
+      : [
+          { id: "use", label: "使う" },
+          { id: "discard", label: "すてる" },
+          { id: "cancel", label: "やめる" }
+        ];
     this.actionMenu = new MenuList(this.scene, this.parentLayer, {
-      items: [
-        { id: "use", label: "使う" },
-        { id: "discard", label: "すてる" },
-        { id: "cancel", label: "やめる" }
-      ],
+      items: actions,
       x: this.panelX + LIST_WIDTH + 36,
-      y: this.panelY + 80,
+      y: this.panelY + LIST_TOP,
       width: 150,
       onSelect: (id) => {
         this.closeActionMenu();
         if (id === "use") {
           this.options.onUse(itemId);
+        } else if (id === "equip") {
+          this.options.onEquip(itemId);
         } else if (id === "discard") {
           this.options.onDiscard(itemId);
+        }
+      },
+      onCancel: () => {
+        this.closeActionMenu();
+      }
+    });
+    this.scene.time.delayedCall(0, () => {
+      if (!this.destroyed) {
+        this.actionMenu?.activate();
+      }
+    });
+  }
+
+  /** 装備スロット行のアクション選択(はずす/やめる) */
+  private openSlotActionMenu(slot: EquipmentSlot): void {
+    this.listMenu?.deactivate();
+    this.actionMenu = new MenuList(this.scene, this.parentLayer, {
+      items: [
+        { id: "unequip", label: "はずす" },
+        { id: "cancel", label: "やめる" }
+      ],
+      x: this.panelX + LIST_WIDTH + 36,
+      y: this.panelY + LIST_TOP,
+      width: 150,
+      onSelect: (id) => {
+        this.closeActionMenu();
+        if (id === "unequip") {
+          this.options.onUnequip(slot);
         }
       },
       onCancel: () => {
