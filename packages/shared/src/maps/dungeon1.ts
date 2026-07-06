@@ -43,5 +43,6 @@ export const dungeon1Map: MapDefinition = mapDefinitionSchema.parse({
     { id: "d1-chest", kind: "chest", position: { x: 5, y: 5 }, message: "消えかけた燭台の傍に、埃をかぶった小箱がある。" },
     { id: "d1-sign", kind: "sign", position: { x: 16, y: 8 }, message: "壁に刻まれた古い印。『灯を絶やすな』と読める。" }
   ],
-  enemySymbols: { min: 2, max: 6, species: ["candle-eater"] }
+  // 蝋燭喰らい + 囁き仮面(M10。浅層帯の雑魚2種。レンジ2-6は不変)
+  enemySymbols: { min: 2, max: 6, species: ["candle-eater", "whisper-mask"] }
 });

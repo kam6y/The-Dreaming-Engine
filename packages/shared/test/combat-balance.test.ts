@@ -11,7 +11,7 @@ import {
   LEVEL_STATS,
   MAX_LEVEL
 } from "../src/index.js";
-import type { BattleCommand, BattleEvent, BattleOutcome, BattleState, PlayerProgress, SkillId } from "../src/index.js";
+import type { BattleCommand, BattleEvent, BattleOutcome, BattleState, EnemyId, PlayerProgress, SkillId } from "../src/index.js";
 
 // --- シミュレーション基盤(固定シード集合で統計的に検証する) ---
 
@@ -26,7 +26,7 @@ interface SimResult {
 
 function simulate(
   progress: PlayerProgress,
-  enemyId: "mist-wolf" | "candle-eater" | "creaking-doll" | "dream-eater",
+  enemyId: EnemyId,
   seed: number,
   policy: Policy,
   maxTurns = 200
@@ -218,6 +218,87 @@ describe("バランス条件2: ボス(夢喰い)", () => {
       console.log(`[SWEEP Lv${level}] 勝率=${(winRate * 100).toFixed(1)}% 全滅率=${(wipeRate * 100).toFixed(1)}% 平均ターン=${avgTurns.toFixed(2)}`);
     }
     expect(true).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 条件3: 敵バリエーション(M10)の推奨レベル帯検証
+//  - 推奨帯で勝てる/推奨未満では危険、を統計検証(既存閾値と同じ 300シード・純関数)。
+//  - 雑魚は通常攻撃のみ(attackPolicy)、中ボスはボス用ヒューリスティック(bossPolicy)で測る。
+// ---------------------------------------------------------------------------
+
+function winWipeRates(
+  enemyId: EnemyId,
+  level: number,
+  policy: Policy
+): { winRate: number; wipeRate: number; avgTurns: number } {
+  const progress = fullProgress(level);
+  let wins = 0;
+  let wipes = 0;
+  let turnSum = 0;
+  for (const seed of SEEDS) {
+    const r = simulate(progress, enemyId, seed, policy);
+    if (r.outcome === "victory") wins += 1;
+    if (r.outcome === "defeat") wipes += 1;
+    turnSum += r.turns;
+  }
+  return { winRate: wins / SEEDS.length, wipeRate: wipes / SEEDS.length, avgTurns: turnSum / SEEDS.length };
+}
+
+describe("バランス条件3: 敵バリエーション(M10)", () => {
+  it("迷い火(フィールド。推奨Lv1-2): Lv1 で通常攻撃のみで全シード勝利し、数ターンで決着", () => {
+    let wins = 0;
+    let minTurns = Infinity;
+    let maxTurns = 0;
+    for (const seed of SEEDS) {
+      const r = simulate(fullProgress(1), "wisp-flame", seed, attackPolicy);
+      if (r.outcome === "victory") wins += 1;
+      minTurns = Math.min(minTurns, r.turns);
+      maxTurns = Math.max(maxTurns, r.turns);
+      expect(r.outcome).toBe("victory");
+      expect(r.turns).toBeGreaterThanOrEqual(2);
+      expect(r.turns).toBeLessThanOrEqual(5);
+    }
+    console.log(`[Lv1 vs 迷い火] 勝率=${((wins / SEEDS.length) * 100).toFixed(1)}% 範囲=${minTurns}-${maxTurns}`);
+    expect(wins).toBe(SEEDS.length);
+  });
+
+  it("囁き仮面(浅層。推奨Lv2-3): Lv3 で確実に勝て、Lv1 では高確率で全滅", () => {
+    const lv3 = winWipeRates("whisper-mask", 3, attackPolicy);
+    const lv1 = winWipeRates("whisper-mask", 1, attackPolicy);
+    console.log(`[囁き仮面] Lv3 勝率=${(lv3.winRate * 100).toFixed(1)}% / Lv1 全滅率=${(lv1.wipeRate * 100).toFixed(1)}%`);
+    expect(lv3.winRate).toBeGreaterThanOrEqual(0.9);
+    expect(lv1.wipeRate).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("錆喰い(深層。推奨Lv3-4): Lv4 で確実に勝て、Lv2 では高確率で全滅", () => {
+    const lv4 = winWipeRates("rust-eater", 4, attackPolicy);
+    const lv2 = winWipeRates("rust-eater", 2, attackPolicy);
+    console.log(`[錆喰い] Lv4 勝率=${(lv4.winRate * 100).toFixed(1)}% / Lv2 全滅率=${(lv2.wipeRate * 100).toFixed(1)}%`);
+    expect(lv4.winRate).toBeGreaterThanOrEqual(0.9);
+    expect(lv2.wipeRate).toBeGreaterThanOrEqual(0.9);
+  });
+
+  describe("紡ぎ損ない(中ボス。推奨Lv4-5。bossPolicy で測る)", () => {
+    it("推奨Lv5 では十分な確率(>=85%)で勝てる", () => {
+      const { winRate, wipeRate } = winWipeRates("failing-spinner", 5, bossPolicy);
+      console.log(`[Lv5 vs 紡ぎ損ない] 勝率=${(winRate * 100).toFixed(1)}% 全滅率=${(wipeRate * 100).toFixed(1)}%`);
+      expect(winRate).toBeGreaterThanOrEqual(0.85);
+    });
+
+    it("推奨下限 Lv4 でも勝ち越せる(>=70%)", () => {
+      const { winRate } = winWipeRates("failing-spinner", 4, bossPolicy);
+      console.log(`[Lv4 vs 紡ぎ損ない] 勝率=${(winRate * 100).toFixed(1)}%`);
+      expect(winRate).toBeGreaterThanOrEqual(0.7);
+    });
+
+    it("推奨未満(Lv2-3)は高確率(>=90%)で全滅する", () => {
+      for (const level of [2, 3]) {
+        const { wipeRate } = winWipeRates("failing-spinner", level, bossPolicy);
+        console.log(`[Lv${level} vs 紡ぎ損ない] 全滅率=${(wipeRate * 100).toFixed(1)}%`);
+        expect(wipeRate).toBeGreaterThanOrEqual(0.9);
+      }
+    });
   });
 });
 

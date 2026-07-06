@@ -4,6 +4,7 @@ import {
   ENEMY_DISPLAY_NAMES,
   isEquipment,
   MAPS,
+  midBossDefeatFlag,
   NPC_DISPLAY_NAMES,
   samePosition,
   tileTypeAt,
@@ -59,7 +60,12 @@ const SYMBOL_COLORS: Record<EnemyId, number> = {
   "mist-wolf": 0x9aa7b8,
   "candle-eater": 0xc9a25c,
   "creaking-doll": 0x8a7f8f,
-  "dream-eater": 0x5c2431
+  "dream-eater": 0x5c2431,
+  // M10拡張(グラフィックは M10-2。シンボルのプレースホルダー色)
+  "wisp-flame": 0x8fbfe0,
+  "whisper-mask": 0xd8d2c4,
+  "rust-eater": 0x8a5a3c,
+  "failing-spinner": 0x6e5560
 };
 
 type ConversationInteraction = Extract<ActiveInteraction, { kind: "conversation" }>;
@@ -202,6 +208,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.drawObjects();
     this.drawNpcs();
     this.drawBoss();
+    this.drawMidBoss();
     this.updateEnemySymbols();
     this.updateResolvedObjects();
     this.createPlayer();
@@ -800,6 +807,42 @@ export class ExplorationScene extends Phaser.Scene {
       this.add
         .text(x, y - TILE_SIZE - 6, ENEMY_DISPLAY_NAMES[this.map.boss.enemyId], {
           color: "#c98f9a",
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: "13px"
+        })
+        .setOrigin(0.5)
+    );
+  }
+
+  /**
+   * 中ボスマーカー(固定配置。M10)を描画する。撃破済み(resolvedObjectIds に撃破フラグあり)は
+   * 非表示にする。最終ボスと違いメインクエスト段階のゲートはなく、未撃破の間は常時表示。
+   */
+  private drawMidBoss(): void {
+    const midBoss = this.map.midBoss;
+    if (midBoss === undefined) {
+      return;
+    }
+    if (this.snapshot.resolvedObjectIds.includes(midBossDefeatFlag(midBoss.enemyId))) {
+      return;
+    }
+    const { x, y } = this.tileCenter(midBoss.position);
+    const marker = this.add
+      .circle(x, y, TILE_SIZE - 12, SYMBOL_COLORS[midBoss.enemyId])
+      .setStrokeStyle(2, 0x1a1420);
+    this.worldLayer.add(marker);
+    this.tweens.add({
+      targets: marker,
+      scale: 1.1,
+      duration: 1000,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut"
+    });
+    this.worldLayer.add(
+      this.add
+        .text(x, y - TILE_SIZE - 6, ENEMY_DISPLAY_NAMES[midBoss.enemyId], {
+          color: "#c9b9c4",
           fontFamily: UI_FONT_FAMILY,
           fontSize: "13px"
         })

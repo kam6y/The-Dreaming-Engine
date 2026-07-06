@@ -40,15 +40,14 @@ describe("マップレジストリ", () => {
 });
 
 describe("敵シンボル出現数レンジ(game-design.md『マップ構成』が正)", () => {
-  it("フィールドは2-3体", () => {
-    expect(MAPS.field.enemySymbols).toEqual({
-      min: 2,
-      max: 3,
-      species: ["mist-wolf"]
-    });
+  it("フィールドは2-3体(レンジ不変。プールは霧狼+迷い火 に拡張=M10)", () => {
+    // レンジ(min/max)は game-design.md「マップ構成」が唯一の正=不変。species は M10 で拡張。
+    expect(MAPS.field.enemySymbols?.min).toBe(2);
+    expect(MAPS.field.enemySymbols?.max).toBe(3);
+    expect(MAPS.field.enemySymbols?.species).toEqual(["mist-wolf", "wisp-flame"]);
   });
 
-  it("ダンジョン各層は2-6体", () => {
+  it("ダンジョン各層は2-6体(レンジ不変)", () => {
     for (const id of ["dungeon-1", "dungeon-2", "dungeon-3"] as const) {
       expect(MAPS[id].enemySymbols?.min).toBe(2);
       expect(MAPS[id].enemySymbols?.max).toBe(6);

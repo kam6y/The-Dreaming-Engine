@@ -1021,3 +1021,53 @@
   codex委譲でグラフィックも生成)」をM10として展開してから着手
   (敵定義・行動・配置=subagent、グラフィック=codex委譲(asset-pipeline.md)、
   検収・コミット=オーケストレーター)
+
+## [35] 2026-07-06 M10-1: 新敵4種の定義と出現(敵バリエーション基盤)
+
+- やったこと(実装=subagent。グラフィックは M10-2 で codex 委譲):
+  - ロア/仕様追記: world-lore.md に §4.1「敵バリエーション(拡張: M10)」+ §5用語集4件、
+    game-design.md 敵表直後に「敵バリエーション(拡張: M10)」小節(区分・出現マップ・
+    推奨レベル帯・中ボス出現方式)を追記(既存記述の変更なし・追記のみ)
+  - 新敵4種を定義(shared): 迷い火 `wisp-flame`(フィールド Lv1-2)/囁き仮面
+    `whisper-mask`(浅層 Lv2-3)/錆喰い `rust-eater`(深層 Lv3-4)/中ボス 紡ぎ損ない
+    `failing-spinner`(2層 Lv4-5)。enemyIdSchema・ENEMY_DISPLAY_NAMES・ENEMIES・
+    ENEMY_MOVES(新技6種)へ追加。既存4敵の数値・挙動は不変
+  - 出現プール: field=霧狼+迷い火 / d1=蝋燭喰らい+囁き仮面 / d2=既存2種+囁き仮面+錆喰い /
+    d3=軋み人形+錆喰い。**シンボル数レンジ(2-3 / 各層2-6)は不変**
+  - 新雑魚3種は `RESPAWNABLE_ENEMY_IDS` に追加(リスポーン=出現可)。ただし
+    **`HuntTargetId`(ai/hunt.ts)は既存3種のまま据え置き**(将来拡張)。よって
+    RESPAWNABLE と HUNT_TARGET_IDS の「一致」不変条件を「HUNT⊆RESPAWNABLE(hunt対象は
+    必ずリスポーン)」へ更新(ai-enums.test)。propose_quest のホワイトリストは無変更
+  - 中ボス出現方式(裁量設計): dungeon-2 の側室 (17,8)(背骨道 x=11 外)に**占有マーカー**
+    `midBoss` を1体固定配置(最終ボス `boss` とは別枠)。map.ts へ `midBoss`/`midBossAt`/
+    `isOccupied` 拡張。踏み込み=戦闘、撃破は `gimmicks` に `midboss:<id>` 記録して
+    リスポーンなし(旧セーブは既定=未撃破で互換。gameStateSchema 変更不要)。撃破後は
+    定型 dialog で再戦不可。`isBoss=false` とし**メインクエスト進行/エンディングを誘発しない**
+    (逃走は可能)。撃破フラグは resolvedObjectIds に載せてクライアントのマーカーを非表示化
+  - クライアント: battle-scene ENEMY_COLORS / exploration-scene SYMBOL_COLORS に新4色
+    (グラフィック未生成=退避描画で動作)。exploration-scene に中ボスマーカー描画 `drawMidBoss`
+  - テスト: enemies.test(新規=定義妥当性を全敵横断)/encounter(新雑魚の実出現・レンジ不変・
+    中ボス非出現)/ai-enums(HUNT⊆RESPAWNABLE)/combat-balance(推奨帯検証)/session
+    (中ボス戦・撃破記録・再戦不可・エンディング非誘発・背骨道非閉塞)/maps(field species)
+  - **seed=42 問題への対処**: フィールドのプール拡張で seed=42 の最寄りシンボルが
+    霧狼→迷い火 に変化。battle.spec は「敵種をサンプリング結果から動的導出」する方式へ更新
+    (検証意図=接触→勝利→復帰は不変。むしろサーバー/テストの敵種一致検証に強化)。
+    skill.spec は澱み斬りで敵が生存する必要があるため、迷い火(HP16=倒しきる)を避け
+    霧狼(HP20=生存)を明示的に狙う BFS へ更新(他シンボルは壁扱いで別戦闘を回避)
+- 数値根拠(300シード純関数sim・通常攻撃): 迷い火 Lv1勝率100%(2-3ターン。霧狼相当の
+  最序盤)。囁き仮面 Lv3=100%/Lv1=全滅(蝋燭喰らいと軋み人形の中間)。錆喰い Lv4=99%/
+  Lv2=全滅(軋み人形と同格の閾値)。紡ぎ損ない(中ボス。heal+ember相当) Lv5≈100%/Lv4≈88%/
+  Lv2-3=全滅(HP96=夢喰いHP150より弱く雑魚より格上。推奨Lv4-5)
+- 検証: `pnpm check` 緑(unit **676**・typecheck/lint/build/secretscan)・
+  `pnpm test:e2e` **12/12緑**(5.6分)。既存の敵・ボスの数値/挙動・防御仕様は不変
+- 裁量で決めたこと: 敵ID/技ID命名(英語)・ステータス/報酬値・中ボス配置座標(17,8)・
+  中ボス出現方式(占有マーカー+gimmicks撃破記録)・プレースホルダー色・narrate定型文
+- 既知の申し送り: (a) 新雑魚の hunt 対象化は未実施(HuntTargetId 据え置き)。将来
+  `HUNT_TARGET_IDS` へ追加すれば propose_quest 対象に昇格可(drift テストは部分集合で許容済み)。
+  (b) ROADMAP の M10-1 チェックと commit はオーケストレーター(検収後)。本セッションは未コミット
+- 次にやること: **M10-2**(codex委譲で敵グラフィック4種を生成)。外見典拠は world-lore.md
+  §4.1(迷い火=青白い炎/囁き仮面=罅の白面/錆喰い=錆歯車の蛭状/紡ぎ損ない=崩れた織機・
+  2形態)。サイズは既存踏襲で雑魚3種 512x512・中ボスは 512 か 768(ボス級演出なら 768x768)。
+  manifest 追加時は id=敵ID(wisp-flame等)で一致必須。battle-scene は `textures.exists(enemyId)`
+  で自動的に画像へ切替(未生成時は退避描画のまま)。中ボスは isBoss=false のため戦闘スロットは
+  通常サイズ(ENEMY_SLOT_HEIGHT)で表示される点に留意

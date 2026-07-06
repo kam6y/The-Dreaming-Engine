@@ -48,15 +48,35 @@ describe("GiftableItemId(贈答ホワイトリスト)", () => {
 });
 
 describe("HuntTargetId(討伐ホワイトリスト)", () => {
-  it("RESPAWNABLE_ENEMY_IDS と集合として一致する(drift 検知)", () => {
-    expect([...HUNT_TARGET_IDS].sort()).toEqual([...RESPAWNABLE_ENEMY_IDS].sort());
+  // M10 で新雑魚(リスポーンする)を RESPAWNABLE へ追加したが、HuntTargetId は据え置いた
+  // (game-design.md「敵バリエーション(拡張: M10)」/ 将来拡張)。よって両者はもはや一致せず、
+  // HuntTargetId は RESPAWNABLE の「部分集合」であることを不変条件とする(hunt 対象は必ずリスポーンする)。
+  it("HuntTargetId は RESPAWNABLE_ENEMY_IDS の部分集合(hunt 対象は必ずリスポーンする)", () => {
+    for (const id of HUNT_TARGET_IDS) {
+      expect(RESPAWNABLE_ENEMY_IDS).toContain(id);
+    }
   });
 
-  it("ボス dream-eater を含まない", () => {
-    expect(HUNT_TARGET_IDS).not.toContain("dream-eater");
-    expect(huntTargetIdSchema.safeParse("dream-eater").success).toBe(false);
+  it("縦切りの HuntTargetId は既存3種のまま据え置き(M10 で不変)", () => {
+    expect([...HUNT_TARGET_IDS].sort()).toEqual(["candle-eater", "creaking-doll", "mist-wolf"]);
+  });
+
+  it("M10 の新雑魚はリスポーンするが hunt 対象には含めない(据え置き)", () => {
+    for (const id of ["wisp-flame", "whisper-mask", "rust-eater"] as const) {
+      expect(RESPAWNABLE_ENEMY_IDS).toContain(id);
+      expect(HUNT_TARGET_IDS as readonly string[]).not.toContain(id);
+      expect(isHuntTarget(id)).toBe(false);
+    }
+  });
+
+  it("ボス dream-eater・中ボス failing-spinner を含まない(リスポーンしない)", () => {
+    for (const id of ["dream-eater", "failing-spinner"] as const) {
+      expect(HUNT_TARGET_IDS as readonly string[]).not.toContain(id);
+      expect(RESPAWNABLE_ENEMY_IDS).not.toContain(id);
+      expect(huntTargetIdSchema.safeParse(id).success).toBe(false);
+      expect(isHuntTarget(id)).toBe(false);
+    }
     expect(isHuntTarget("mist-wolf")).toBe(true);
-    expect(isHuntTarget("dream-eater")).toBe(false);
   });
 });
 

@@ -39,5 +39,6 @@ export const dungeon3Map: MapDefinition = mapDefinitionSchema.parse({
     { id: "d3-sign", kind: "sign", position: { x: 8, y: 12 }, message: "重い唸りのような静寂。奥に、うずくまる巨躯の輪郭が見える。" }
   ],
   boss: { position: { x: 11, y: 13 }, enemyId: "dream-eater" },
-  enemySymbols: { min: 2, max: 6, species: ["creaking-doll"] }
+  // 軋み人形 + 錆喰い(M10。最深部の壊死帯の雑魚2種。レンジ2-6は不変)
+  enemySymbols: { min: 2, max: 6, species: ["creaking-doll", "rust-eater"] }
 });

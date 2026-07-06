@@ -110,17 +110,18 @@ function pathToNearestSymbol(
   return null;
 }
 
-test("seed=42でフィールドの霧狼に接触し、勝利して探索へ復帰する", async ({ page }) => {
+test("seed=42でフィールドの敵シンボルに接触し、勝利して探索へ復帰する", async ({ page }) => {
   test.setTimeout(60_000);
 
   // --- 敵シンボル配置をクライアントと同一手順で再現(座標のハードコード回避) ---
   const rng = createRng(SEED);
   // 街入場のサンプリング(安全地帯=enemySymbols 無しのため RNG は消費されない)を忠実に再現
   expect(sampleEnemySymbols(townMap, rng)).toHaveLength(0);
-  // フィールド入場のサンプリング = 最初の乱数消費。seed=42 では 霧狼2体
+  // フィールド入場のサンプリング = 最初の乱数消費。seed=42 では 2体
+  // (M10 でフィールドのプールは 霧狼+迷い火 に拡張。敵種はサンプリング結果から動的に導出し、
+  //  特定の敵種を前提にしない。接触する最寄りシンボルはいずれも Lv1 の通常攻撃で数ターンで倒せる)
   const symbols = sampleEnemySymbols(fieldMap, rng);
   expect(symbols).toHaveLength(2);
-  expect(symbols.every((s) => s.enemyId === "mist-wolf")).toBe(true);
 
   // --- 新規ゲーム開始 → 街「灯町」 ---
   await page.goto(`/?seed=${SEED}&skipIntro=1`);
@@ -154,7 +155,9 @@ test("seed=42でフィールドの霧狼に接触し、勝利して探索へ復�
   expect(path, "霧狼への接触経路が見つかること").not.toBeNull();
   const route = path as Position[];
   const goal = route[route.length - 1] as Position;
-  expect(symbols.some((s) => samePosition(s.position, goal))).toBe(true);
+  const goalSymbol = symbols.find((s) => samePosition(s.position, goal));
+  expect(goalSymbol, "接触先ゴールが敵シンボルであること").toBeDefined();
+  const expectedEnemyId = (goalSymbol as EnemySymbolPlacement).enemyId;
 
   // 経路を1マスずつ進む。最後の1歩でシンボルへ踏み込み戦闘開始
   for (let i = 0; i < route.length - 1; i += 1) {
@@ -172,8 +175,9 @@ test("seed=42でフィールドの霧狼に接触し、勝利して探索へ復�
     }
   }
 
-  // --- 戦闘開始: 交戦相手が霧狼であること ---
-  expect(await readAttr(page, "data-battle-enemy")).toBe("mist-wolf");
+  // --- 戦闘開始: 交戦相手がサンプリングで最寄りに配置された敵と一致すること
+  // (サーバーとテストが同一の sampleEnemySymbols を再現しているため、敵種まで一致する) ---
+  expect(await readAttr(page, "data-battle-enemy")).toBe(expectedEnemyId);
 
   // スペース連打で進める。コマンドメニューは先頭「たたかう」が選択済みのまま
   // (上下キーは押さないのでカーソルは動かず、サブメニューも開かない)。
@@ -191,7 +195,7 @@ test("seed=42でフィールドの霧狼に接触し、勝利して探索へ復�
   expect(await readAttr(page, "data-symbol-count")).toBe(String(symbols.length - 1)); // "1"
 });
 
-test("初見霧狼の撃破で戦果narrate(ai-utterance)が探索復帰前に届く(M4-G)", async ({ page }) => {
+test("初見敵の撃破で戦果narrate(ai-utterance)が探索復帰前に届く(M4-G)", async ({ page }) => {
   test.setTimeout(60_000);
 
   // WS フレーム傍受: ai-utterance narrate が届いたかを記録する
@@ -235,8 +239,12 @@ test("初見霧狼の撃破で戦果narrate(ai-utterance)が探索復帰前に�
 
   const start = await readPlayerPosition(page);
   const path = pathToNearestSymbol(start, symbols);
-  expect(path, "霧狼への接触経路が見つかること").not.toBeNull();
+  expect(path, "敵シンボルへの接触経路が見つかること").not.toBeNull();
   const route = path as Position[];
+  const goal = route[route.length - 1] as Position;
+  const goalSymbol = symbols.find((s) => samePosition(s.position, goal));
+  expect(goalSymbol, "接触先ゴールが敵シンボルであること").toBeDefined();
+  const expectedEnemyId = (goalSymbol as EnemySymbolPlacement).enemyId;
   for (let i = 0; i < route.length - 1; i += 1) {
     const from = route[i] as Position;
     const to = route[i + 1] as Position;
@@ -249,7 +257,8 @@ test("初見霧狼の撃破で戦果narrate(ai-utterance)が探索復帰前に�
         .toBe(posKey(to));
     }
   }
-  expect(await readAttr(page, "data-battle-enemy")).toBe("mist-wolf");
+  // 交戦相手はサンプリングで最寄りに配置された初見敵(mist-wolf/wisp-flame いずれも初見=narrate 対象)
+  expect(await readAttr(page, "data-battle-enemy")).toBe(expectedEnemyId);
 
   // 勝利まで Space 送り。narrate が「戦闘中(探索復帰前)」に届くことを確認する:
   // ループ先頭で data-scene が battle のうちに narrate 受信していれば探索復帰前の到達となる。

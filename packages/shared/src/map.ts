@@ -123,6 +123,8 @@ const mapDefinitionBaseSchema = z.object({
   objects: z.array(mapObjectSchema),
   enemySymbols: enemySymbolsSchema.optional(),
   boss: bossMarkerSchema.optional(),
+  /** 中ボス(固定配置マーカー。M10)。最終ボスとは別枠で、占有マス=踏み込みで戦闘開始 */
+  midBoss: bossMarkerSchema.optional(),
   playerStart: spawnPointSchema.optional()
 });
 
@@ -177,6 +179,7 @@ export const mapDefinitionSchema = mapDefinitionBaseSchema.superRefine((map, ctx
   for (const n of map.npcs) checkPlaceable(n.position, `npc:${n.id}`);
   for (const o of map.objects) checkPlaceable(o.position, `object:${o.id}`);
   if (map.boss) checkPlaceable(map.boss.position, "boss");
+  if (map.midBoss) checkPlaceable(map.midBoss.position, "midBoss");
   if (map.playerStart) checkPlaceable(map.playerStart.position, "playerStart");
 
   // --- 占有マス(NPC/オブジェクト/ボス)の重複禁止 ---
@@ -185,6 +188,7 @@ export const mapDefinitionSchema = mapDefinitionBaseSchema.superRefine((map, ctx
     ...map.objects.map((o) => ({ position: o.position, label: `object:${o.id}` }))
   ];
   if (map.boss) occupancy.push({ position: map.boss.position, label: "boss" });
+  if (map.midBoss) occupancy.push({ position: map.midBoss.position, label: "midBoss" });
   occupancy.forEach((a, i) => {
     for (let j = i + 1; j < occupancy.length; j += 1) {
       const b = occupancy[j];
@@ -263,9 +267,24 @@ export function bossAt(map: MapDefinition, position: Position): BossMarker | nul
   return null;
 }
 
-/** NPC・オブジェクト・ボスのいずれかがマスを占有しているか */
+/**
+ * 中ボス(固定配置マーカー)がそのマスにいるか(M10。game-design.md「敵バリエーション」)。
+ * 最終ボス(bossAt)とは別枠の占有マーカー。撃破状態はセッション側(gimmicks)で管理し、
+ * マップ定義上は常に存在する(撃破後も占有=非walkableのまま。側室の行き止まりのため経路を塞がない)。
+ */
+export function midBossAt(map: MapDefinition, position: Position): BossMarker | null {
+  if (map.midBoss && samePosition(map.midBoss.position, position)) return map.midBoss;
+  return null;
+}
+
+/** NPC・オブジェクト・ボス・中ボスのいずれかがマスを占有しているか */
 export function isOccupied(map: MapDefinition, position: Position): boolean {
-  return npcAt(map, position) !== null || objectAt(map, position) !== null || bossAt(map, position) !== null;
+  return (
+    npcAt(map, position) !== null ||
+    objectAt(map, position) !== null ||
+    bossAt(map, position) !== null ||
+    midBossAt(map, position) !== null
+  );
 }
 
 /** そのマスにプレイヤーが立てるか(範囲内・地形非solid・占有物なし) */

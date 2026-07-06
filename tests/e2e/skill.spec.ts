@@ -60,12 +60,18 @@ function posKey(p: Position): string {
   return `${p.x},${p.y}`;
 }
 
-/** BFSで最寄りの敵シンボルへの経路(開始位置含む)を求める(battle.spec.ts と同じ) */
-function pathToNearestSymbol(
+/**
+ * BFSで、条件に合う「対象」敵シンボルへの最短経路(開始位置含む)を求める。
+ * - 対象シンボル(isTarget)はゴール。対象外のシンボルは踏むと別の戦闘が始まるため壁扱いにする
+ *   (M10 でフィールドのプールが 霧狼+迷い火 に拡張されたため、目的の敵種だけを狙う)。
+ */
+function pathToTargetSymbol(
   start: Position,
-  symbols: readonly EnemySymbolPlacement[]
+  symbols: readonly EnemySymbolPlacement[],
+  isTarget: (s: EnemySymbolPlacement) => boolean
 ): Position[] | null {
-  const isSymbol = (p: Position): boolean => symbols.some((s) => samePosition(s.position, p));
+  const symbolAt = (p: Position): EnemySymbolPlacement | undefined =>
+    symbols.find((s) => samePosition(s.position, p));
   const queue: Position[] = [start];
   const visited = new Set<string>([posKey(start)]);
   const prev = new Map<string, Position>();
@@ -86,10 +92,12 @@ function pathToNearestSymbol(
       const next = neighbor(current, dir);
       const key = posKey(next);
       if (visited.has(key)) continue;
-      if (isSymbol(next)) {
+      const sym = symbolAt(next);
+      if (sym && isTarget(sym)) {
         prev.set(key, current);
         return rebuild(next);
       }
+      if (sym) continue; // 対象外シンボルは踏まない(別戦闘の回避)=壁扱い
       if (!isWalkable(fieldMap, next)) continue;
       visited.add(key);
       prev.set(key, current);
@@ -137,9 +145,13 @@ test("スキルスモーク: 澱み斬りでMPを消費し、霧狼に毒を付�
   await page.keyboard.up("ArrowDown");
   await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("exploration");
 
-  // --- 最寄りの霧狼へ接触して戦闘開始 ---
+  // --- 霧狼(HP20)へ接触して戦闘開始 ---
+  // 澱み斬り(Lv3で13-17ダメージ)で倒れず生存し毒付与を観測するため、HPの低い迷い火(HP16)ではなく
+  // 霧狼を狙う(M10でフィールドのプールが 霧狼+迷い火 に拡張されたため敵種を明示的に選ぶ)。
   const start = await readPlayerPosition(page);
-  const route = pathToNearestSymbol(start, symbols);
+  const mistWolves = symbols.filter((s) => s.enemyId === "mist-wolf");
+  expect(mistWolves.length, "seed=42 のフィールドに霧狼が居ること").toBeGreaterThan(0);
+  const route = pathToTargetSymbol(start, symbols, (s) => s.enemyId === "mist-wolf");
   expect(route, "霧狼への接触経路が見つかること").not.toBeNull();
   const path = route as Position[];
   for (let i = 0; i < path.length - 1; i += 1) {

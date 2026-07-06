@@ -18,7 +18,14 @@ export const enemyMoveIdSchema = z.enum([
   "gear-grind", // ボス: 歯車の軋み
   "devour", // ボス: 貪り(高倍率)
   "nightmare-spew", // ボス: 悪夢の吐瀉(毒)
-  "frenzy" // ボス第2形態: 飢餓の暴走(最高倍率)
+  "frenzy", // ボス第2形態: 飢餓の暴走(最高倍率)
+  // --- M10拡張(world-lore.md 4.1節) ---
+  "flame-flick", // 迷い火: 火の粉(通常)
+  "flare-up", // 迷い火: 燃え上がり(高倍率)
+  "whisper", // 囁き仮面: 囁き(通常)
+  "rust-gnaw", // 錆喰い: 錆びた顎(通常)
+  "thread-lash", // 紡ぎ損ない: 解れ糸の鞭
+  "unravel" // 紡ぎ損ない第2形態: 締めあげ(高倍率)
 ]);
 export type EnemyMoveId = z.infer<typeof enemyMoveIdSchema>;
 
@@ -49,7 +56,14 @@ export const ENEMY_MOVES: Record<EnemyMoveId, EnemyMoveDefinition> = {
     powerMultiplier: 1.0,
     inflicts: "poison"
   },
-  frenzy: { id: "frenzy", flavor: "は飢えのままに暴れ狂った。", powerMultiplier: 1.7 }
+  frenzy: { id: "frenzy", flavor: "は飢えのままに暴れ狂った。", powerMultiplier: 1.7 },
+  // --- M10拡張 ---
+  "flame-flick": { id: "flame-flick", flavor: "は青白い火の粉を撒いた。", powerMultiplier: 1.0 },
+  "flare-up": { id: "flare-up", flavor: "は音もなく燃え上がった。", powerMultiplier: 1.35 },
+  whisper: { id: "whisper", flavor: "は聞き取れない声で囁いた。", powerMultiplier: 1.0 },
+  "rust-gnaw": { id: "rust-gnaw", flavor: "は錆びた顎で軋み噛んだ。", powerMultiplier: 1.05 },
+  "thread-lash": { id: "thread-lash", flavor: "は解れた糸を鞭のように振るった。", powerMultiplier: 1.1 },
+  unravel: { id: "unravel", flavor: "は喪った糸を手繰り寄せ、軋みながら締めあげた。", powerMultiplier: 1.5 }
 };
 
 // ---------------------------------------------------------------------------
@@ -163,6 +177,77 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     reward: {
       xp: 120,
       gold: { min: 100, max: 100 }
+    }
+  },
+  // ---------------------------------------------------------------------------
+  // M10拡張(world-lore.md 4.1節)。数値・行動・報酬は既存敵・成長表(stats.ts)と整合。
+  // ---------------------------------------------------------------------------
+  // 迷い火(フィールド雑魚。推奨Lv1-2)— 霧狼と同じ最序盤帯。速いが脆く低防御で、
+  // Lv1の通常攻撃で数ターン以内に確実に倒せる(combat-balance で担保)。
+  "wisp-flame": {
+    id: "wisp-flame",
+    displayName: "迷い火",
+    stats: { maxHP: 16, maxMP: 0, attack: 7, defense: 1, speed: 10 },
+    isBoss: false,
+    phases: [{ hpThreshold: 1.0, rotation: ["flame-flick", "flame-flick", "flare-up"] }],
+    reward: {
+      xp: 5,
+      gold: { min: 4, max: 8 },
+      drop: { itemId: "potion-small", chance: 0.15 }
+    }
+  },
+  // 囁き仮面(ダンジョン浅層雑魚。推奨Lv2-3)— 霧狼と蝋燭喰らいの中間帯。
+  "whisper-mask": {
+    id: "whisper-mask",
+    displayName: "囁き仮面",
+    stats: { maxHP: 30, maxMP: 0, attack: 10, defense: 5, speed: 9 },
+    isBoss: false,
+    phases: [{ hpThreshold: 1.0, rotation: ["whisper", "heavy"] }],
+    reward: {
+      xp: 11,
+      gold: { min: 8, max: 14 },
+      drop: { itemId: "potion-small", chance: 0.25 }
+    }
+  },
+  // 錆喰い(ダンジョン深層雑魚。推奨Lv3-4)— 軋み人形と同格〜やや上。鈍足だが高防御・高火力。
+  "rust-eater": {
+    id: "rust-eater",
+    displayName: "錆喰い",
+    stats: { maxHP: 54, maxMP: 0, attack: 13, defense: 8, speed: 5 },
+    isBoss: false,
+    phases: [{ hpThreshold: 1.0, rotation: ["rust-gnaw", "gear-grind", "heavy"] }],
+    reward: {
+      xp: 18,
+      gold: { min: 14, max: 24 },
+      drop: { itemId: "antidote", chance: 0.2 }
+    }
+  },
+  // 紡ぎ損ない(ダンジョン2層の中ボス。推奨Lv4-5)— isBoss=false(メインクエスト進行を誘発しない)。
+  // 2形態(HP50%以下で行動変化)。夢喰いより弱いが雑魚より格上。固定配置・リスポーンなし。
+  "failing-spinner": {
+    id: "failing-spinner",
+    displayName: "紡ぎ損ない",
+    stats: { maxHP: 96, maxMP: 0, attack: 15, defense: 9, speed: 8 },
+    isBoss: false,
+    phases: [
+      {
+        hpThreshold: 1.0,
+        rotation: ["thread-lash", "heavy"]
+      },
+      {
+        hpThreshold: 0.5,
+        rotation: ["unravel", "heavy", "thread-lash"],
+        transition: {
+          // world-lore 4.1節「怒りではなく、止まれないことへの疲弊」
+          message:
+            "――紡錘が、ひときわ高く軋んだ。\n垂れた糸が音もなく焼け落ち、剥き出しの錘が逆しまに回りだす。\n正しく紡ぐことを、それはもう思い出せない。"
+        }
+      }
+    ],
+    reward: {
+      xp: 55,
+      gold: { min: 40, max: 60 },
+      drop: { itemId: "potion-mid", chance: 0.5 }
     }
   }
 };

@@ -13,6 +13,9 @@ import {
   advanceDay,
   applyPartyWipe,
   bossAt,
+  midBossAt,
+  isMidBossEnemyId,
+  midBossDefeatFlag,
   buyPriceOf,
   countOf,
   createBattle,
@@ -142,6 +145,10 @@ const BOSS_GATE_LINE =
 
 /** 撃破後にボスの在った場所へ近づいた時のスクリプト(再戦不可) */
 const BOSS_DEFEATED_LINE = "裂け目の奥は、もう静かだ。飢えは終わり、ただ青灰の凪だけが残っている。";
+
+/** 中ボス撃破後にその場所へ近づいた時のスクリプト(再戦不可。M10) */
+const MID_BOSS_DEFEATED_LINE =
+  "崩れた織機の残骸が、糸を垂らしたまま動かない。空回りは、もう止まっている。";
 
 export class GameSession {
   private readonly saveStore: SaveStore;
@@ -411,6 +418,10 @@ export class GameSession {
     const boss = bossAt(map, target);
     if (boss !== null) return this.approachBoss(boss);
 
+    // 中ボスマーカーへの踏み込み = 中ボス戦(占有マス。撃破済みなら定型 dialog。M10)
+    const midBoss = midBossAt(map, target);
+    if (midBoss !== null) return this.approachMidBoss(midBoss);
+
     const result = tryMove(map, state.location.position, direction);
     if (result.moved) {
       state.location.position = result.position;
@@ -452,6 +463,22 @@ export class GameSession {
       return [this.snapshotMsg(), this.dialogMsg(null, BOSS_GATE_LINE)];
     }
     this.beginBossBattle(boss.enemyId);
+    return [this.snapshotMsg()];
+  }
+
+  /**
+   * 中ボスマーカーへの接触処理(M10。最終ボスと別枠):
+   * - 撃破済み(gimmicks に記録あり): 非アクティブ。定型 dialog で戻す(再戦不可)
+   * - 未撃破: 中ボス戦を開始(beginBossBattle と同経路。isBoss=false なのでメインクエスト進行・
+   *   エンディングは誘発しない。逃走は敵定義どおり可能)
+   * approachBoss と同様、move からの呼び出しで移動ロックが固まらないよう snapshot を必ず先に返す。
+   */
+  private approachMidBoss(midBoss: BossMarker): ServerMessage[] {
+    const state = this.requireState();
+    if (state.gimmicks.includes(midBossDefeatFlag(midBoss.enemyId))) {
+      return [this.snapshotMsg(), this.dialogMsg(null, MID_BOSS_DEFEATED_LINE)];
+    }
+    this.beginBossBattle(midBoss.enemyId);
     return [this.snapshotMsg()];
   }
 
@@ -514,6 +541,11 @@ export class GameSession {
         state.subQuests = recordHuntKill(state.subQuests, enemyId);
         // 撃破したシンボルを除去(再入場でリスポーン)
         if (this.battleSymbolIndex !== null) this.symbols.splice(this.battleSymbolIndex, 1);
+        // 中ボス撃破: gimmicks に記録(リスポーンなし)。isBoss=false なのでメインクエストは進めない。
+        // 永続化は次回セーブ時(宝箱の開封と同じ扱い。game-design.md「敵バリエーション(拡張: M10)」)。
+        if (isMidBossEnemyId(enemyId) && !state.gimmicks.includes(midBossDefeatFlag(enemyId))) {
+          state.gimmicks.push(midBossDefeatFlag(enemyId));
+        }
         this.endBattle();
         if (overflowed) {
           dialogs.push(this.dialogMsg(null, "戦利品は手に余り、いくらかは夢に溶けて消えた。(持ちきれなかった)"));
@@ -1366,6 +1398,10 @@ export class GameSession {
     for (const object of map.objects) {
       if (object.kind === "chest" && state.gimmicks.includes(object.id)) ids.push(object.id);
       else if (object.kind === "gather" && this.gatheredThisVisit.has(object.id)) ids.push(object.id);
+    }
+    // 中ボス撃破フラグも載せる(クライアントが中ボスマーカーを非表示にするため。M10)
+    if (map.midBoss && state.gimmicks.includes(midBossDefeatFlag(map.midBoss.enemyId))) {
+      ids.push(midBossDefeatFlag(map.midBoss.enemyId));
     }
     return ids;
   }

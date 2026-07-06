@@ -24,7 +24,12 @@ const ENEMY_COLORS: Record<EnemyId, number> = {
   "mist-wolf": 0x9aa7b8,
   "candle-eater": 0xc9a25c,
   "creaking-doll": 0x8a7f8f,
-  "dream-eater": 0x5c2431
+  "dream-eater": 0x5c2431,
+  // M10拡張(グラフィックは M10-2。それまではこのプレースホルダー色で退避描画)
+  "wisp-flame": 0x8fbfe0,
+  "whisper-mask": 0xd8d2c4,
+  "rust-eater": 0x8a5a3c,
+  "failing-spinner": 0x6e5560
 };
 
 /** 敵グラフィックの表示スロット高さ(通常/ボス)。画像は縦横比維持で収める */

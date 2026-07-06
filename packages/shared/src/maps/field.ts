@@ -45,5 +45,6 @@ export const fieldMap: MapDefinition = mapDefinitionSchema.parse({
     { id: "field-gather-ore", kind: "gather", position: { x: 18, y: 3 }, message: "崩れた岩の間に、鈍く光る鉱石の露頭がある。" },
     { id: "field-sign-post", kind: "sign", position: { x: 5, y: 12 }, message: "朽ちた道標。文字は掠れ、行き先はもう読めない。" }
   ],
-  enemySymbols: { min: 2, max: 3, species: ["mist-wolf"] }
+  // 霧狼 + 迷い火(M10。序盤帯の雑魚2種。レンジ2-3は不変)
+  enemySymbols: { min: 2, max: 3, species: ["mist-wolf", "wisp-flame"] }
 });

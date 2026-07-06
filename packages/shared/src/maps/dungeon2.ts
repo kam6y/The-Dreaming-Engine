@@ -45,5 +45,9 @@ export const dungeon2Map: MapDefinition = mapDefinitionSchema.parse({
     { id: "d2-sign", kind: "sign", position: { x: 6, y: 4 }, message: "同じ扉が二度現れる。夢が夢であることを、もう隠さない。" },
     { id: "d2-chest", kind: "chest", position: { x: 17, y: 6 }, message: "天井のはずの場所に、なぜか小箱が伏せて置かれている。" }
   ],
-  enemySymbols: { min: 2, max: 6, species: ["candle-eater", "creaking-doll"] }
+  // 蝋燭喰らい/軋み人形 + 囁き仮面/錆喰い(M10。浅層と深層をつなぐ移行帯。レンジ2-6は不変)
+  enemySymbols: { min: 2, max: 6, species: ["candle-eater", "creaking-doll", "whisper-mask", "rust-eater"] },
+  // 中ボス「紡ぎ損ない」(M10)。背骨道 x=11 を外れた右側の側室 (17,8) に固定配置(占有マーカー)。
+  // 撃破状態はセーブ gimmicks に記録し、リスポーンしない(game-design.md「敵バリエーション(拡張: M10)」)。
+  midBoss: { position: { x: 17, y: 8 }, enemyId: "failing-spinner" }
 });

@@ -11,6 +11,7 @@ import {
   createNewGameState,
   emptyInventory,
   gameStateSchema,
+  MAPS,
   samePosition,
   sellPriceOf,
   statsForLevel
@@ -426,8 +427,10 @@ describe("敵シンボルと戦闘開始", () => {
     const view = firstSnapshot(await session.handle({ type: "continue" }));
     expect(view.symbols.length).toBeGreaterThanOrEqual(2);
     expect(view.symbols.length).toBeLessThanOrEqual(3);
+    // フィールドのプールは 霧狼+迷い火(M10)。敵種はプール内であることを検証する
+    const fieldSpecies = MAPS.field.enemySymbols?.species ?? [];
     for (const symbol of view.symbols) {
-      expect(symbol.enemyId).toBe("mist-wolf");
+      expect(fieldSpecies).toContain(symbol.enemyId);
       expect(samePosition(symbol.position, view.location.position)).toBe(false);
     }
   });
@@ -801,6 +804,99 @@ describe("メインクエスト進行(司祭・ボス・エンディング)", ()
     state.mainQuestStage = "dream-eater-defeated";
     return state;
   }
+});
+
+// ===========================================================================
+// 中ボス「紡ぎ損ない」(M10。dungeon-2 の固定占有マーカー)
+// ===========================================================================
+
+describe("中ボス(紡ぎ損ない)", () => {
+  const MID_BOSS_FLAG = "midboss:failing-spinner";
+
+  /** dungeon-2 の中ボス (17,8) の西隣 (16,8) 向き right に立つ(踏み込みで戦闘)。noSymbols 既定 true */
+  async function midBossSession(opts?: { level?: number; state?: GameState }): Promise<SessionContext> {
+    const ctx = createSession();
+    let state: GameState;
+    if (opts?.state !== undefined) {
+      state = opts.state;
+    } else {
+      state = createNewGameState();
+      state.location = { mapId: "dungeon-2", position: { x: 16, y: 8 }, facing: "right" };
+      const level = opts?.level ?? 10;
+      const stats = statsForLevel(level);
+      state.player = { level, xp: 0, hp: stats.maxHP, mp: stats.maxMP, gold: 50 };
+    }
+    ctx.store.loadResult = { ok: true, state };
+    await ctx.session.handle({ type: "continue" });
+    return ctx;
+  }
+
+  async function fightToVictory(session: GameSession): Promise<ServerMessage[]> {
+    let last: ServerMessage[] = [];
+    let rounds = 0;
+    while (mustView(session).mode === "battle") {
+      last = await session.handle({ type: "battle-command", command: { kind: "attack" } });
+      rounds += 1;
+      if (rounds > 40) throw new Error("中ボス戦が終わらない(想定外)");
+    }
+    if (!battleEventsOf(last).events.some((e) => e.type === "victory")) {
+      throw new Error("中ボス戦に勝てなかった(Lv10 前提が崩れている)");
+    }
+    return last;
+  }
+
+  it("踏み込みで中ボス戦が始まる(isBoss=false・enemyId=failing-spinner)", async () => {
+    const { session } = await midBossSession({ level: 10 });
+    const snap = firstSnapshot(await session.handle({ type: "move", direction: "right" }));
+    expect(snap.mode).toBe("battle");
+    expect(snap.battle?.enemyId).toBe("failing-spinner");
+    expect(snap.battle?.isBoss).toBe(false); // メインクエスト進行・エンディングを誘発しない
+    // 占有マスなので位置は据え置き(通常移動しない)
+    expect(mustState(session).location.position).toEqual({ x: 16, y: 8 });
+  });
+
+  it("撃破で gimmicks に記録・メインクエストは進めず・マーカー非表示・再戦不可", async () => {
+    const { session } = await midBossSession({ level: 10 });
+    const before = mustState(session).mainQuestStage;
+    await session.handle({ type: "move", direction: "right" }); // 中ボス戦開始
+    const last = await fightToVictory(session);
+    const finalSnap = firstSnapshot(last);
+
+    // 探索へ復帰・撃破フラグが gimmicks に記録される
+    expect(finalSnap.mode).toBe("exploration");
+    expect(mustState(session).gimmicks).toContain(MID_BOSS_FLAG);
+    // メインクエストは進まない(最終ボスと違いエンディング非誘発)
+    expect(mustState(session).mainQuestStage).toBe(before);
+    expect(mustState(session).mainQuestStage).not.toBe("dream-eater-defeated");
+    // クライアントのマーカー非表示用に resolvedObjectIds へ載る
+    expect(finalSnap.resolvedObjectIds).toContain(MID_BOSS_FLAG);
+
+    // 再接触では戦闘にならず定型 dialog で戻る(リスポーンなし)
+    const again = await session.handle({ type: "move", direction: "right" });
+    expect(dialogsOf(again)).toHaveLength(1);
+    expect(dialogsOf(again)[0]?.body).toContain("空回り");
+    expect(firstSnapshot(again).mode).toBe("exploration");
+    expect(mustView(session).mode).toBe("exploration");
+  });
+
+  it("撃破済みフラグを持つセーブをロードすると最初から非アクティブ(占有dialogのみ)", async () => {
+    const saved = createNewGameState();
+    saved.location = { mapId: "dungeon-2", position: { x: 16, y: 8 }, facing: "right" };
+    saved.gimmicks = [MID_BOSS_FLAG];
+    const { session } = await midBossSession({ state: saved });
+    const msgs = await session.handle({ type: "move", direction: "right" });
+    expect(dialogsOf(msgs)).toHaveLength(1);
+    expect(dialogsOf(msgs)[0]?.body).toContain("空回り");
+    expect(firstSnapshot(msgs).mode).toBe("exploration");
+    expect(firstSnapshot(msgs).resolvedObjectIds).toContain(MID_BOSS_FLAG);
+  });
+
+  it("背骨道 x=11 を塞がない(中ボスは側室 (17,8) に配置)", async () => {
+    // 中ボス位置が背骨道(x=11)上でないこと=移動スモーク・通しプレイの南下を妨げない
+    const midBoss = MAPS["dungeon-2"].midBoss;
+    expect(midBoss?.position.x).not.toBe(11);
+    expect(midBoss?.enemyId).toBe("failing-spinner");
+  });
 });
 
 // ===========================================================================

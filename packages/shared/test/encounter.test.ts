@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   createRng,
   fieldMap,
+  dungeon1Map,
+  dungeon2Map,
   dungeon3Map,
   isWalkable,
   mapDefinitionSchema,
   sampleEnemySymbols,
+  samePosition,
   townMap,
+  MID_BOSS_ENEMY_IDS,
   RESPAWNABLE_ENEMY_IDS
 } from "../src/index.js";
-import type { MapDefinition, Position } from "../src/index.js";
+import type { EnemyId, MapDefinition, Position } from "../src/index.js";
 
 function forbidden(map: MapDefinition): Position[] {
   const list: Position[] = map.transitions.map((t) => t.position);
@@ -117,5 +121,64 @@ describe("sampleEnemySymbols(敵シンボル配置)", () => {
     const a = sampleEnemySymbols(dungeon3Map, createRng(2024));
     const b = sampleEnemySymbols(dungeon3Map, createRng(2024));
     expect(a).toEqual(b);
+  });
+
+  // -------------------------------------------------------------------------
+  // M10: 新雑魚の出現とレンジ不変・中ボスの非出現
+  // -------------------------------------------------------------------------
+
+  /** 複数シードで実際に出現した敵種の集合を返す(存在検証用。メンバーシップだけでは
+   *  RESPAWNABLE 未登録で暗黙除外されても検知できないため、実出現を確認する) */
+  function speciesSeenAcross(map: MapDefinition, seeds: number): Set<EnemyId> {
+    const seen = new Set<EnemyId>();
+    for (let seed = 1; seed <= seeds; seed += 1) {
+      for (const p of sampleEnemySymbols(map, createRng(seed))) seen.add(p.enemyId);
+    }
+    return seen;
+  }
+
+  it("M10新雑魚は各出現マップで実際に湧く(単なるプール登録でなく出現を確認)", () => {
+    // フィールド: 霧狼 + 迷い火 の両方が出る
+    const field = speciesSeenAcross(fieldMap, 100);
+    expect(field).toContain("wisp-flame");
+    expect(field).toContain("mist-wolf");
+    // 1層: 蝋燭喰らい + 囁き仮面
+    expect(speciesSeenAcross(dungeon1Map, 100)).toContain("whisper-mask");
+    // 2層: 囁き仮面 + 錆喰い(と既存2種)
+    const d2 = speciesSeenAcross(dungeon2Map, 100);
+    expect(d2).toContain("whisper-mask");
+    expect(d2).toContain("rust-eater");
+    // 3層: 錆喰い
+    expect(speciesSeenAcross(dungeon3Map, 100)).toContain("rust-eater");
+  });
+
+  it("シンボル数レンジは各マップとも不変(フィールド2-3・ダンジョン各層2-6)", () => {
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const f = sampleEnemySymbols(fieldMap, createRng(seed));
+      expect(f.length).toBeGreaterThanOrEqual(2);
+      expect(f.length).toBeLessThanOrEqual(3);
+      for (const map of [dungeon1Map, dungeon2Map, dungeon3Map]) {
+        const p = sampleEnemySymbols(map, createRng(seed));
+        expect(p.length).toBeGreaterThanOrEqual(2);
+        expect(p.length).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+
+  it("中ボス(紡ぎ損ない)はサンプリングで出現しない=固定占有マーカーのみ", () => {
+    const midBossPos = dungeon2Map.midBoss?.position;
+    expect(midBossPos).toBeDefined();
+    for (const map of [dungeon1Map, dungeon2Map, dungeon3Map, fieldMap]) {
+      for (let seed = 1; seed <= 100; seed += 1) {
+        for (const p of sampleEnemySymbols(map, createRng(seed))) {
+          // 中ボス種は湧かない
+          for (const midId of MID_BOSS_ENEMY_IDS) expect(p.enemyId).not.toBe(midId);
+          // 中ボスの占有マス(非walkable)にはシンボルが載らない
+          if (midBossPos && map === dungeon2Map) {
+            expect(samePosition(p.position, midBossPos)).toBe(false);
+          }
+        }
+      }
+    }
   });
 });
