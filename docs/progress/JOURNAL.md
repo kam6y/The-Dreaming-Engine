@@ -1257,3 +1257,40 @@
   `getSeVolume`/`setSeVolume`(0..1)。BGMは別系統(ループ/フェード)として追加し、
   BGM音量とSE音量を別スライダーにするのが素直。M12完了時に `pnpm test:e2e:full` 緑+
   BACKLOG「効果音・BGMの整備」へチェック
+
+## [42] 2026-07-07 M12-3: BGM同梱・シーン別切替・音量/ミュート設定UI(M12完了)
+
+- やったこと(素材同梱・BGM基盤・設定UI=オーケストレーター自身が実装):
+  - BGM5曲を同梱(Kevin MacLeod / incompetech.com、**CC-BY 4.0=帰属表記必須**。
+    assets/audio/README.md とルート README のクレジット節に帰属を記録):
+    bgm-title(Long Note One)/bgm-town(Ossuary 6 - Air)/bgm-field(Penumbra)/
+    bgm-dungeon(The Dread)/bgm-battle(Volatile Reaction)。ffmpegで112kbps・
+    **120秒+フェードアウトへトリム**(容量8.3MB・デコード時間削減。ループの継ぎ目は
+    フェード終端でハードカット=聴感確認は人間待ち)
+  - audio.ts拡張: playBgm(ループ・フェードイン・切替時の旧曲停止・ロック解除後開始・
+    「切替済みなら古い解除予約は再生しない」ゲート)/stopBgm/音量・ミュート
+    (SE/BGM別音量+マスターミュート。localStorageへ永続化・復元)
+  - **重要な学び(E2E赤→修正)**: 当初BGMをpreloadで読み込んだところ、WebAudioの
+    デコード(当初20MB)がpreloadを数十秒塞ぎ、E2Eのタイトル操作が間に合わず10/12が赤に。
+    **requestBgm(遅延読み込み)**へ変更: preloadではSEのみ読み込み、BGMはシーンが
+    要求した時にシーンのローダーでバックグラウンド読み込み→完了時に「まだその曲が
+    望まれているか(desiredBgm)」を確認して再生。E2E 12/12緑へ回復
+  - シーン配線: タイトル=bgm-title(オープニングへ継続)/探索=マップ区分で
+    town/field/dungeon/戦闘=bgm-battle(終了時は探索createが戻す)
+  - 設定UI(SettingsOverlay): タイトルメニューに「設定」を追加(3項目目=既存E2Eの
+    カーソル位置に影響なし)。BGM音量・効果音音量(20%刻み巡回)・ミュート(トグル)・
+    とじる。変更は再生中のBGMへ即時反映+localStorage永続化。実プレイで
+    変更→保存(bgmVolume 0.2/muted true)をスクリーンショット+localStorageで確認
+  - テスト11件追加(BGM id/パス・切替・ロック解除・古い予約の破棄・音量/ミュート反映・
+    requestBgmのゲート。unit 728)
+- 検証: `pnpm check` 緑(unit 728)・`pnpm test:e2e` 12/12緑・
+  **`pnpm test:e2e:full` 2/2緑**(M12完了のマイルストーンゲート)
+- **M12完了**: BACKLOG「効果音・BGMの整備」にチェック
+- 人間確認待ち: BGM・SEの聴感(音量バランス・トリムしたループの継ぎ目)。
+  差し替えは assets/audio/ のファイル置換+台帳更新のみで可能
+- 次にやること: BACKLOG次点(優先度: 高)「タイルマップ上のNPCや主人公、敵、
+  一マス構造物の絵のcodex生成と反映」をM13として展開してから着手
+  (人間が追加した項目。asset-pipeline.mdの「プレイヤー・NPCのマップ上の見た目も
+  プレースホルダー」方針の更新を伴う。1マス=32pxのトップダウンスプライトは
+  タイルマップの方針(グリッド整合性)と衝突しないよう、生成方式(1体ずつ透過生成)を
+  仕様骨子で先に固めること)

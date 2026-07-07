@@ -2,12 +2,14 @@ import Phaser from "phaser";
 
 import { GAME_TITLE, type ClientMessage } from "@dreaming-engine/shared";
 
+import { requestBgm } from "../audio.js";
 import { clearDialogQueue } from "../dialog-queue.js";
 import { getGameClient } from "../net/game-client.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { fitCover } from "../ui/cover-image.js";
 import { UI_FONT_FAMILY } from "../ui/font.js";
 import { MenuList } from "../ui/menu-list.js";
+import { SettingsOverlay } from "../ui/settings-overlay.js";
 import { newGameOptionsFromUrl, shouldSkipIntro } from "../url-flags.js";
 
 /**
@@ -37,6 +39,9 @@ export class TitleScene extends Phaser.Scene {
   private veil: Phaser.GameObjects.Rectangle | null = null;
 
   private confirm: ConfirmDialog | null = null;
+
+  /** 音量・ミュートの設定オーバーレイ(「設定」で開閉。M12-3) */
+  private settings: SettingsOverlay | null = null;
 
   /** 接続確立前に選択された場合に接続後へ持ち越す送信待ちメッセージ */
   private pendingMessage: ClientMessage | null = null;
@@ -68,8 +73,12 @@ export class TitleScene extends Phaser.Scene {
     // メニュー・確認ダイアログはタイトル文字より前面に描画する
     this.uiLayer = this.add.container(0, 0).setDepth(10);
     this.confirm = null;
+    this.settings = null;
     this.pendingMessage = null;
     this.requested = false;
+
+    // タイトルBGM(遅延読み込み: preloadを塞がない。ロック中はaudio.ts側で解除後に開始)
+    requestBgm(this, "bgm-title");
 
     this.titleText = this.add
       .text(0, 0, GAME_TITLE, {
@@ -150,7 +159,8 @@ export class TitleScene extends Phaser.Scene {
     this.menu = new MenuList(this, this.uiLayer, {
       items: [
         { id: "new-game", label: "新規ゲーム" },
-        { id: "continue", label: "つづきから", disabled: !hasSave }
+        { id: "continue", label: "つづきから", disabled: !hasSave },
+        { id: "settings", label: "設定" }
       ],
       x: 0,
       y: 0,
@@ -161,8 +171,13 @@ export class TitleScene extends Phaser.Scene {
     });
     this.layout();
     if (wasActive || this.scene.isActive()) {
-      // 確認ダイアログ表示中・要求送信中はメニューを受け付けない
-      if (this.confirm === null && !this.requested && this.pendingMessage === null) {
+      // 確認ダイアログ・設定表示中・要求送信中はメニューを受け付けない
+      if (
+        this.confirm === null &&
+        this.settings === null &&
+        !this.requested &&
+        this.pendingMessage === null
+      ) {
         this.menu.activate();
       }
     }
@@ -180,6 +195,23 @@ export class TitleScene extends Phaser.Scene {
     if (id === "continue") {
       this.request({ type: "continue" });
     }
+    if (id === "settings") {
+      this.openSettings();
+    }
+  }
+
+  /** 音量・ミュートの設定を開く(閉じるとメニューへ戻る。M12-3) */
+  private openSettings(): void {
+    this.menu?.deactivate();
+    this.settings = new SettingsOverlay(this, this.uiLayer, {
+      onClose: () => {
+        this.settings?.destroy();
+        this.settings = null;
+        this.time.delayedCall(0, () => {
+          this.menu?.activate();
+        });
+      }
+    });
   }
 
   /** 既存セーブがある場合の新規ゲーム上書き確認 */

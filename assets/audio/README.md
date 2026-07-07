@@ -35,5 +35,26 @@ id はファイル名(拡張子なし)と一致させる。クライアントは
 
 - 選定はファイル名・パック説明に基づく(聴感の最終確認は人間プレイ待ち。
   差し替えは該当 id のファイルを置き換えて本表を更新するだけでよい)
-- BGM(`bgm/`)は M12-3 で選定・追加する(ループ可能なダークアンビエント。
-  CC0優先、CC-BY の場合は本READMEへ帰属表記を必ず記載する)
+
+## BGM(bgm/)
+
+すべて **Kevin MacLeod (incompetech.com)** の楽曲。ライセンスは **CC BY 4.0**
+(https://creativecommons.org/licenses/by/4.0/)。**帰属表記が必須**であり、
+本READMEとゲームのREADMEに以下のクレジットを維持すること:
+
+> Music by Kevin MacLeod (incompetech.com)
+> Licensed under Creative Commons: By Attribution 4.0 License
+
+2026-07-07 に incompetech.com から取得し、ffmpeg で 112kbps MP3 へ再エンコード
+(尺・内容は無加工)。
+
+| id | 用途 | 原題 |
+|---|---|---|
+| `bgm-title` | タイトル画面(オープニングにも継続) | Long Note One |
+| `bgm-town` | 街(灯町) | Ossuary 6 - Air |
+| `bgm-field` | フィールド(忘れ野) | Penumbra |
+| `bgm-dungeon` | ダンジョン(裂け目 全層) | The Dread |
+| `bgm-battle` | 戦闘 | Volatile Reaction |
+
+- 選定は楽曲説明・タイトルに基づくダークアンビエント志向(聴感の最終確認は
+  人間プレイ待ち。差し替えは該当 id のファイル置換+本表更新でよい)

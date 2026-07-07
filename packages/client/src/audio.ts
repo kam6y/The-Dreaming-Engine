@@ -63,11 +63,119 @@ export function getSeVolume(): number {
 
 /**
  * SE 音量(0〜1)を設定する。範囲外・NaN は丸める。
- * M12-3 の音量設定 UI がこの setter で可変化する(BGM は別系統で追加予定)。
+ * 音量設定 UI(M12-3)がこの setter で変更し、localStorage へ永続化する。
  */
 export function setSeVolume(value: number): void {
   seVolume = clamp01(value);
+  saveSettings();
 }
+
+// ===========================================================================
+// BGM(M12-3)。台帳 assets/audio/README.md の bgm/ 節が正
+// ===========================================================================
+
+/** BGM ID(台帳表と一致。id はファイル名(拡張子なし)) */
+export const BGM_IDS = [
+  "bgm-title", // タイトル(オープニングにも流し続ける)
+  "bgm-town", // 街(灯町)
+  "bgm-field", // フィールド(忘れ野)
+  "bgm-dungeon", // ダンジョン(裂け目 全層)
+  "bgm-battle" // 戦闘
+] as const;
+
+/** BGM ID の型(台帳 5 種のいずれか) */
+export type BgmId = (typeof BGM_IDS)[number];
+
+/** BGM ファイルの配信パス(直接パス。manifest 対象外) */
+export function bgmAssetPath(id: BgmId): string {
+  return `assets/audio/bgm/${id}.mp3`;
+}
+
+/** BGM の既定音量(0〜1)。環境音として控えめに始める(聴感の最終確認は人間プレイ待ち) */
+export const DEFAULT_BGM_VOLUME = 0.4;
+
+/** 現在の BGM 音量(0〜1) */
+let bgmVolume = DEFAULT_BGM_VOLUME;
+
+/** ミュート(SE・BGM 共通のマスター)。オンの間は実効音量 0 として扱う */
+let muted = false;
+
+/** 現在の BGM 音量(0〜1)を返す */
+export function getBgmVolume(): number {
+  return bgmVolume;
+}
+
+/** BGM 音量(0〜1)を設定し、再生中の BGM へ即時反映する */
+export function setBgmVolume(value: number): void {
+  bgmVolume = clamp01(value);
+  applyBgmVolume();
+  saveSettings();
+}
+
+/** ミュート中か */
+export function isMuted(): boolean {
+  return muted;
+}
+
+/** ミュート(SE・BGM 共通)を設定し、再生中の BGM へ即時反映する */
+export function setMuted(value: boolean): void {
+  muted = value;
+  applyBgmVolume();
+  saveSettings();
+}
+
+/** ミュートを反転して新しい状態を返す(設定 UI のトグル用) */
+export function toggleMuted(): boolean {
+  setMuted(!muted);
+  return muted;
+}
+
+// ---------------------------------------------------------------------------
+// 設定の永続化(localStorage。非ブラウザ環境・失敗時は黙って既定値のまま)
+// ---------------------------------------------------------------------------
+
+const AUDIO_SETTINGS_KEY = "dreaming-engine.audio";
+
+/** 現在の音量・ミュート設定を localStorage へ保存する(失敗は無害) */
+function saveSettings(): void {
+  try {
+    globalThis.localStorage?.setItem(
+      AUDIO_SETTINGS_KEY,
+      JSON.stringify({ seVolume, bgmVolume, muted })
+    );
+  } catch {
+    // プライベートモード等で保存できなくても進行に影響しない
+  }
+}
+
+/** localStorage から音量・ミュート設定を読み込む(型が崩れていても既定値で続行) */
+function loadSettings(): void {
+  try {
+    const raw = globalThis.localStorage?.getItem(AUDIO_SETTINGS_KEY);
+    if (raw === null || raw === undefined) {
+      return;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) {
+      return;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (typeof record["seVolume"] === "number") {
+      seVolume = clamp01(record["seVolume"]);
+    }
+    if (typeof record["bgmVolume"] === "number") {
+      bgmVolume = clamp01(record["bgmVolume"]);
+    }
+    if (typeof record["muted"] === "boolean") {
+      muted = record["muted"];
+    }
+  } catch {
+    // 壊れた保存値は無視して既定値で続行
+  }
+}
+
+// モジュール読み込み時に一度だけ復元する(非ブラウザ環境ではガードにより何もしない)
+loadSettings();
 
 /**
  * playSe が必要とする Phaser Scene の最小構造。
@@ -114,7 +222,7 @@ export function playSe(scene: SoundScene | undefined | null, id: SeId): void {
     if (sound.locked) {
       return;
     }
-    const volume = clamp01(seVolume);
+    const volume = muted ? 0 : clamp01(seVolume);
     if (volume <= 0) {
       return;
     }
@@ -122,5 +230,180 @@ export function playSe(scene: SoundScene | undefined | null, id: SeId): void {
   } catch (error) {
     // 演出である SE の失敗はゲーム進行を止めない(画像プレースホルダーと同じ思想)
     console.warn(`[audio] 効果音の再生に失敗しました: ${id}`, error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BGM の再生(ループ・フェードイン・シーン跨ぎの一元管理)
+// ---------------------------------------------------------------------------
+
+/** playBgm が扱う BGM サウンドの最小構造(Phaser.Sound.BaseSound が適合する) */
+export interface BgmSound {
+  play(): unknown;
+  stop(): unknown;
+  setVolume(value: number): unknown;
+}
+
+/**
+ * playBgm が必要とする Phaser Scene の最小構造(SoundScene の拡張)。
+ * Phaser.Scene が構造的に適合する。テストではフェイクを注入する。
+ */
+export interface BgmScene {
+  sound: {
+    readonly locked: boolean;
+    /** ループ再生する BGM サウンドを生成する */
+    add(key: string, config?: { loop?: boolean; volume?: number }): BgmSound;
+    /** WebAudio のロック解除(初回ユーザー操作)を一度だけ待つ */
+    once(event: "unlocked", handler: () => void): unknown;
+  };
+  cache: {
+    audio: {
+      exists(key: string): boolean;
+    };
+  };
+  /** フェードイン用(シーン破棄で止まっても実害がないため任意) */
+  tweens?: {
+    add(config: {
+      targets: unknown;
+      volume: number;
+      duration: number;
+      ease?: string;
+    }): unknown;
+  };
+}
+
+/** 再生中の BGM(サウンドマネージャはゲーム全体で共有のため、モジュールで一元管理する) */
+let currentBgm: { id: BgmId; sound: BgmSound } | null = null;
+
+/** ミュートを織り込んだ BGM の実効音量 */
+function effectiveBgmVolume(): number {
+  return muted ? 0 : clamp01(bgmVolume);
+}
+
+/** 音量・ミュート変更を再生中の BGM へ反映する(未再生なら何もしない) */
+function applyBgmVolume(): void {
+  try {
+    currentBgm?.sound.setVolume(effectiveBgmVolume());
+  } catch {
+    // 破棄済みサウンドへの適用失敗は無害
+  }
+}
+
+/**
+ * BGM を切り替える(フェイルセーフ)。同じ id が再生中なら何もしない。
+ * 未ロード・音声無効環境では無音で続行し、WebAudio ロック中は解除時に再生を開始する。
+ * 切替は旧BGMを即停止し、新BGMを音量0から実効音量へ短くフェードインする
+ * (フェードは tweens が使える場合のみ。シーン破棄でフェードが止まっても音量は setVolume 済み想定で無害)。
+ */
+export function playBgm(scene: BgmScene | undefined | null, id: BgmId): void {
+  try {
+    if (scene === undefined || scene === null) {
+      return;
+    }
+    if (currentBgm?.id === id) {
+      applyBgmVolume();
+      return;
+    }
+    const { sound, cache } = scene;
+    if (sound === undefined || cache === undefined) {
+      return;
+    }
+    stopBgm();
+    if (!cache.audio.exists(id)) {
+      return;
+    }
+    const bgm = sound.add(id, { loop: true, volume: effectiveBgmVolume() });
+    currentBgm = { id, sound: bgm };
+    const start = (): void => {
+      try {
+        // 停止→開始の間に別BGMへ切り替わっていたら開始しない(ロック解除待ちの古い予約)
+        if (currentBgm?.sound !== bgm) {
+          return;
+        }
+        bgm.play();
+        // 短いフェードイン(tweens が無い環境では即時に実効音量)
+        const target = effectiveBgmVolume();
+        if (scene.tweens !== undefined && target > 0) {
+          bgm.setVolume(0);
+          scene.tweens.add({ targets: bgm, volume: target, duration: 600, ease: "Linear" });
+        }
+      } catch (error) {
+        console.warn(`[audio] BGMの再生に失敗しました: ${id}`, error);
+      }
+    };
+    if (sound.locked) {
+      // 初回ユーザー操作(ロック解除)後に開始する
+      sound.once("unlocked", start);
+      return;
+    }
+    start();
+  } catch (error) {
+    console.warn(`[audio] BGMの切替に失敗しました: ${id}`, error);
+  }
+}
+
+/** BGM を停止する(未再生なら何もしない。失敗は無害) */
+export function stopBgm(): void {
+  try {
+    currentBgm?.sound.stop();
+  } catch {
+    // 破棄済みサウンドの停止失敗は無害
+  }
+  currentBgm = null;
+}
+
+/** 再生中の BGM id(テスト・デバッグ用。未再生なら null) */
+export function currentBgmId(): BgmId | null {
+  return currentBgm?.id ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// BGM の遅延読み込み(preload をブロックしない。M12-3)
+// ---------------------------------------------------------------------------
+
+/**
+ * requestBgm が必要とするローダーの最小構造(Phaser.Scene の load が適合する)。
+ * BGM はデコードが重い(headless E2E で preload を数十秒塞いだ実績)ため、
+ * 起動時の preload では読み込まず、シーンが要求した時にバックグラウンドで読み込む。
+ */
+export interface BgmLoaderScene extends BgmScene {
+  load: {
+    audio(key: string, url: string): unknown;
+    once(event: string, handler: () => void): unknown;
+    start(): unknown;
+  };
+}
+
+/**
+ * 最後に要求された BGM id。読み込み完了時に「まだこの曲が望まれているか」を確認する
+ * (読み込み中にシーンが変わって別の曲が要求されたら、古い完了通知では再生しない)。
+ */
+let desiredBgm: BgmId | null = null;
+
+/**
+ * BGM を要求する(シーンからの入口)。読み込み済みなら即再生、未読み込みなら
+ * バックグラウンドで読み込み、完了時にまだ要求が生きていれば再生する。
+ * すべてフェイルセーフ(失敗・音声無効環境では無音のままゲームを続行する)。
+ */
+export function requestBgm(scene: BgmLoaderScene | undefined | null, id: BgmId): void {
+  try {
+    if (scene === undefined || scene === null) {
+      return;
+    }
+    desiredBgm = id;
+    if (scene.cache?.audio.exists(id)) {
+      playBgm(scene, id);
+      return;
+    }
+    // 未読み込み: シーンのローダーで非同期に読み込む(create 後でも start() で走る)
+    scene.load.once(`filecomplete-audio-${id}`, () => {
+      if (desiredBgm === id) {
+        playBgm(scene, id);
+      }
+    });
+    scene.load.audio(id, bgmAssetPath(id));
+    scene.load.start();
+  } catch (error) {
+    console.warn(`[audio] BGMの読み込み要求に失敗しました: ${id}`, error);
   }
 }

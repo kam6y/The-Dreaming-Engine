@@ -13,7 +13,7 @@ import {
   type ViewBattle
 } from "@dreaming-engine/shared";
 
-import { playSe } from "../audio.js";
+import { playSe, requestBgm } from "../audio.js";
 import { getGameClient, type BattleEventsPayload, type GameClient } from "../net/game-client.js";
 import { fitContain, fitCover } from "../ui/cover-image.js";
 import { UI_FONT_FAMILY } from "../ui/font.js";
@@ -134,6 +134,7 @@ export class BattleScene extends Phaser.Scene {
     this.buildCommandMenu();
     this.setupKeys();
     this.syncDomState();
+    requestBgm(this, "bgm-battle"); // 戦闘BGM(遅延読み込み。終了時は探索シーンのcreateがマップBGMへ戻す)
 
     this.unsubscribes = [
       client.on("battle-events", (events) => {

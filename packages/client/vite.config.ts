@@ -16,7 +16,8 @@ function serveRepoAssets(): Plugin {
     ".png": "image/png",
     ".json": "application/json",
     ".woff2": "font/woff2",
-    ".ogg": "audio/ogg"
+    ".ogg": "audio/ogg",
+    ".mp3": "audio/mpeg"
   };
   return {
     name: "serve-repo-assets",

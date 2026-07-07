@@ -153,3 +153,20 @@ pnpm test:e2e:full # 通しプレイ(新規→司祭→ダンジョン→夢喰�
 | ![会話(情報屋カイ・霧笛亭)](docs/screenshots/conversation.png) | ![ボス「夢喰い」](docs/screenshots/boss.png) |
 
 ![エンディング](docs/screenshots/ending.png)
+
+## クレジット(サードパーティ素材)
+
+| 素材 | 出典 | ライセンス |
+|---|---|---|
+| 日本語フォント「しっぽり明朝」 | [google/fonts](https://github.com/google/fonts/tree/main/ofl/shipporimincho) | SIL OFL 1.1(`assets/fonts/OFL.txt`) |
+| タイルセット | [Kenney「Roguelike/RPG pack」](https://kenney.nl/assets/roguelike-rpg-pack) | CC0 1.0 |
+| 効果音 | Kenney「RPG Audio」「Interface Sounds」「Music Jingles」 | CC0 1.0 |
+| BGM | Music by Kevin MacLeod ([incompetech.com](https://incompetech.com)) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+
+BGMのクレジット(CC BY 4.0 の帰属表記):
+
+> Music by Kevin MacLeod (incompetech.com)
+> Licensed under Creative Commons: By Attribution 4.0 License
+
+各素材の詳細な台帳は `assets/fonts/README.md`・`assets/tiles/README.md`・
+`assets/audio/README.md` を参照。

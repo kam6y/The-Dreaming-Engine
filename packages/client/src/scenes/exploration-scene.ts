@@ -20,7 +20,7 @@ import {
 
 import type { AiUtteranceEvent } from "../net/game-client.js";
 
-import { playSe } from "../audio.js";
+import { playSe, requestBgm } from "../audio.js";
 import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
 import { getGameClient, type GameClient } from "../net/game-client.js";
 import { TILESET_KEY, TILESET_TILE_PX, tileFrame, tileTint } from "../tile-frames.js";
@@ -268,6 +268,11 @@ export class ExplorationScene extends Phaser.Scene {
 
     this.updateHud();
     this.syncDomState();
+    // マップ区分に応じたBGM(街/フィールド/ダンジョン。M12-3)
+    requestBgm(
+      this,
+      this.map.id === "town" ? "bgm-town" : this.map.id === "field" ? "bgm-field" : "bgm-dungeon"
+    );
     this.cameras.main.fadeIn(200, 11, 13, 18);
   }
 
