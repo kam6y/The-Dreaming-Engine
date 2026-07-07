@@ -370,5 +370,65 @@
     "promptFile": "assets/prompts/failing-spinner-phase2.md",
     "createdAt": "2026-07-06",
     "note": "背景透過。紡ぎ損ない第2形態用"
+  },
+  {
+    "id": "sprite-player",
+    "path": "assets/sprites/sprite-player.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-innkeeper",
+    "path": "assets/sprites/sprite-innkeeper.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-merchant",
+    "path": "assets/sprites/sprite-merchant.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-informant",
+    "path": "assets/sprites/sprite-informant.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-priest",
+    "path": "assets/sprites/sprite-priest.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
   }
 ]
