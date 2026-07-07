@@ -1180,3 +1180,27 @@
   組み込み)」をM12として展開してから着手。JOURNAL[16]で縦切りは無音の判断だった
   経緯があるため、素材選定(CC0/CC-BY)・ライセンス記録(fonts/tilesの台帳方式)・
   音量設定UI・E2Eへの影響(音声はheadlessで無害)を分割の観点にする
+
+## [40] 2026-07-07 M12展開+M12-1: SE素材の選定・同梱と音声アセット方針
+
+- やったこと(BACKLOG「効果音・BGMの整備」をM12として3分割で展開し、M12-1を完了。
+  素材の選定・同梱・台帳=オーケストレーター自身。fonts/tilesと同じCC0同梱方式):
+  - asset-pipeline.mdへ「音声アセットの方針(拡張: M12)」を追記(音声はcodex対象外・
+    オープンライセンス同梱(CC0優先・CC-BYは帰属記録)・台帳は assets/audio/README.md・
+    読み込み失敗や音声無効環境で進行を阻害しないフェイルセーフ)
+  - Kenney CC0 3パック(RPG Audio / Interface Sounds / Music Jingles)から
+    SE12点を選定し assets/audio/se/ へ同梱(id=ファイル名: se-cursor/confirm/cancel/
+    error/attack/skill/damage/heal/coin/door/levelup/victory)。
+    ライセンス文3点(LICENSE-kenney-*.txt)と台帳README(用途・出典の対応表)を整備
+  - 選定はファイル名・パック説明に基づく(**聴感の最終確認は人間プレイ待ち**。
+    差し替えは該当idのファイル置換+台帳更新のみで可能な構造)
+- 検証: `pnpm check` 緑(unit 706)・`pnpm test:e2e` 12/12緑(コード変更なし・
+  アセット+ドキュメントのみ)
+- 次にやること: M12-2(SE再生基盤+配線)をsubagentへ委譲。申し送り:
+  (1) 台帳のid 12種を assets/audio/se/<id>.ogg から直接ロード(manifest対象外。
+  preload-sceneのフォント/タイルセットと同様の直接パス指定)、(2) サウンド
+  マネージャは読み込み失敗・WebAudio無効(ユーザー操作前のautoplay制限含む)で
+  無害にno-op、(3) 配線先の目安: MenuList(カーソル/決定/キャンセル)・
+  battle-scene(attack/skill/damage/levelup/victory)・session応答のerror系・
+  shop売買成立・マップ遷移・回復、(4) E2E(headless)が緑のまま=音声で
+  タイミングを変えない、(5) 音量はまず固定定数(設定UIはM12-3)
