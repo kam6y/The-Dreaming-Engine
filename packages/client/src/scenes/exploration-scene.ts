@@ -666,7 +666,7 @@ export class ExplorationScene extends Phaser.Scene {
   private openInnConfirm(inn: { npcName: string; costGold: number }): void {
     this.pendingInn = null;
     this.innConfirm = new ConfirmDialog(this, this.uiLayer, {
-      message: `一晩 ${inn.costGold}ゴールド。今夜はここで休むか?\n(休むと、今日までの歩みが機関に記録される)`,
+      message: `一晩 ${inn.costGold}ゴールド。今夜はここで休むか?\n(休むと、今日までの歩みが\n機関に記録される)`,
       yesLabel: "泊まる",
       noLabel: "やめる",
       onResult: (yes) => {

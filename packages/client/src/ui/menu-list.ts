@@ -14,6 +14,11 @@ export interface MenuListOptions {
   /** キャンセル時(Esc)。省略時はキャンセル不可 */
   onCancel?: () => void;
   /**
+   * 左右キー(←→/A/D)での値調整(音量等)。省略時は左右キーを扱わない
+   * (不要なメニューが移動用のA/Dを奪わないよう、必要なメニューだけが受け取る)
+   */
+  onAdjust?: (id: string, delta: -1 | 1) => void;
+  /**
    * 初期カーソル位置(省略時は先頭)。無効項目なら以降の有効項目へ送る。
    * リスト再構築(店の売買後の更新等)でカーソル位置を維持するために使う
    */
@@ -146,6 +151,28 @@ export class MenuList {
     };
     on("keydown-SPACE", select);
     on("keydown-ENTER", select);
+    if (this.options.onAdjust !== undefined) {
+      const onAdjust = this.options.onAdjust;
+      const adjust = (delta: -1 | 1): void => {
+        const item = this.options.items[this.index];
+        if (item !== undefined && item.disabled !== true) {
+          playSe(this.scene, "se-cursor");
+          onAdjust(item.id, delta);
+        }
+      };
+      on("keydown-LEFT", () => {
+        adjust(-1);
+      });
+      on("keydown-A", () => {
+        adjust(-1);
+      });
+      on("keydown-RIGHT", () => {
+        adjust(1);
+      });
+      on("keydown-D", () => {
+        adjust(1);
+      });
+    }
     if (this.options.onCancel !== undefined) {
       const cancel = this.options.onCancel;
       on("keydown-ESC", () => {

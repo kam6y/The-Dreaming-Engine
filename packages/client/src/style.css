@@ -64,3 +64,13 @@ h1 {
   opacity: 0.6;
   pointer-events: none;
 }
+
+/* 接続が正常な間は視覚的に隠す(異常時のみ表示: M15-3)。
+   h1 と同じ1pxクリップ方式(E2Eの toBeVisible を維持) */
+#connection-status.connected {
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

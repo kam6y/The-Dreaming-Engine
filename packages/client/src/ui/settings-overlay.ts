@@ -42,9 +42,21 @@ function nextStepVolume(volume: number): number {
 }
 
 /**
+ * 左右キーでの増減(M15-3: UX点検)。VOLUME_STEPS は降順なので、
+ * 右(+1)=1段上げ=添字を減らす。端で止める(巡回しない)
+ */
+function adjustedStepVolume(volume: number, delta: -1 | 1): number {
+  const index = nearestStepIndex(volume);
+  const next = Math.min(VOLUME_STEPS.length - 1, Math.max(0, index - delta));
+  return VOLUME_STEPS[next] ?? 0;
+}
+
+/**
  * 音量・ミュートの設定オーバーレイ(M12-3。タイトルメニュー「設定」から開く)。
- * 各項目は決定(スペース/Enter)で変更する: 音量は20%刻みで巡回、ミュートはトグル。
- * 設定は audio.ts が localStorage へ永続化し、再生中のBGMへ即時反映される。
+ * 音量は左右キー(←→/A/D)で増減(端で停止)、決定(スペース/Enter)で20%刻みの巡回。
+ * ミュートはどちらでもトグル。設定は audio.ts が localStorage へ永続化し、
+ * 再生中のBGMへ即時反映される。
+
  */
 export class SettingsOverlay {
   private readonly scene: Phaser.Scene;
@@ -92,7 +104,7 @@ export class SettingsOverlay {
       .text(
         this.panelX + PANEL_WIDTH - 16,
         this.panelY + 18,
-        "スペース / Enter: 変更 ・ Esc: とじる",
+        "←→: 音量 ・ スペース / Enter: 変更 ・ Esc: とじる",
         {
           color: "#a9b0ba",
           fontFamily: UI_FONT_FAMILY,
@@ -136,6 +148,19 @@ export class SettingsOverlay {
       },
       onCancel: () => {
         this.options.onClose();
+      },
+      // 左右キーで音量を増減する(M15-3。ミュートはトグル、とじるは無視)
+      onAdjust: (id, delta) => {
+        if (id === "bgm") {
+          setBgmVolume(adjustedStepVolume(getBgmVolume(), delta));
+        } else if (id === "se") {
+          setSeVolume(adjustedStepVolume(getSeVolume(), delta));
+        } else if (id === "mute") {
+          toggleMuted();
+        } else {
+          return;
+        }
+        this.rebuildMenu();
       }
     });
     // 呼び出し元のkeydownと同一イベントでの二重発火を避けるため次tickで受付開始

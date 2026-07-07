@@ -176,6 +176,8 @@ export class TitleScene extends Phaser.Scene {
       x: 0,
       y: 0,
       width: 240,
+      // セーブがあるときは「つづきから」を初期選択にする(M15-3: 復帰プレイヤーの期待)
+      initialIndex: hasSave ? 1 : 0,
       onSelect: (id) => {
         this.onMenuSelected(id);
       }

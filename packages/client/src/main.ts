@@ -18,6 +18,10 @@ const client = new GameClient({
   setStatusText: (text) => {
     if (connectionStatus !== null) {
       connectionStatus.textContent = text;
+      // 正常時(接続済み)は視覚的に隠し、異常時のみ表示する(M15-3: UX点検)。
+      // E2E(title.spec)が接続済みテキストの可視性を同期点にするため、
+      // display:none ではなく1pxクリップ(style.css の .connected)で隠す
+      connectionStatus.classList.toggle("connected", text === "サーバー: 接続済み");
     }
   }
 });

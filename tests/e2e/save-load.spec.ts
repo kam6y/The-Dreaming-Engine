@@ -115,16 +115,10 @@ test("宿泊でセーブし、リロード→つづきからで状態が復元�
   await page.locator("canvas").click();
 
   // hello 受信でセーブ有無が反映される。hasSave=1 になってから操作する
-  // (hello ハンドラがメニューを組み直しカーソルを先頭へ戻すため、この後の
-  //  ArrowDown が確実に「つづきから」へ当たる)
+  // (hello ハンドラがメニューを組み直し、セーブ有時は初期カーソルが
+  //  「つづきから」になる: M15-3。Enter 一回で決定できる)。
+  // 反映とキー受付が確実に別フレームになるよう少し待つ(既存E2Eの慣例)
   await expect.poll(() => readAttr(page, "data-has-save"), { timeout: 10_000 }).toBe("1");
-
-  // カーソルを「つづきから」へ下げて決定 → 探索へ。
-  // ArrowDown と Enter の間に待ちを挟むのが要点: Phaser のキーボード入力は
-  // ゲーム更新フレーム単位で処理されるため、両キーが同一フレームに入ると
-  // カーソル移動が決定に反映されず「新規ゲーム」のまま決定されかねない
-  // (=タイトルに留まる)。人が押す程度の間隔を空けて確実に別フレームへ分ける。
-  await page.keyboard.press("ArrowDown");
   await page.waitForTimeout(250);
   await page.keyboard.press("Enter");
   await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("exploration");
