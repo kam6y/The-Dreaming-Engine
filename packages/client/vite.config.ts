@@ -15,7 +15,8 @@ function serveRepoAssets(): Plugin {
   const contentTypes: Record<string, string> = {
     ".png": "image/png",
     ".json": "application/json",
-    ".woff2": "font/woff2"
+    ".woff2": "font/woff2",
+    ".ogg": "audio/ogg"
   };
   return {
     name: "serve-repo-assets",

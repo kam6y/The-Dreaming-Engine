@@ -1204,3 +1204,56 @@
   battle-scene(attack/skill/damage/levelup/victory)・session応答のerror系・
   shop売買成立・マップ遷移・回復、(4) E2E(headless)が緑のまま=音声で
   タイミングを変えない、(5) 音量はまず固定定数(設定UIはM12-3)
+
+## [41] 2026-07-07 M12-2: SE再生基盤+配線(subagent実装)
+
+- やったこと(SE再生基盤とゲーム全体への配線。コミットはオーケストレーター):
+  - サウンドマネージャ `packages/client/src/audio.ts` を新設。台帳12 idを `SE_IDS`
+    (union型 `SeId`)で定数化、`seAssetPath(id)`=`assets/audio/se/<id>.ogg`。
+    `playSe(scene, id)` はフェイルセーフ: scene/sound/cache欠如・**未ロード
+    (`cache.audio.exists`偽)・WebAudioロック中(`sound.locked`)・音量0** で
+    無音return、`sound.play`はtry/catchで握りconsole.warn。Phaser非依存の構造型
+    `SoundScene` を注入口にし(font.tsのFontLoaderと同方式)、シーンからは `playSe(this,id)`
+  - 音量: モジュール内 `seVolume`(既定 `DEFAULT_SE_VOLUME=0.5`)+ `getSeVolume`/
+    `setSeVolume`(0..1クランプ)。M12-3の音量UIはこのsetterで可変化する受け皿
+  - preload-scene: `SE_IDS` を `this.load.audio` で12点直接ロード(manifest対象外・
+    フォント/タイルと同方式)。失敗は既存 FILE_LOAD_ERROR 警告のみで続行
+  - vite.config: dev配信の contentTypes へ `.ogg`(audio/ogg)追加
+  - 配線(イベント→SE): MenuList=カーソル移動se-cursor(実移動時のみ)/決定se-confirm/
+    キャンセルse-cancel(全メニュー共通=タイトル・戦闘・各overlay・確認ダイアログを網羅)。
+    battle-scene(applyEventToView)=damage/敵→se-attack・damage/自→se-damage・
+    action.skill→se-skill・heal→se-heal・level-up→se-levelup・victory→se-victory。
+    exploration-scene=マップ遷移開始→se-door・server-error→se-error・
+    売買成立→se-coin・アイテム使用回復→se-heal
+  - 売買/回復の成立観測: 探索は店開放中/インベントリ開放中に自律snapshotが来ない
+    ことを利用し、要求送信時に成立待ちフラグ(awaitingCoinSe/awaitingHealSe)を立て、
+    次のsnapshot(=結果)で鳴らす。失敗はserver-error(se-error)でフラグ解除。
+    探索の use-item はサーバー側で heal-hp のみ成功する(解毒等はエラー)ため
+    「成功=回復」が確定し se-heal 観測が正確。フラグはhandleSnapshot冒頭で取り出し
+    クリアして残留を防ぐ
+  - ユニットテスト `test/audio.test.ts` 11件: 12id/パス/音量クランプ/未ロード無音/
+    ロック無音/scene欠如無害/音量反映/例外非伝播 等
+- 検証: `pnpm check` 緑(typecheck+lint+**unit 717**+build+secretスキャン)・
+  `pnpm test:e2e` **12/12緑**。配線ゼロで先にE2Eを走らせ音声ロード単独の安定性を確認
+  (12/12緑・約4.5分)してから配線を追加し、配線込みでも12/12緑(約4.6分)
+- 裁量で決めたこと:
+  - se-attackは damage(target=enemy) 着弾時、se-damageは damage(target=player) 時に
+    鳴らす(damageイベントの target を利用)。status-tick(毒等の継続dmg)は鳴らさない。
+    スキルの与ダメは action.skill→se-skill の後に着弾で se-attack が重なる=溜め→斬撃の
+    レイヤーとして許容
+  - SE音量はジングル系も含め一律 0.5(聴感の最終確認は人間プレイ待ちのため個別バランスは
+    未調整。M12-3 or 人間確認後に調整)
+  - 同一フレーム重複再生の抑止は入れない(既存の入力ガードで同フレーム二重発火の経路が
+    無いことを確認済み。Phaser既定の多重再生許容に従う)
+  - server-errorのse-errorは探索のみ配線(戦闘のcommand-rejectedはスキル/MP不足を
+    メニュー側でdisabled済みで稀のため未配線)。ROADMAP M12-1のチェック漏れも実態に
+    合わせて[x]へ更新([40]で完了済みだった)
+- 既知の問題(人間確認待ち):
+  - 初回SEはWebAudioロック中(初回ユーザー操作=タイトル選択の前)は無音になる。
+    これはautoplay制限に対する設計どおりの挙動(locked ガード)。以後は鳴る
+  - 各SEの実際の聴感・音量バランス・ジングル長は人間プレイでの確認待ち(素材選定と同じ)
+- 次にやること: M12-3(BGM選定・同梱+シーン別BGM切替(フェード)+音量/ミュート設定UI。
+  オーケストレーター自身が実装)。SE音量UIの受け皿は `audio.ts` の
+  `getSeVolume`/`setSeVolume`(0..1)。BGMは別系統(ループ/フェード)として追加し、
+  BGM音量とSE音量を別スライダーにするのが素直。M12完了時に `pnpm test:e2e:full` 緑+
+  BACKLOG「効果音・BGMの整備」へチェック

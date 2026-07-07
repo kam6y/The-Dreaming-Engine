@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { seAssetPath, SE_IDS } from "../audio.js";
 import { TILESET_FRAME_CONFIG, TILESET_KEY, TILESET_PATH } from "../tile-frames.js";
 import { UI_FONT_FAMILY, waitForUiFont } from "../ui/font.js";
 
@@ -53,6 +54,13 @@ export class PreloadScene extends Phaser.Scene {
     // 読み込み失敗時は FILE_LOAD_ERROR 警告のみで続行し、探索シーンが
     // 単色プレースホルダー描画へ退避する
     this.load.spritesheet(TILESET_KEY, TILESET_PATH, TILESET_FRAME_CONFIG);
+
+    // 効果音(manifest対象外: assets/audio/README.md が台帳)。id 直接パスで 12 点読み込む。
+    // 読み込み失敗は FILE_LOAD_ERROR 警告のみで続行し、playSe が存在確認で無音退避する
+    // (asset-pipeline.md「音声アセットの方針」のフェイルセーフ)。
+    for (const id of SE_IDS) {
+      this.load.audio(id, seAssetPath(id));
+    }
 
     // まず台帳を読み、その完了時に全画像をキューへ積む(ロード中の追加は継続処理される)
     this.load.json("asset-manifest", "assets/manifest.json");

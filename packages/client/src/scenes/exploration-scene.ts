@@ -20,6 +20,7 @@ import {
 
 import type { AiUtteranceEvent } from "../net/game-client.js";
 
+import { playSe } from "../audio.js";
 import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
 import { getGameClient, type GameClient } from "../net/game-client.js";
 import { TILESET_KEY, TILESET_TILE_PX, tileFrame, tileTint } from "../tile-frames.js";
@@ -107,6 +108,21 @@ export class ExplorationScene extends Phaser.Scene {
   /** シーン遷移(マップ移動・戦闘開始)中 */
   private transitioning = false;
 
+  /**
+   * 売買要求を送信済みで、成立(=次の snapshot 到着)を待っている状態。
+   * 店を開いている間の snapshot は売買結果のみ(自律的な world tick は無い)ため、
+   * このフラグが立った状態で snapshot が来たら売買成立とみなし se-coin を鳴らす。
+   * 失敗(資金不足・満杯)は server-error 経路(se-error)で、このフラグは解除する。
+   */
+  private awaitingCoinSe = false;
+
+  /**
+   * アイテム使用要求を送信済みで、成功(=次の snapshot 到着)を待っている状態。
+   * 探索での use-item はサーバー側で heal-hp のアイテムのみ成功する(それ以外はエラー)ため、
+   * 成功 snapshot が来たら回復とみなし se-heal を鳴らす。失敗は server-error(se-error)。
+   */
+  private awaitingHealSe = false;
+
   /** タップ入力(短いkeydown)を取りこぼさないための予約ステップ */
   private pendingStep: Direction | null = null;
 
@@ -184,6 +200,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.moving = false;
     this.awaiting = false;
     this.transitioning = false;
+    this.awaitingCoinSe = false;
+    this.awaitingHealSe = false;
     this.pendingStep = null;
     this.innConfirm = null;
     this.pendingInn = null;
@@ -347,6 +365,13 @@ export class ExplorationScene extends Phaser.Scene {
 
   private handleSnapshot(view: SnapshotView): void {
     this.awaiting = false;
+    // 売買・アイテム使用の「成立待ち」フラグはここで確定(消費)する。フラグが残留して
+    // 無関係な snapshot で鳴らないよう、分岐前に取り出してクリアする。成功音は
+    // 同一マップ更新(結果 snapshot)の枝でのみ鳴らす
+    const coinConfirmed = this.awaitingCoinSe;
+    const healConfirmed = this.awaitingHealSe;
+    this.awaitingCoinSe = false;
+    this.awaitingHealSe = false;
     if (this.transitioning) {
       // 遷移中の更新は保存のみ(次のシーンが lastSnapshot から読む)
       this.snapshot = view;
@@ -378,12 +403,24 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateInteraction(view);
     this.shopOverlay?.refresh(view);
     this.inventoryOverlay?.refresh(view);
+    // 売買成立=se-coin / アイテム使用の回復成功=se-heal(要求送信済みで届いた結果 snapshot)
+    if (coinConfirmed) {
+      playSe(this, "se-coin");
+    }
+    if (healConfirmed) {
+      playSe(this, "se-heal");
+    }
     this.updateHud();
     this.syncDomState();
   }
 
   private handleServerError(message: string): void {
     this.awaiting = false;
+    // 操作の拒否(資金不足・満杯・使用不可等)。成立待ちフラグは失敗として解除し、
+    // 拒否音(se-error)を鳴らす(README: se-error=操作の拒否)
+    this.awaitingCoinSe = false;
+    this.awaitingHealSe = false;
+    playSe(this, "se-error");
     // オーバーレイ中の操作エラー(金不足・満杯等)はオーバーレイの通知行へ、
     // それ以外は地の文ダイアログとして表示する
     if (this.shopOverlay !== null) {
@@ -436,9 +473,11 @@ export class ExplorationScene extends Phaser.Scene {
         snapshot: view,
         onBuy: (itemId: ItemId) => {
           this.awaiting = this.client.send({ type: "shop-buy", itemId, quantity: 1 });
+          this.awaitingCoinSe = this.awaiting; // 成立(次の snapshot)で se-coin を鳴らす
         },
         onSell: (itemId: ItemId) => {
           this.awaiting = this.client.send({ type: "shop-sell", itemId, quantity: 1 });
+          this.awaitingCoinSe = this.awaiting;
         },
         onClose: () => {
           this.closeShopOverlay();
@@ -593,6 +632,7 @@ export class ExplorationScene extends Phaser.Scene {
       snapshot: this.snapshot,
       onUse: (itemId: ItemId) => {
         this.awaiting = this.client.send({ type: "use-item", itemId });
+        this.awaitingHealSe = this.awaiting; // 成功(次の snapshot)で se-heal を鳴らす
       },
       onDiscard: (itemId: ItemId) => {
         this.awaiting = this.client.send({ type: "discard-item", itemId, quantity: 1 });
@@ -654,6 +694,7 @@ export class ExplorationScene extends Phaser.Scene {
 
   private startMapTransition(): void {
     this.transitioning = true;
+    playSe(this, "se-door");
     this.cameras.main.fadeOut(180, 11, 13, 18);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       // create() が client.lastSnapshot(遷移後の状態)から組み直す

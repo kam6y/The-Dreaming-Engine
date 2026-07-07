@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { playSe } from "../audio.js";
 import { UI_FONT_FAMILY } from "./font.js";
 
 export interface MenuListOptions {
@@ -139,6 +140,7 @@ export class MenuList {
     const select = (): void => {
       const item = this.options.items[this.index];
       if (item !== undefined && item.disabled !== true) {
+        playSe(this.scene, "se-confirm");
         this.options.onSelect(item.id);
       }
     };
@@ -147,6 +149,7 @@ export class MenuList {
     if (this.options.onCancel !== undefined) {
       const cancel = this.options.onCancel;
       on("keydown-ESC", () => {
+        playSe(this.scene, "se-cancel");
         cancel();
       });
     }
@@ -183,6 +186,7 @@ export class MenuList {
     if (count === 0) {
       return;
     }
+    const before = this.index;
     // 無効項目はスキップして次の有効項目へ
     for (let step = 1; step <= count; step += 1) {
       const next = (this.index + delta * step + count * step) % count;
@@ -190,6 +194,10 @@ export class MenuList {
         this.index = next;
         break;
       }
+    }
+    // 実際にカーソルが動いたときだけ鳴らす(有効項目が1つだけ等で不動の場合は無音)
+    if (this.index !== before) {
+      playSe(this.scene, "se-cursor");
     }
     this.updateCursor();
   }

@@ -13,6 +13,7 @@ import {
   type ViewBattle
 } from "@dreaming-engine/shared";
 
+import { playSe } from "../audio.js";
 import { getGameClient, type BattleEventsPayload, type GameClient } from "../net/game-client.js";
 import { fitContain, fitCover } from "../ui/cover-image.js";
 import { UI_FONT_FAMILY } from "../ui/font.js";
@@ -382,9 +383,16 @@ export class BattleScene extends Phaser.Scene {
         if (event.target === "enemy") {
           this.enemyHpBar.setValue(event.remainingHp);
           this.flash(this.enemySprite);
+          // 直接攻撃の着弾のみ攻撃ヒット音(毒等の継続ダメージ status-tick は鳴らさない)
+          if (event.type === "damage") {
+            playSe(this, "se-attack");
+          }
         } else {
           this.playerHpBar.setValue(event.remainingHp);
           this.cameras.main.shake(120, 0.004);
+          if (event.type === "damage") {
+            playSe(this, "se-damage");
+          }
         }
         break;
       case "heal":
@@ -393,8 +401,13 @@ export class BattleScene extends Phaser.Scene {
         } else {
           this.enemyHpBar.setValue(event.remainingHp);
         }
+        playSe(this, "se-heal");
         break;
       case "action":
+        // スキル発動音(通常攻撃の着弾音は damage イベント側で鳴らす)
+        if (event.actionKind === "skill") {
+          playSe(this, "se-skill");
+        }
         if (event.actor === "player" && event.mpCost !== undefined) {
           this.currentMp = Math.max(0, this.currentMp - event.mpCost);
           this.playerMpBar.setValue(this.currentMp);
@@ -413,7 +426,11 @@ export class BattleScene extends Phaser.Scene {
         break;
       }
       case "victory":
+        playSe(this, "se-victory");
+        break;
       case "level-up":
+        playSe(this, "se-levelup");
+        break;
       case "defeat":
       case "flee":
       case "item-used":
