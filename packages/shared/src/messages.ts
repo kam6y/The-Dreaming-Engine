@@ -14,6 +14,7 @@ import { statusStateSchema } from "./combat/status.js";
 import { gameLocationSchema } from "./game-state.js";
 import { directionSchema } from "./geometry.js";
 import { enemyIdSchema, npcIdSchema } from "./ids.js";
+import { affinityTierSchema } from "./npc.js";
 import { mainQuestStageSchema, subQuestStatusSchema } from "./quests.js";
 
 export const GAME_TITLE = "The Dreaming Engine";
@@ -129,7 +130,13 @@ export const activeInteractionSchema = z.discriminatedUnion("kind", [
     npcName: z.string(),
     stock: z.array(
       z.object({ itemId: itemIdSchema, name: z.string(), buyPrice: z.number().int() })
-    )
+    ),
+    /**
+     * 店主(商人)の好感度(M11-3)。クライアントが売値表示を adjustedSellPrice で
+     * サーバーの請求と同一計算するために渡す(UI に数値そのものは表示しない)。
+     * 開店中は好感度が変わらない(adjust_affinity は会話中のみ)ため開店時の値で一貫する。
+     */
+    merchantAffinity: z.number().int().min(0).max(100)
   }),
   z.object({
     kind: z.literal("inn"),
@@ -141,6 +148,11 @@ export const activeInteractionSchema = z.discriminatedUnion("kind", [
     kind: z.literal("conversation"),
     npcId: npcIdSchema,
     npcName: z.string(),
+    /**
+     * 相手の好感度の段階(M11-3)。会話UIの関係性の暗示表示に使う
+     * (数値は送らない・表示しない。段階名の雰囲気のみ)。
+     */
+    affinityTier: affinityTierSchema,
     /** 現在取りうるアクション(状態依存。提案中なら accept/decline を含む) */
     options: z.array(conversationActionSchema),
     /** 提案中サブクエスト(あれば)。無ければ省略 */

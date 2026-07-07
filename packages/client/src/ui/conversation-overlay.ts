@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 
+import { affinityTierDefinition } from "@dreaming-engine/shared";
 import type {
   ActiveInteraction,
   ConversationAction,
@@ -14,6 +15,11 @@ import { TextInputBox } from "./text-input-box.js";
 import { TypewriterText } from "./typewriter-text.js";
 
 type ConversationInteraction = Extract<ActiveInteraction, { kind: "conversation" }>;
+
+/** 関係性の暗示ラベル(段階の日本語名のみ。数値は出さない。M11-3) */
+function relationLabel(interaction: ConversationInteraction): string {
+  return `― ${affinityTierDefinition(interaction.affinityTier).label} ―`;
+}
 
 /** NPC → 会話屋内背景アセット id(未整備時はプレースホルダー暗幕のまま) */
 const INTERIOR_BY_NPC: Record<string, string> = {
@@ -76,6 +82,9 @@ export class ConversationOverlay {
   private readonly container: Phaser.GameObjects.Container;
 
   private readonly headerText: Phaser.GameObjects.Text;
+
+  /** 関係性の暗示(好感度の段階名。数値なし。M11-3) */
+  private readonly relationText: Phaser.GameObjects.Text;
 
   private readonly proposalText: Phaser.GameObjects.Text;
 
@@ -147,6 +156,14 @@ export class ConversationOverlay {
       { color: "#d8c98f", fontFamily: UI_FONT_FAMILY, fontSize: "20px" }
     );
 
+    // 関係性の暗示(好感度の段階名のみ。数値は表示しない。M11-3)。名前の右に沈んだ色で添える
+    this.relationText = scene.add.text(
+      this.panelX + 24 + this.headerText.width + 16,
+      this.panelY + 21,
+      relationLabel(this.interaction),
+      { color: "#7d8494", fontFamily: UI_FONT_FAMILY, fontSize: "14px" }
+    );
+
     // 発話本文(左カラム。メニュー幅を除いた領域に折り返す)
     const bodyWidth = PANEL_WIDTH - MENU_WIDTH - 72;
 
@@ -171,6 +188,7 @@ export class ConversationOverlay {
       ...scenery,
       background,
       this.headerText,
+      this.relationText,
       this.proposalText,
       this.hintText
     ]);
@@ -226,6 +244,9 @@ export class ConversationOverlay {
     }
     this.interaction = interaction;
     this.headerText.setText(interaction.npcName);
+    // 段階が会話中に変わったら表示も追従する(名前の幅変化にも合わせて置き直す)
+    this.relationText.setText(relationLabel(interaction));
+    this.relationText.setX(this.panelX + 24 + this.headerText.width + 16);
     this.updateProposal();
     // 入力中・応答待ちの間はメニューを組み直さない(状態を壊さない)
     if (this.input === null && !this.awaiting) {

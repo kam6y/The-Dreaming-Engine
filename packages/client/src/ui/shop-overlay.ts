@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 
 import {
+  adjustedSellPrice,
   ITEMS,
-  sellPriceOf,
   type ActiveInteraction,
   type ItemId,
   type SnapshotView
@@ -250,10 +250,11 @@ export class ShopOverlay {
   }
 
   private buildSellItems(): { id: string; label: string; disabled?: boolean }[] {
-    // クエスト用アイテムは別枠(questItems)のためここには現れない=売却対象は inventory 全件
+    // クエスト用アイテムは別枠(questItems)のためここには現れない=売却対象は inventory 全件。
+    // 売値は店主の好感度込みでサーバーの請求と同一計算(interaction.merchantAffinity。M11-3)
     return this.snapshot.inventory.map((stack) => ({
       id: stack.itemId,
-      label: `${ITEMS[stack.itemId].name}${equipmentBonusLabel(stack.itemId)} ×${stack.count}  売値${sellPriceOf(stack.itemId)}G`
+      label: `${ITEMS[stack.itemId].name}${equipmentBonusLabel(stack.itemId)} ×${stack.count}  売値${adjustedSellPrice(stack.itemId, this.options.interaction.merchantAffinity)}G`
     }));
   }
 }

@@ -347,6 +347,23 @@ function activeHunt(id: string, count: number): SubQuest {
 // ===========================================================================
 
 describe("会話フロー(提案の受諾・辞退・破棄)", () => {
+  it("会話 interaction は好感度の段階を含む(初期30=よそよそしい/80=信頼。M11-3)", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+    const view = mustView(session);
+    if (view.interaction?.kind !== "conversation") throw new Error("会話 interaction がない");
+    expect(view.interaction.affinityTier).toBe("distant"); // 初期好感度30
+
+    // 往復0回の終了は要約をスキップするため、すぐ再会話できる(0往復スキップ)
+    await session.handle({ type: "conversation-end" });
+    mustState(session).npcs.informant.affinity = 80;
+    await talkTo(session, "informant");
+    const view2 = mustView(session);
+    if (view2.interaction?.kind !== "conversation") throw new Error("会話 interaction がない");
+    expect(view2.interaction.affinityTier).toBe("trusted");
+  });
+
   it("情報屋で提案生成→受諾で subQuests へ、pendingProposal クリア・発行カウンタ増加", async () => {
     const { session } = makeAiSession();
     await session.handle({ type: "new-game" });

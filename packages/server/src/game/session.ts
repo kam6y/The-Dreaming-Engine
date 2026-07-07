@@ -16,6 +16,8 @@ import {
   midBossAt,
   isMidBossEnemyId,
   midBossDefeatFlag,
+  adjustedSellPrice,
+  affinityTier,
   countOf,
   createBattle,
   createNewGameState,
@@ -36,7 +38,6 @@ import {
   resolveTurn,
   sampleEnemySymbols,
   samePosition,
-  sellPriceOf,
   shopStockEntries,
   statsForLevel,
   toPlayerProgress,
@@ -641,7 +642,9 @@ export class GameSession {
           kind: "shop",
           npcId: "merchant",
           npcName: NPC_DISPLAY_NAMES.merchant,
-          stock: shopStockEntries(this.requireState().npcs.merchant.affinity)
+          stock: shopStockEntries(this.requireState().npcs.merchant.affinity),
+          // 売値表示をクライアントがサーバーと同一計算するための好感度(M11-3)
+          merchantAffinity: this.requireState().npcs.merchant.affinity
         };
         return [
           this.snapshotMsg(),
@@ -1078,9 +1081,10 @@ export class GameSession {
     if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
     if (ITEMS[itemId].questItem) return this.errorMsgs("not-sellable", "これは、売れるものではない。");
     if (countOf(state.inventory, itemId) < quantity) return this.errorMsgs("not-owned", "そんなには持っていない。");
-    // 売値の段階増し(adjustedSellPrice)は M11-3 で表示と同時に配線する
-    // (クライアントの売値ラベルは sellPriceOf 直参照のため、先に適用すると表示額と実受取額がずれる)
-    const gain = sellPriceOf(itemId) * quantity;
+    // 売値の段階増し(信頼のみ+5%。買い戻し増殖防止クランプ込み)。クライアントの売値表示も
+    // interaction.merchantAffinity から同じ関数で計算するため、表示と実受取は常に一致する(M11-3)
+    const gain =
+      adjustedSellPrice(itemId, state.npcs[this.activeInteraction.npcId].affinity) * quantity;
     state.inventory = removeItem(state.inventory, itemId, quantity).inventory;
     state.player.gold += gain;
     return [this.snapshotMsg()];
@@ -1228,6 +1232,9 @@ export class GameSession {
       kind: "conversation",
       npcId,
       npcName: NPC_DISPLAY_NAMES[npcId],
+      // 関係性の暗示表示用の段階(M11-3)。snapshot 毎に組み直されるため、
+      // 会話中の adjust_affinity で段階が変われば表示も追従する(数値は送らない)
+      affinityTier: affinityTier(this.requireState().npcs[npcId].affinity),
       options,
       ...(proposal !== null ? { pendingProposal: this.pendingProposalView(proposal) } : {})
     };

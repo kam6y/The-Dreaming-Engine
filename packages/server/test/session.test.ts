@@ -7,6 +7,7 @@ import {
   TOWN_WAKE_POINT,
   addItem,
   countOf,
+  adjustedSellPrice,
   createEmptyEquipment,
   createNewGameState,
   emptyInventory,
@@ -1235,14 +1236,31 @@ describe("店", () => {
     expect(firstSnapshot(msgs).player.gold).toBe(INITIAL_GOLD - 20);
   });
 
-  it("好感度80でも売却は従来価格(売値の段階増しは M11-3 で表示と同時に適用)", async () => {
+  it("好感度80(信頼)の売却は+5%の段階増し(M11-3で表示と同時に配線)", async () => {
     const { session } = await shopSessionWithAffinity(80);
     const state = mustState(session);
     state.inventory = addItem(state.inventory, "worn-blade", 1).inventory;
     const goldBefore = state.player.gold;
     const msgs = await session.handle({ type: "shop-sell", itemId: "worn-blade", quantity: 1 });
-    // adjustedSellPrice(31G)ではなく基準売値(30G)。クライアントの売値表示と一致させる
+    // adjustedSellPrice: 30 + floor(30*5/100) = 31G(割引後買値54Gを下回るのでクランプなし)
+    expect(adjustedSellPrice("worn-blade", 80)).toBe(31);
+    expect(firstSnapshot(msgs).player.gold).toBe(goldBefore + adjustedSellPrice("worn-blade", 80));
+  });
+
+  it("好感度49までの売却は従来の売値のまま", async () => {
+    const { session } = await shopSessionWithAffinity(49);
+    const state = mustState(session);
+    state.inventory = addItem(state.inventory, "worn-blade", 1).inventory;
+    const goldBefore = state.player.gold;
+    const msgs = await session.handle({ type: "shop-sell", itemId: "worn-blade", quantity: 1 });
     expect(firstSnapshot(msgs).player.gold).toBe(goldBefore + sellPriceOf("worn-blade"));
+  });
+
+  it("shop interaction は merchantAffinity を含む(クライアントの売値表示の同一計算用)", async () => {
+    const { session } = await shopSessionWithAffinity(80);
+    const view = mustView(session);
+    if (view.interaction?.kind !== "shop") throw new Error("shop interaction が無い");
+    expect(view.interaction.merchantAffinity).toBe(80);
   });
 });
 
