@@ -163,7 +163,7 @@ export class ExplorationScene extends Phaser.Scene {
   private questJournal: QuestJournalOverlay | null = null;
 
   /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
-  private objectViews = new Map<string, Phaser.GameObjects.Rectangle[]>();
+  private objectViews = new Map<string, (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image)[]>();
 
   private symbolViews: Phaser.GameObjects.GameObject[] = [];
 
@@ -787,9 +787,30 @@ export class ExplorationScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * マップ上スプライト(M13)を生成する。テクスチャ未整備なら null(呼び出し側が
+   * 既存プレースホルダー図形へ退避する)。ソースは256x256正方の透過カットアウトのため、
+   * displaySize は正方で与える(被写体は余白込みで収まっている)。
+   */
+  private mapSprite(textureId: string, x: number, y: number, displaySize: number): Phaser.GameObjects.Image | null {
+    if (!this.textures.exists(textureId)) {
+      return null;
+    }
+    const image = this.add.image(x, y, textureId).setOrigin(0.5);
+    image.setDisplaySize(displaySize, displaySize);
+    return image;
+  }
+
   private drawObjects(): void {
     for (const object of this.map.objects) {
       const { x, y } = this.tileCenter(object.position);
+      // 構造物スプライト(prop-sign/chest/gather。M13-3)。未整備なら従来の色付き矩形
+      const sprite = this.mapSprite(`prop-${object.kind}`, x, y, 30);
+      if (sprite !== null) {
+        this.worldLayer.add(sprite);
+        this.objectViews.set(object.id, [sprite]);
+        continue;
+      }
       const color = OBJECT_COLORS[object.kind] ?? 0x9a8f76;
       const view = this.add
         .rectangle(x, y, TILE_SIZE - 12, TILE_SIZE - 12, color)
@@ -813,9 +834,15 @@ export class ExplorationScene extends Phaser.Scene {
   private drawNpcs(): void {
     for (const npc of this.map.npcs) {
       const { x, y } = this.tileCenter(npc.position);
-      this.worldLayer.add(
-        this.add.circle(x, y, TILE_SIZE / 2 - 6, NPC_COLOR).setStrokeStyle(2, 0x0b0d12)
-      );
+      // NPCスプライト(sprite-<npcId>。M13-3)。未整備なら従来の円プレースホルダー
+      const sprite = this.mapSprite(`sprite-${npc.id}`, x, y, 42);
+      if (sprite !== null) {
+        this.worldLayer.add(sprite);
+      } else {
+        this.worldLayer.add(
+          this.add.circle(x, y, TILE_SIZE / 2 - 6, NPC_COLOR).setStrokeStyle(2, 0x0b0d12)
+        );
+      }
       this.worldLayer.add(
         this.add
           .text(x, y - TILE_SIZE + 8, NPC_DISPLAY_NAMES[npc.id], {
@@ -839,11 +866,14 @@ export class ExplorationScene extends Phaser.Scene {
       return;
     }
     const { x, y } = this.tileCenter(this.map.boss.position);
-    const bossCircle = this.add.circle(x, y, TILE_SIZE - 10, 0x5c2431).setStrokeStyle(2, 0x2a0f16);
-    this.worldLayer.add(bossCircle);
+    // ボスマーカーのスプライト(symbol-dream-eater。M13-3)。未整備なら従来の円
+    const bossMarker: Phaser.GameObjects.GameObject & { scale: number } =
+      this.mapSprite(`symbol-${this.map.boss.enemyId}`, x, y, 56) ??
+      this.add.circle(x, y, TILE_SIZE - 10, 0x5c2431).setStrokeStyle(2, 0x2a0f16);
+    this.worldLayer.add(bossMarker);
     this.tweens.add({
-      targets: bossCircle,
-      scale: 1.08,
+      targets: bossMarker,
+      scale: bossMarker.scale * 1.08,
       duration: 1200,
       yoyo: true,
       repeat: -1,
@@ -873,13 +903,14 @@ export class ExplorationScene extends Phaser.Scene {
       return;
     }
     const { x, y } = this.tileCenter(midBoss.position);
-    const marker = this.add
-      .circle(x, y, TILE_SIZE - 12, SYMBOL_COLORS[midBoss.enemyId])
-      .setStrokeStyle(2, 0x1a1420);
+    // 中ボスマーカーのスプライト(symbol-failing-spinner。M13-3)。未整備なら従来の円
+    const marker: Phaser.GameObjects.GameObject & { scale: number } =
+      this.mapSprite(`symbol-${midBoss.enemyId}`, x, y, 48) ??
+      this.add.circle(x, y, TILE_SIZE - 12, SYMBOL_COLORS[midBoss.enemyId]).setStrokeStyle(2, 0x1a1420);
     this.worldLayer.add(marker);
     this.tweens.add({
       targets: marker,
-      scale: 1.1,
+      scale: marker.scale * 1.1,
       duration: 1000,
       yoyo: true,
       repeat: -1,
@@ -911,27 +942,34 @@ export class ExplorationScene extends Phaser.Scene {
     this.symbolViews = [];
     for (const symbol of this.snapshot.symbols) {
       const { x, y } = this.tileCenter(symbol.position);
-      const diamond = this.add
-        .polygon(x, y, [0, -12, 12, 0, 0, 12, -12, 0], SYMBOL_COLORS[symbol.enemyId])
-        .setStrokeStyle(2, 0x0b0d12);
+      // 敵シンボルのスプライト(symbol-<enemyId>。M13-3)。未整備なら従来の菱形
+      const view: Phaser.GameObjects.GameObject & { scale: number } =
+        this.mapSprite(`symbol-${symbol.enemyId}`, x, y, 34) ??
+        this.add
+          .polygon(x, y, [0, -12, 12, 0, 0, 12, -12, 0], SYMBOL_COLORS[symbol.enemyId])
+          .setStrokeStyle(2, 0x0b0d12);
       this.tweens.add({
-        targets: diamond,
-        scale: 1.15,
+        targets: view,
+        scale: view.scale * 1.15,
         duration: 900,
         yoyo: true,
         repeat: -1,
         ease: "Sine.easeInOut"
       });
-      this.worldLayer.add(diamond);
-      this.symbolViews.push(diamond);
+      this.worldLayer.add(view);
+      this.symbolViews.push(view);
     }
   }
 
   private createPlayer(): void {
-    const body = this.add
-      .rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, 0xd8c98f)
-      .setStrokeStyle(2, 0x0b0d12);
-    this.facingDot = this.add.circle(0, 0, 3, 0x0b0d12);
+    // 主人公スプライト(sprite-player。M13-3)。未整備なら従来の矩形プレースホルダー。
+    // 向き表示は仕様どおり既存の向きドットを継続する(スプライトは正面1枚)
+    const sprite = this.mapSprite("sprite-player", 0, 0, 42);
+    const body: Phaser.GameObjects.GameObject =
+      sprite ??
+      this.add.rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, 0xd8c98f).setStrokeStyle(2, 0x0b0d12);
+    // 向きドットの色: スプライト(暗色の外套)上では明るい琥珀、金色の矩形上では暗色
+    this.facingDot = this.add.circle(0, 0, 3, sprite !== null ? 0xd8c98f : 0x0b0d12);
 
     const { x, y } = this.tileCenter(this.renderedPosition);
     this.playerSprite = this.add.container(x, y, [body, this.facingDot]).setDepth(10);
