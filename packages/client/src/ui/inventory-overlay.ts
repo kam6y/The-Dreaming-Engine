@@ -122,7 +122,16 @@ export class InventoryOverlay {
       }
     );
 
-    this.container = scene.add.container(0, 0, [background, title, this.headerText, this.messageText]);
+    // 操作ヒント(タイトル行の右肩。オーバーレイ間で表記を統一: M15-2)
+    const hint = scene.add
+      .text(this.panelX + PANEL_WIDTH - 16, this.panelY + 18, "スペース / Enter: 決定 ・ Esc: とじる", {
+        color: "#a9b0ba",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "13px"
+      })
+      .setOrigin(1, 0);
+
+    this.container = scene.add.container(0, 0, [background, title, this.headerText, this.messageText, hint]);
     parentLayer.add(this.container);
 
     this.updateHeader();

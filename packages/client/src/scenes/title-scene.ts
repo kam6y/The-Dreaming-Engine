@@ -28,6 +28,9 @@ export class TitleScene extends Phaser.Scene {
 
   private statusText!: Phaser.GameObjects.Text;
 
+  /** 操作キーの常設ヘルプ(画面下端。M15-2: 操作説明の不在への対処) */
+  private keyHelpText!: Phaser.GameObjects.Text;
+
   private menu: MenuList | null = null;
 
   private uiLayer!: Phaser.GameObjects.Container;
@@ -101,6 +104,14 @@ export class TitleScene extends Phaser.Scene {
         fontSize: "16px"
       })
       .setOrigin(0.5);
+    this.keyHelpText = this.add
+      .text(0, 0, "移動 ↑↓←→ / WASD ・ 調べる/決定 スペース ・ もちもの Esc ・ クエスト Q", {
+        color: "#a9b0ba",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "14px"
+      })
+      .setOrigin(0.5, 1)
+      .setAlpha(0.85);
 
     this.buildMenu();
 
@@ -271,6 +282,7 @@ export class TitleScene extends Phaser.Scene {
     this.subtitleText.setPosition(centerX, centerY - 36);
     this.statusText.setPosition(centerX, centerY + 24);
     this.menu?.setPosition(centerX - 120, centerY + 48);
+    this.keyHelpText.setPosition(centerX, this.scale.height - 16);
   }
 
   /** E2E・デバッグ用にタイトル状態をDOMデータ属性へ反映する(#game要素) */

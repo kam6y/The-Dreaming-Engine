@@ -173,6 +173,9 @@ export class ExplorationScene extends Phaser.Scene {
 
   private hudStatusText!: Phaser.GameObjects.Text;
 
+  /** 操作キーの常設ヒント(右下。M15-2: 操作説明の不在への対処) */
+  private keyHintText!: Phaser.GameObjects.Text;
+
   private unsubscribes: (() => void)[] = [];
 
   private keys!: {
@@ -995,6 +998,7 @@ export class ExplorationScene extends Phaser.Scene {
     const onResize = (): void => {
       this.applyWorldZoom();
       uiCamera.setSize(this.scale.width, this.scale.height);
+      this.layoutKeyHint();
     };
     this.scale.on(Phaser.Scale.Events.RESIZE, onResize);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -1049,6 +1053,23 @@ export class ExplorationScene extends Phaser.Scene {
       padding: { x: 8, y: 4 }
     });
     this.uiLayer.add(this.hudStatusText);
+    this.keyHintText = this.add
+      .text(0, 0, "スペース: 調べる ・ Esc: もちもの ・ Q: クエスト", {
+        color: "#a9b0ba",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "13px",
+        backgroundColor: "#0b0d12cc",
+        padding: { x: 8, y: 4 }
+      })
+      .setOrigin(1, 1)
+      .setAlpha(0.85);
+    this.uiLayer.add(this.keyHintText);
+    this.layoutKeyHint();
+  }
+
+  /** キーヒントを右下へ配置する(リサイズ時にも呼ぶ) */
+  private layoutKeyHint(): void {
+    this.keyHintText.setPosition(this.scale.width - 12, this.scale.height - 8);
   }
 
   private updateHud(): void {

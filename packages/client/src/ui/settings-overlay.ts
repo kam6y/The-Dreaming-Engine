@@ -87,7 +87,21 @@ export class SettingsOverlay {
       fontSize: "20px"
     });
 
-    this.container = scene.add.container(0, 0, [background, title]);
+    // 操作ヒント(タイトル行の右肩。オーバーレイ間で表記を統一: M15-2)
+    const hint = scene.add
+      .text(
+        this.panelX + PANEL_WIDTH - 16,
+        this.panelY + 18,
+        "スペース / Enter: 変更 ・ Esc: とじる",
+        {
+          color: "#a9b0ba",
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: "13px"
+        }
+      )
+      .setOrigin(1, 0);
+
+    this.container = scene.add.container(0, 0, [background, title, hint]);
     parentLayer.add(this.container);
 
     this.rebuildMenu();

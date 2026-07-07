@@ -1437,3 +1437,24 @@
   **UI=オーケストレーター自身が実装**)。h1/#connection-statusはE2E参照のため
   視覚的に隠すだけにする(style.cssのコメント参照)。ヘルプはタイトルとメニューの
   両方から出せると理想だが、最小はタイトル画面のフッター常設+探索HUDへのキーヒント
+
+## [49] 2026-07-07 M15-2: タイトル二重解消+操作キーの常設ヘルプ(UI=オーケストレーター)
+
+- やったこと:
+  - style.css: DOMのh1を1pxクリップ(clip-path+overflow)で視覚的に不可視化。
+    display:none/visibility:hiddenはE2Eの toBeVisible(10スペックが参照)が落ちるため
+    「存在するが見えない」方式を採用(スクリーンリーダーにも残る)。
+    これでタイトル画面の二重表示と、全シーン上部への常時被さりが解消
+  - title-scene: 画面下端に操作キーの常設ヘルプ1行
+    (移動 ↑↓←→/WASD ・ 調べる/決定 スペース ・ もちもの Esc ・ クエスト Q)
+  - exploration-scene: 右下に常設キーヒント(スペース/Esc/Q。リサイズ追従)
+  - settings/inventory/shop の3オーバーレイにタイトル行右肩の操作ヒントを統一様式で追加
+    (下部はmessageText帯と衝突するため右肩に配置。dialog-boxの文体を踏襲)
+- 検証: `pnpm check` 緑(unit 735)・`pnpm test:e2e` 12/12緑(h1クリップ方式の回帰なし)。
+  dev:mock+Playwrightでタイトル・探索・もちものの実表示を目視確認
+- 次にやること: M15-3(UX点検のP2群+軽量P3)。内訳はROADMAP参照。
+  設定音量の左右キー増減(settings-overlay+menu-listへの左右キー通知が必要かも)/
+  消耗品の効果説明(効果値はshared側の定義から引く=ロジック寄りはsubagent)/
+  オブジェクトの視覚的手掛かり/勝利時の戦果表示(resolveVictoryの戻りに
+  xpGained/goldGainedあり=表示のみ)/接続ステータス自動非表示/タイトル初期カーソル/
+  宿確認文の折返し。ロジック(shared/server)=subagent委譲、UI=オーケストレーター

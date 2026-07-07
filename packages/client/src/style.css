@@ -22,27 +22,28 @@ body {
 }
 
 /* ゲームキャンバスがウィンドウ全体を占める(16:9が合わない分はレターボックス)。
-   h1・接続状態は隅の小さなオーバーレイとして残す(ページ構造・E2Eアサーション用) */
+   接続状態は隅の小さなオーバーレイとして残す(ページ構造・E2Eアサーション用) */
 .shell {
   position: fixed;
   inset: 0;
 }
 
+/* ページ見出しはスクリーンリーダー・E2E用に残しつつ視覚的には出さない
+   (canvas内タイトルとの二重表示の解消: M15-2)。
+   display:none / visibility:hidden にすると E2E の toBeVisible が落ちるため、
+   1pxのクリップで「存在するが見えない」状態にする */
 h1 {
   position: fixed;
-  top: 10px;
+  top: 0;
   left: 0;
-  right: 0;
-  z-index: 10;
+  width: 1px;
+  height: 1px;
   margin: 0;
-  text-align: center;
-  font-size: 20px;
-  font-weight: 400;
-  letter-spacing: 0.06em;
-  color: #cfd4da;
-  opacity: 0.75;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   pointer-events: none;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
 }
 
 #game {
