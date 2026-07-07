@@ -3,11 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   AFFINITY_MAX,
   AFFINITY_MIN,
+  AFFINITY_TIERS,
+  affinityTier,
+  affinityTierDefinition,
+  affinityTierSchema,
   appendUnsummarizedExchange,
   clampAffinity,
   createDefaultNpcState,
   createDefaultNpcStates,
   DEFAULT_NPC_TOPICS,
+  GIVE_ITEM_AFFINITY_THRESHOLD,
   INITIAL_AFFINITY,
   MAX_UNSUMMARIZED_EXCHANGES,
   npcIdSchema,
@@ -72,5 +77,54 @@ describe("npcStatesSchema(デフォルト補完・ドリフト防止)", () => {
     const schemaKeys = Object.keys(npcStatesSchema.shape).sort();
     const enumKeys = [...npcIdSchema.options].sort();
     expect(schemaKeys).toEqual(enumKeys);
+  });
+});
+
+describe("affinityTier(好感度の段階。game-design.md「好感度の段階(拡張: M11)」)", () => {
+  it("段階境界で正しく切り替わる(19/20・49/50・79/80)", () => {
+    expect(affinityTier(0)).toBe("wary");
+    expect(affinityTier(19)).toBe("wary");
+    expect(affinityTier(20)).toBe("distant");
+    expect(affinityTier(49)).toBe("distant");
+    expect(affinityTier(50)).toBe("friendly");
+    expect(affinityTier(79)).toBe("friendly");
+    expect(affinityTier(80)).toBe("trusted");
+    expect(affinityTier(100)).toBe("trusted");
+  });
+
+  it("初期好感度30は第2段階(よそよそしい)", () => {
+    expect(affinityTier(INITIAL_AFFINITY)).toBe("distant");
+  });
+
+  it("give_item の解禁閾値50が段階境界と一致する(50=打ち解けたの下限)", () => {
+    expect(affinityTier(GIVE_ITEM_AFFINITY_THRESHOLD)).toBe("friendly");
+    expect(affinityTier(GIVE_ITEM_AFFINITY_THRESHOLD - 1)).toBe("distant");
+    const friendly = affinityTierDefinition("friendly");
+    expect(friendly.min).toBe(GIVE_ITEM_AFFINITY_THRESHOLD);
+  });
+
+  it("範囲外の値はクランプして判定する(頑健性)", () => {
+    expect(affinityTier(-10)).toBe("wary");
+    expect(affinityTier(120)).toBe("trusted");
+  });
+
+  it("メタ: 段階表は 0-100 を昇順・隙間なく被覆し、表示名(日本語)を持つ", () => {
+    expect(AFFINITY_TIERS[0]?.min).toBe(AFFINITY_MIN);
+    expect(AFFINITY_TIERS.at(-1)?.max).toBe(AFFINITY_MAX);
+    for (let i = 1; i < AFFINITY_TIERS.length; i += 1) {
+      expect(AFFINITY_TIERS[i]?.min).toBe((AFFINITY_TIERS[i - 1]?.max ?? Number.NaN) + 1);
+    }
+    // 仕様表の名称と一致(4段階)
+    expect(AFFINITY_TIERS.map((t) => t.label)).toEqual(["警戒", "よそよそしい", "打ち解けた", "信頼"]);
+    // enum(affinityTierSchema)と表の id 集合が一致
+    expect(AFFINITY_TIERS.map((t) => t.id)).toEqual([...affinityTierSchema.options]);
+  });
+
+  it("全好感度0-100で、段階の min/max と affinityTier の結果が一致する", () => {
+    for (let a = AFFINITY_MIN; a <= AFFINITY_MAX; a += 1) {
+      const tier = affinityTierDefinition(affinityTier(a));
+      expect(a).toBeGreaterThanOrEqual(tier.min);
+      expect(a).toBeLessThanOrEqual(tier.max);
+    }
   });
 });

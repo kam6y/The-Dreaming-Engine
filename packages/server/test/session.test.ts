@@ -1189,6 +1189,61 @@ describe("店", () => {
     expect(mustState(session).equipment.weapon).toBe("worn-blade"); // 外れていない
     expect(mustState(session).player.gold).toBe(goldBefore); // 増えていない
   });
+
+  // --- 好感度の段階割引(M11-1。game-design.md「好感度の段階(拡張: M11)」) ---
+
+  /** 商人の好感度を直接設定してから店を開いた状態を用意する */
+  async function shopSessionWithAffinity(affinity: number): Promise<SessionContext> {
+    const ctx = createSession();
+    await ctx.session.handle({ type: "new-game" });
+    mustState(ctx.session).npcs.merchant.affinity = affinity;
+    mustState(ctx.session).location.position = { x: 16, y: 5 };
+    mustState(ctx.session).location.facing = "up";
+    await ctx.session.handle({ type: "interact" });
+    return ctx;
+  }
+
+  it("好感度80(信頼)で店を開くと stock の buyPrice が割引後の値になる", async () => {
+    const { session } = await shopSessionWithAffinity(80);
+    const view = mustView(session);
+    if (view.interaction?.kind !== "shop") throw new Error("shop interaction が無い");
+    const byId = new Map(view.interaction.stock.map((e) => [e.itemId, e.buyPrice]));
+    expect(byId.get("potion-small")).toBe(18); // 20 - floor(20*10/100)
+    expect(byId.get("worn-blade")).toBe(54); // 60 - floor(60*10/100)
+  });
+
+  it("好感度80(信頼)の購入は10%引きで請求される(表示と同額)", async () => {
+    const { session } = await shopSessionWithAffinity(80);
+    mustState(session).player.gold = 200;
+    const msgs = await session.handle({ type: "shop-buy", itemId: "worn-blade", quantity: 1 });
+    expect(firstSnapshot(msgs).player.gold).toBe(200 - 54);
+    expect(countOf(mustState(session).inventory, "worn-blade")).toBe(1);
+  });
+
+  it("好感度50(打ち解けた)の購入は5%引き(境界50で割引が始まる)", async () => {
+    const { session } = await shopSessionWithAffinity(50);
+    const msgs = await session.handle({ type: "shop-buy", itemId: "potion-small", quantity: 1 });
+    expect(firstSnapshot(msgs).player.gold).toBe(INITIAL_GOLD - 19); // 20 - floor(20*5/100)
+  });
+
+  it("好感度49(よそよそしい)までは従来価格のまま(境界の直下)", async () => {
+    const { session } = await shopSessionWithAffinity(49);
+    const view = mustView(session);
+    if (view.interaction?.kind !== "shop") throw new Error("shop interaction が無い");
+    expect(view.interaction.stock.find((e) => e.itemId === "potion-small")?.buyPrice).toBe(20);
+    const msgs = await session.handle({ type: "shop-buy", itemId: "potion-small", quantity: 1 });
+    expect(firstSnapshot(msgs).player.gold).toBe(INITIAL_GOLD - 20);
+  });
+
+  it("好感度80でも売却は従来価格(売値の段階増しは M11-3 で表示と同時に適用)", async () => {
+    const { session } = await shopSessionWithAffinity(80);
+    const state = mustState(session);
+    state.inventory = addItem(state.inventory, "worn-blade", 1).inventory;
+    const goldBefore = state.player.gold;
+    const msgs = await session.handle({ type: "shop-sell", itemId: "worn-blade", quantity: 1 });
+    // adjustedSellPrice(31G)ではなく基準売値(30G)。クライアントの売値表示と一致させる
+    expect(firstSnapshot(msgs).player.gold).toBe(goldBefore + sellPriceOf("worn-blade"));
+  });
 });
 
 // ===========================================================================

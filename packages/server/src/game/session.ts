@@ -16,11 +16,11 @@ import {
   midBossAt,
   isMidBossEnemyId,
   midBossDefeatFlag,
-  buyPriceOf,
   countOf,
   createBattle,
   createNewGameState,
   createRng,
+  discountedBuyPrice,
   effectiveStats,
   equipItem,
   freeSpace,
@@ -635,11 +635,13 @@ export class GameSession {
   private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
     switch (npcId) {
       case "merchant": {
+        // 在庫の buyPrice は商人の好感度を反映した割引後の値(M11-1)。店を開いている間は
+        // 好感度が変わらない(adjust_affinity は会話 interaction 中のみ)ため、開店時の値で一貫する
         this.activeInteraction = {
           kind: "shop",
           npcId: "merchant",
           npcName: NPC_DISPLAY_NAMES.merchant,
-          stock: shopStockEntries()
+          stock: shopStockEntries(this.requireState().npcs.merchant.affinity)
         };
         return [
           this.snapshotMsg(),
@@ -1058,7 +1060,9 @@ export class GameSession {
     const state = this.requireState();
     if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
     if (!isInShopStock(itemId)) return this.errorMsgs("not-sold", "それは、この店では扱っていない。");
-    const cost = buyPriceOf(itemId) * quantity;
+    // 店主(商人)の好感度による段階割引を適用(0-49 は従来価格と完全同値。
+    // stock の表示価格と同じ関数・同じ好感度で計算するため、表示と請求は常に一致する)
+    const cost = discountedBuyPrice(itemId, state.npcs[this.activeInteraction.npcId].affinity) * quantity;
     if (state.player.gold < cost) return this.errorMsgs("not-enough-gold", "持ち合わせが足りない。");
     // 事前に容量チェックし、不足なら購入をブロック(game-design.md「成長・経済」)
     if (freeSpace(state.inventory) < quantity) return this.errorMsgs("inventory-full", "そんなに持ちきれない。");
@@ -1074,6 +1078,8 @@ export class GameSession {
     if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
     if (ITEMS[itemId].questItem) return this.errorMsgs("not-sellable", "これは、売れるものではない。");
     if (countOf(state.inventory, itemId) < quantity) return this.errorMsgs("not-owned", "そんなには持っていない。");
+    // 売値の段階増し(adjustedSellPrice)は M11-3 で表示と同時に配線する
+    // (クライアントの売値ラベルは sellPriceOf 直参照のため、先に適用すると表示額と実受取額がずれる)
     const gain = sellPriceOf(itemId) * quantity;
     state.inventory = removeItem(state.inventory, itemId, quantity).inventory;
     state.player.gold += gain;

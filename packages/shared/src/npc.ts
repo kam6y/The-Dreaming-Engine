@@ -35,6 +35,61 @@ export function clampAffinity(value: number): number {
   return Math.min(AFFINITY_MAX, Math.max(AFFINITY_MIN, value));
 }
 
+// ===========================================================================
+// 好感度の段階(game-design.md「好感度の段階(拡張: M11)」)
+// ===========================================================================
+
+/** 好感度の段階(4段階)。境界は give_item の解禁閾値50と整合(50が段階境界) */
+export const AFFINITY_TIER_IDS = ["wary", "distant", "friendly", "trusted"] as const;
+export const affinityTierSchema = z.enum(AFFINITY_TIER_IDS);
+export type AffinityTier = z.infer<typeof affinityTierSchema>;
+
+/** 段階1件の定義(下限・上限・日本語表示名。仕様表と一致させる) */
+export interface AffinityTierDefinition {
+  id: AffinityTier;
+  /** 日本語の段階名(仕様表の名称) */
+  label: string;
+  /** この段階に属する好感度の下限(含む) */
+  min: number;
+  /** この段階に属する好感度の上限(含む) */
+  max: number;
+}
+
+/**
+ * 段階表(昇順・隙間なく 0-100 を被覆)。friendly の下限は
+ * GIVE_ITEM_AFFINITY_THRESHOLD(50)と一致する(ユニットテストで担保)。
+ */
+export const AFFINITY_TIERS: readonly AffinityTierDefinition[] = [
+  { id: "wary", label: "警戒", min: 0, max: 19 },
+  { id: "distant", label: "よそよそしい", min: 20, max: 49 },
+  { id: "friendly", label: "打ち解けた", min: 50, max: 79 },
+  { id: "trusted", label: "信頼", min: 80, max: 100 }
+];
+
+/**
+ * 好感度 → 段階の写像(純関数)。範囲外の値はクランプしてから判定する。
+ * 段階表の下限を降順に照合するため、表と実装が常に一致する。
+ */
+export function affinityTier(affinity: number): AffinityTier {
+  const value = clampAffinity(affinity);
+  for (let i = AFFINITY_TIERS.length - 1; i >= 0; i -= 1) {
+    const tier = AFFINITY_TIERS[i];
+    if (tier !== undefined && value >= tier.min) {
+      return tier.id;
+    }
+  }
+  return "wary"; // clampAffinity 後は必ず表に該当するため到達しない
+}
+
+/** 段階 ID → 定義(表示名の参照用。M11-2 のプロンプト・M11-3 の UI で使う) */
+export function affinityTierDefinition(tier: AffinityTier): AffinityTierDefinition {
+  const found = AFFINITY_TIERS.find((t) => t.id === tier);
+  if (found === undefined) {
+    throw new Error(`未定義の好感度段階: ${tier}`); // enum 網羅により到達しない
+  }
+  return found;
+}
+
 /**
  * NPC 別のデフォルト「今日の話題」(裁量文。world-lore.md 3節「夢との関わり」を典拠に作成)。
  * 日送りでこの値へリセットし、trigger_world_event の npc_rumor が置き換える。

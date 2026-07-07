@@ -11,6 +11,7 @@ import {
   freeSpace,
   GAME_STATE_VERSION,
   gameStateSchema,
+  INITIAL_AFFINITY,
   INITIAL_GOLD,
   ITEMS,
   lootForChest,
@@ -96,7 +97,7 @@ describe("店(在庫・価格)", () => {
   });
 
   it("shopStockEntriesは名称と購入価格を持つ", () => {
-    const entries = shopStockEntries();
+    const entries = shopStockEntries(INITIAL_AFFINITY);
     expect(entries).toHaveLength(SHOP_STOCK.length);
     for (const e of entries) {
       expect(e.name.length).toBeGreaterThan(0);
@@ -132,8 +133,8 @@ describe("店(在庫・価格)", () => {
     ]);
   });
 
-  it("shopStockEntries は装備の名称・購入価格を返す(M8-3)", () => {
-    const entries = shopStockEntries();
+  it("shopStockEntries は装備の名称・購入価格を返す(M8-3。初期好感度30=割引なしの基準価格)", () => {
+    const entries = shopStockEntries(INITIAL_AFFINITY);
     const byId = new Map(entries.map((e) => [e.itemId, e]));
     expect(byId.get("worn-blade")).toEqual({ itemId: "worn-blade", name: "錆びた片刃", buyPrice: 60 });
     expect(byId.get("amber-blade")).toEqual({ itemId: "amber-blade", name: "琥珀刃", buyPrice: 180 });
