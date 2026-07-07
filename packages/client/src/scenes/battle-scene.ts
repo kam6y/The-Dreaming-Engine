@@ -365,7 +365,18 @@ export class BattleScene extends Phaser.Scene {
     const next = this.eventQueue.shift();
     if (next !== undefined) {
       this.applyEventToView(next);
-      this.messageText.setText(next.message);
+      // 勝利イベントはフレーバー文に戦果(経験値・ゴールド・ドロップ)を添える(M15-3)
+      if (next.type === "victory") {
+        const drops =
+          next.drops.length > 0
+            ? `\n${next.drops.map((id) => ITEMS[id].name).join("・")}を手に入れた。`
+            : "";
+        this.messageText.setText(
+          `${next.message}\n経験値${next.xpGained}と ${next.goldGained}ゴールドを得た。${drops}`
+        );
+      } else {
+        this.messageText.setText(next.message);
+      }
       return;
     }
     const after = this.afterMessages;

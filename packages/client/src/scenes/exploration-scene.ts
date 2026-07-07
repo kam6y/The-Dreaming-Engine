@@ -164,7 +164,10 @@ export class ExplorationScene extends Phaser.Scene {
   private questJournal: QuestJournalOverlay | null = null;
 
   /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
-  private objectViews = new Map<string, (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image)[]>();
+  private objectViews = new Map<
+    string,
+    (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image | Phaser.GameObjects.Arc)[]
+  >();
 
   private symbolViews: Phaser.GameObjects.GameObject[] = [];
 
@@ -815,17 +818,26 @@ export class ExplorationScene extends Phaser.Scene {
       const { x, y } = this.tileCenter(object.position);
       // 構造物スプライト(prop-sign/chest/gather。M13-3)。未整備なら従来の色付き矩形
       const sprite = this.mapSprite(`prop-${object.kind}`, x, y, 30);
-      if (sprite !== null) {
-        this.worldLayer.add(sprite);
-        this.objectViews.set(object.id, [sprite]);
-        continue;
-      }
-      const color = OBJECT_COLORS[object.kind] ?? 0x9a8f76;
-      const view = this.add
-        .rectangle(x, y, TILE_SIZE - 12, TILE_SIZE - 12, color)
-        .setStrokeStyle(1, 0x0b0d12);
+      const view =
+        sprite ??
+        this.add
+          .rectangle(x, y, TILE_SIZE - 12, TILE_SIZE - 12, OBJECT_COLORS[object.kind] ?? 0x9a8f76)
+          .setStrokeStyle(1, 0x0b0d12);
       this.worldLayer.add(view);
-      this.objectViews.set(object.id, [view]);
+      // 「調べられる」ことの視覚的手掛かり: 琥珀色の小さな灯を上に浮かべ、
+      // ゆっくり明滅させる(M15-3: UX点検。解決済みはオブジェクトごと非表示になる)
+      const cue = this.add.circle(x + 9, y - TILE_SIZE / 2 - 2, 2.5, 0xd8c98f, 0.9);
+      this.worldLayer.add(cue);
+      this.tweens.add({
+        targets: cue,
+        alpha: 0.2,
+        y: cue.y - 3,
+        duration: 1100,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut"
+      });
+      this.objectViews.set(object.id, [view, cue]);
     }
   }
 

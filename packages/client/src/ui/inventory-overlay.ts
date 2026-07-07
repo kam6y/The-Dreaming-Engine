@@ -1,9 +1,10 @@
 import Phaser from "phaser";
 
-import { ITEMS, isEquipment } from "@dreaming-engine/shared";
+import { isEquipment } from "@dreaming-engine/shared";
 import type { EquipmentSlot, ItemId, SnapshotView, ViewEquipmentSlot } from "@dreaming-engine/shared";
 
 import { UI_FONT_FAMILY } from "./font.js";
+import { itemShortLabel } from "./item-labels.js";
 import { MenuList } from "./menu-list.js";
 
 export interface InventoryOverlayOptions {
@@ -20,24 +21,12 @@ export interface InventoryOverlayOptions {
   onClose: () => void;
 }
 
-/** 装備品のボーナス表記(武器=攻、防具=防)。装備品以外は空文字 */
-function bonusLabelOf(itemId: ItemId): string {
-  const def = ITEMS[itemId];
-  if (def.slot === "weapon") {
-    return `(攻+${def.atkBonus ?? 0})`;
-  }
-  if (def.slot === "armor") {
-    return `(防+${def.defBonus ?? 0})`;
-  }
-  return "";
-}
-
 /** 装備スロット行のラベル(空スロットは「(なし)」) */
 function slotRowLabel(prefix: string, equipped: ViewEquipmentSlot | null): string {
   if (equipped === null) {
     return `${prefix} (なし)`;
   }
-  return `${prefix} ${equipped.name}${bonusLabelOf(equipped.itemId)}`;
+  return `${prefix} ${equipped.name}${itemShortLabel(equipped.itemId)}`;
 }
 
 const PANEL_WIDTH = 560;
@@ -193,7 +182,7 @@ export class InventoryOverlay {
       },
       ...this.snapshot.inventory.map((stack) => ({
         id: stack.itemId,
-        label: `${stack.name}${bonusLabelOf(stack.itemId)} ×${stack.count}`
+        label: `${stack.name}${itemShortLabel(stack.itemId)} ×${stack.count}`
       })),
       // クエスト用アイテムは別枠(使う/すてる不可)。存在の確認用に表示だけする
       ...this.snapshot.questItems.map((stack) => ({
