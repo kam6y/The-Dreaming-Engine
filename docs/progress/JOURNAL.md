@@ -1320,3 +1320,29 @@
   依頼に必ず含める**(今回の差し戻しの教訓)。敵はマップ上の「シンボル」なので
   戦闘グラフィック(enemies/)より簡略・小サイズ感で。構造物は正面気味でも
   タイルに置けるが、俯瞰の影の付け方を揃えること
+
+## [44] 2026-07-07 M13-2: マップ上スプライト第2弾(敵シンボル8種+構造物3種)のcodex生成
+
+- やったこと(生成=codex、検収・コミット=オーケストレーター):
+  - codexへ委譲して11枚を生成: 敵シンボル8種(symbol-mist-wolf/wisp-flame/
+    candle-eater/whisper-mask/rust-eater/creaking-doll/dream-eater(ボスマーカー用・
+    大きめ)/failing-spinner(中ボスマーカー用))+構造物3種(prop-sign/prop-chest/
+    prop-gather)。すべて256x256透過・**見下ろし俯瞰**(前回差し戻しの教訓を依頼に
+    明記し、今回は一発受入)。prompts11件・manifest11エントリも登録
+  - 検収: 代表7枚を目視(霧狼=俯瞰の狼影+霧、夢喰い=歯車塊+青灰の靄、
+    紡ぎ損ない=織機フレーム+垂れ糸、宝箱・看板・採取草花はタイルに置ける小物感)。
+    戦闘グラフィックとの同一個体性(主要特徴の俯瞰圧縮)も良好。
+    manifest整合は pnpm check の機械検証。codexは蝋燭喰らい初回の顔に見える生成を
+    自主的に破棄・再生成(プロンプトに試行記録あり)
+- 検証: `pnpm check` 緑(unit 728)・`pnpm test:e2e` 12/12緑(アセットのみ。
+  クライアント反映はM13-3)
+- 次にやること: M13-3(クライアント反映)。**UI作業のためオーケストレーター自身が実装**。
+  申し送り: (1) exploration-scene の createPlayer(矩形+向きドット)・drawNpcs(円+名前)・
+  updateEnemySymbols(SYMBOL_COLORS の図形)・drawBoss/drawMidBoss・drawObjects
+  (OBJECT_COLORS の矩形)をスプライト画像へ差し替え(textures.exists で存在確認し
+  無ければ既存プレースホルダーへ退避)、(2) スプライトは manifest 経由で preload 済み
+  (kind:"sprite" も画像として読み込まれる=preload-scene は全エントリを load.image する)、
+  (3) 32px マスに対する表示サイズはやや大きめ(例 30-34px 高)で足元をマス中心へ、
+  (4) プレイヤーの向き表示は既存の向きドットを継続(仕様どおり)、
+  (5) 実プレイのスクリーンショットでタイルとの馴染みを確認(ユーザーの美術方針
+  フィードバック=memory 参照)

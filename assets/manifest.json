@@ -430,5 +430,137 @@
     "promptFile": "assets/prompts/sprite-priest.md",
     "createdAt": "2026-07-07",
     "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-mist-wolf",
+    "path": "assets/sprites/symbol-mist-wolf.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-mist-wolf.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-wisp-flame",
+    "path": "assets/sprites/symbol-wisp-flame.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-wisp-flame.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-candle-eater",
+    "path": "assets/sprites/symbol-candle-eater.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-candle-eater.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-whisper-mask",
+    "path": "assets/sprites/symbol-whisper-mask.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-whisper-mask.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-rust-eater",
+    "path": "assets/sprites/symbol-rust-eater.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-rust-eater.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-creaking-doll",
+    "path": "assets/sprites/symbol-creaking-doll.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-creaking-doll.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-dream-eater",
+    "path": "assets/sprites/symbol-dream-eater.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-dream-eater.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-failing-spinner",
+    "path": "assets/sprites/symbol-failing-spinner.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-failing-spinner.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "prop-sign",
+    "path": "assets/sprites/prop-sign.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/prop-sign.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "prop-chest",
+    "path": "assets/sprites/prop-chest.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/prop-chest.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "prop-gather",
+    "path": "assets/sprites/prop-gather.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/prop-gather.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
   }
 ]
