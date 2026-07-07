@@ -254,6 +254,16 @@ export function isSolidAt(map: MapDefinition, position: Position): boolean {
   return tile === undefined || TILE_SOLID[tile];
 }
 
+/**
+ * そのマスが壁扱いか(壁タイル、またはマップ範囲外)。M14: 壁の向き差分描画で使う。
+ * 範囲外を壁の続きとして扱うことで、マップ端の壁が「上面」として描かれ、
+ * 境界の見た目(立体感)が破綻しない。水などの他solid種は壁扱いしない。
+ */
+export function isWallLike(map: MapDefinition, position: Position): boolean {
+  const tile = tileTypeAt(map, position);
+  return tile === undefined || tile === "wall";
+}
+
 export function npcAt(map: MapDefinition, position: Position): NpcPlacement | null {
   return map.npcs.find((n) => samePosition(n.position, position)) ?? null;
 }

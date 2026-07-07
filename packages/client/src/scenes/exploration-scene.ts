@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import {
   ENEMY_DISPLAY_NAMES,
   isEquipment,
+  isWallLike,
   MAPS,
   midBossDefeatFlag,
   NPC_DISPLAY_NAMES,
@@ -23,7 +24,7 @@ import type { AiUtteranceEvent } from "../net/game-client.js";
 import { playSe, requestBgm } from "../audio.js";
 import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
 import { getGameClient, type GameClient } from "../net/game-client.js";
-import { TILESET_KEY, TILESET_TILE_PX, tileFrame, tileTint } from "../tile-frames.js";
+import { TILESET_KEY, TILESET_TILE_PX, tileFrame, tileTint, wallFrame } from "../tile-frames.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { ConversationOverlay } from "../ui/conversation-overlay.js";
 import { DialogBox } from "../ui/dialog-box.js";
@@ -730,8 +731,13 @@ export class ExplorationScene extends Phaser.Scene {
         if (tile === undefined) {
           continue;
         }
+        // 壁のみ南隣の壁判定で正面/上面フレームを切り替える(M14)。他種は従来どおり。
+        const frame =
+          tile === "wall"
+            ? wallFrame(this.map.id, isWallLike(this.map, { x, y: y + 1 }))
+            : tileFrame(this.map.id, tile);
         const image = this.add
-          .image(x * TILE_SIZE, y * TILE_SIZE, TILESET_KEY, tileFrame(this.map.id, tile))
+          .image(x * TILE_SIZE, y * TILE_SIZE, TILESET_KEY, frame)
           .setOrigin(0)
           .setScale(TILE_SIZE / TILESET_TILE_PX)
           .setTint(tint);

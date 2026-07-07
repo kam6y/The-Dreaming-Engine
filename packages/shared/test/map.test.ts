@@ -5,6 +5,7 @@ import {
   interactionTarget,
   isSolidTileType,
   isWalkable,
+  isWallLike,
   mapDefinitionSchema,
   tileTypeAt,
   transitionAt,
@@ -48,6 +49,23 @@ describe("tileTypeAt / 衝突", () => {
     expect(tileTypeAt(sampleMap, { x: 0, y: 0 })).toBe("wall");
     expect(tileTypeAt(sampleMap, { x: 2, y: 2 })).toBe("wall");
     expect(tileTypeAt(sampleMap, { x: 5, y: 5 })).toBeUndefined();
+  });
+});
+
+describe("isWallLike(壁の向き差分・M14)", () => {
+  it("壁マスは true", () => {
+    expect(isWallLike(sampleMap, { x: 0, y: 0 })).toBe(true); // 外周壁
+    expect(isWallLike(sampleMap, { x: 2, y: 2 })).toBe(true); // 内部の壁
+  });
+
+  it("床マスは false", () => {
+    expect(isWallLike(sampleMap, { x: 1, y: 1 })).toBe(false);
+  });
+
+  it("範囲外は壁扱いで true(境界を壁の続きとして描く)", () => {
+    expect(isWallLike(sampleMap, { x: 5, y: 5 })).toBe(true);
+    expect(isWallLike(sampleMap, { x: -1, y: 2 })).toBe(true);
+    expect(isWallLike(sampleMap, { x: 2, y: 5 })).toBe(true); // 南端の外側
   });
 });
 

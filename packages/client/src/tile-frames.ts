@@ -67,6 +67,27 @@ export function tileFrame(mapId: MapId, tile: TileType): number {
 }
 
 /**
+ * 壁の「上面・内部」フレーム(M14: 壁の向き差分)。壁が下方向にも続く
+ * (南隣も壁扱い)マスで使う。シートの12行目=ボーダー付きの無地ブロック。
+ * ★暫定値。M14-2でオーケストレーターが実プレイで目視調整する(調整はこの表のみ)。
+ */
+const WALL_TOP_FRAMES: Record<MapCategory, number> = {
+  town: frameAt(14, 12),
+  field: frameAt(21, 12),
+  dungeon: frameAt(28, 12)
+};
+
+/**
+ * 壁タイルのフレーム番号を、南隣が壁扱いか否かで切り替える(M14: 向き差分)。
+ * 南が非壁(下に床が見える)= 壁の正面(TILE_FRAMES の現行フレーム)、
+ * 南も壁 = 壁の上面・内部(WALL_TOP_FRAMES)。正面は tileFrame と単一の出所を共有する。
+ */
+export function wallFrame(mapId: MapId, southIsWall: boolean): number {
+  const category = categoryOf(mapId);
+  return southIsWall ? WALL_TOP_FRAMES[category] : TILE_FRAMES[category].wall;
+}
+
+/**
  * マップ区分ごとの暗色トーン(乗算tint)。原色寄りのCC0タイルを
  * ダークファンタジーの沈んだ色調(青灰と琥珀の対比: asset-pipeline.md)へ寄せる。
  * 街=夕暮れの青灰、フィールド=くすんだ荒野、ダンジョン=冷たい青灰。
