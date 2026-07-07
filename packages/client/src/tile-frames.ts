@@ -68,13 +68,14 @@ export function tileFrame(mapId: MapId, tile: TileType): number {
 
 /**
  * 壁の「上面・内部」フレーム(M14: 壁の向き差分)。壁が下方向にも続く
- * (南隣も壁扱い)マスで使う。シートの12行目=ボーダー付きの無地ブロック。
- * ★暫定値。M14-2でオーケストレーターが実プレイで目視調整する(調整はこの表のみ)。
+ * (南隣も壁扱い)マスで使う。シートの15行目=縁取りの石ブロック
+ * (12行目のボーダー付きブロックは縦積みで横縞に見えたため差し替え。
+ * 候補比較と全マップ合成プレビューの目視で選定: M14-2)。
  */
 const WALL_TOP_FRAMES: Record<MapCategory, number> = {
-  town: frameAt(14, 12),
-  field: frameAt(21, 12),
-  dungeon: frameAt(28, 12)
+  town: frameAt(14, 15),
+  field: frameAt(21, 15),
+  dungeon: frameAt(28, 15)
 };
 
 /**
