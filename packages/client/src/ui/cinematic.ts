@@ -16,7 +16,8 @@ export interface CinematicPanel {
  * オープニング/エンディングの静止画+テキスト演出(共通ロジック)。
  * パネルを順に見せ、各行を TypewriterText で1行ずつ表示する。
  * スペース/Enter/クリックで送る(表示中なら全文スキップ、行末なら次行/次パネル、
- * 最後まで来たら onComplete)。検証済みでない外部テキストは扱わない(固定ナレーション)。
+ * 最後まで来たら onComplete)。Esc で演出全体をとばして即 onComplete(M15-4)。
+ * 検証済みでない外部テキストは扱わない(固定ナレーション)。
  */
 export class Cinematic {
   private readonly scene: Phaser.Scene;
@@ -77,7 +78,7 @@ export class Cinematic {
     });
 
     this.prompt = scene.add
-      .text(Math.round(width * 0.88), Math.round(height * 0.93), "▽ スペース", {
+      .text(Math.round(width * 0.88), Math.round(height * 0.93), "▽ スペース(Esc: とばす)", {
         color: "#8f96a4",
         fontFamily: UI_FONT_FAMILY,
         fontSize: "15px"
@@ -93,6 +94,7 @@ export class Cinematic {
     const keyboard = this.scene.input.keyboard;
     keyboard?.off("keydown-SPACE", this.advance, this);
     keyboard?.off("keydown-ENTER", this.advance, this);
+    keyboard?.off("keydown-ESC", this.finish, this);
     this.scene.input.off(Phaser.Input.Events.POINTER_DOWN, this.advance, this);
     this.background?.destroy();
     this.veil.destroy();
@@ -106,6 +108,7 @@ export class Cinematic {
     this.scene.time.delayedCall(0, () => {
       keyboard?.on("keydown-SPACE", this.advance, this);
       keyboard?.on("keydown-ENTER", this.advance, this);
+      keyboard?.on("keydown-ESC", this.finish, this);
       this.scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.advance, this);
     });
   }

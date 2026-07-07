@@ -418,6 +418,8 @@ export class ExplorationScene extends Phaser.Scene {
     // 売買成立=se-coin / アイテム使用の回復成功=se-heal(要求送信済みで届いた結果 snapshot)
     if (coinConfirmed) {
       playSe(this, "se-coin");
+      // 購入・売却の成功フィードバック(M15-4: 失敗時しか表示が無かった)
+      this.shopOverlay?.showMessage("取引が成立した。");
     }
     if (healConfirmed) {
       playSe(this, "se-heal");
@@ -1026,17 +1028,19 @@ export class ExplorationScene extends Phaser.Scene {
   private applyWorldZoom(): void {
     const mapPixelWidth = this.map.width * TILE_SIZE;
     const mapPixelHeight = this.map.height * TILE_SIZE;
-    const containZoom = Math.min(
+    // cover方式: 画面の縦横を必ずタイルで埋める(黒帯を出さない: M15-4)。
+    // 収まらない軸はカメラのプレイヤー追従+bounds clampでスクロールする
+    const coverZoom = Math.max(
       this.scale.width / mapPixelWidth,
       this.scale.height / mapPixelHeight
     );
     const camera = this.cameras.main;
-    camera.setZoom(containZoom);
+    camera.setZoom(coverZoom);
 
-    // Phaserのbounds clampは左上寄せのため、余白が出る軸はboundsを対称に
-    // 広げてマップを画面中央に置く
-    const viewWorldWidth = this.scale.width / containZoom;
-    const viewWorldHeight = this.scale.height / containZoom;
+    // cover では余白は生じないが、リサイズ端数への防御として対称マージンを保つ
+    // (Phaserのbounds clampは左上寄せのため、余白が出る軸は中央寄せにする)
+    const viewWorldWidth = this.scale.width / coverZoom;
+    const viewWorldHeight = this.scale.height / coverZoom;
     const marginX = Math.max(0, (viewWorldWidth - mapPixelWidth) / 2);
     const marginY = Math.max(0, (viewWorldHeight - mapPixelHeight) / 2);
     camera.setBounds(

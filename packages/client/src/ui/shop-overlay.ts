@@ -239,7 +239,10 @@ export class ShopOverlay {
       const owned = this.snapshot.inventory.find((s) => s.itemId === entry.itemId)?.count ?? 0;
       return {
         id: entry.itemId,
-        label: `${entry.name}${itemShortLabel(entry.itemId)}  ${entry.buyPrice}G(所持${owned})`
+        label: `${entry.name}${itemShortLabel(entry.itemId)}  ${entry.buyPrice}G(所持${owned})`,
+        // 持ち合わせが足りない品は選べない=見た目でも区別される(M15-4)。
+        // 所持金は snapshot 更新(refresh)ごとに再評価される
+        disabled: entry.buyPrice > this.snapshot.player.gold
       };
     });
   }

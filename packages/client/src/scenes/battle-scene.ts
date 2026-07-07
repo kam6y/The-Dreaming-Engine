@@ -439,6 +439,8 @@ export class BattleScene extends Phaser.Scene {
       }
       case "victory":
         playSe(this, "se-victory");
+        // 「崩れて消える」ナレーションに合わせて敵の姿を消す(M15-4)
+        this.tweens.add({ targets: this.enemySprite, alpha: 0, duration: 700 });
         break;
       case "level-up":
         playSe(this, "se-levelup");
