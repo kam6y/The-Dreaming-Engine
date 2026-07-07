@@ -1,4 +1,6 @@
 import {
+  affinityTier,
+  affinityTierDefinition,
   DEFAULT_NPC_TOPICS,
   ENEMY_DISPLAY_NAMES,
   FETCH_TARGET_IDS,
@@ -6,6 +8,8 @@ import {
   ITEMS,
   NPC_DISPLAY_NAMES,
   STREET_EVENTS,
+  SUMMARY_MAX_LENGTH,
+  type AffinityTier,
   type ConversationExchange,
   type NpcId,
   type SubQuest,
@@ -49,6 +53,43 @@ const NPC_PERSONA: Record<NpcId, string> = {
   priest:
     "教会「灯守堂」の司祭フィオル。痩せて背の高い年齢不詳の人物。一人称「私」、穏やかで古風(「〜でしょう」「〜なのです」)。静かで、どこか疲れを滲ませる。"
 };
+
+/**
+ * 好感度の段階別「態度指示」(会話プロンプトの <npc_state> に添える固定定数)。
+ * game-design.md「好感度の段階(拡張: M11)」(a)項の態度指示 / ai-integration.md「会話セッション管理」。
+ * 文面は世界観(青灰と琥珀・灯・夢)のトーンに寄せた裁量文で、各NPCの人物設定と矛盾しない
+ * 一般形にしてある(人物設定が態度より優先である旨は AFFINITY_ATTITUDE_PERSONA_NOTE で添える)。
+ *
+ * これらはサーバー管理の固定定数(段階名も AFFINITY_TIERS 由来の固定文字列)であり、
+ * NPC_PERSONA・NPC_DISPLAY_NAMES と同じ信頼クラスに属する。したがって neutralizeTags は
+ * 通さない(無害化対象は話題・記憶・発話など「出所が可変のテキスト」のみ:guardrails 第3層の流儀)。
+ */
+export const AFFINITY_ATTITUDE_INSTRUCTIONS: Record<AffinityTier, string> = {
+  wary: "態度: 旅人をまだ信じていない。応えは短く、素っ気なく。個人的な打ち明け話や踏み込んだ頼みは、灯を翳すようにやんわり受け流す。",
+  distant:
+    "態度: 礼は尽くすが、心の距離は保つ。自分から深い事情や内緒話は明かさず、当たり障りなく応じる。",
+  friendly:
+    "態度: 旅人に気を許しはじめている。口調はいくらか和らぎ、自分の事情や街の噂を、頼まれずとも少しだけ零す。",
+  trusted: "態度: 旅人を信じ、心を開いている。本音まで率直に語り、その力になろうと自ら手を差し伸べる。"
+};
+
+/** 態度指示は人物設定の枠内で表す(人物設定が態度より優先)旨の一文(段階に依らず添える) */
+export const AFFINITY_ATTITUDE_PERSONA_NOTE =
+  "ただし上の人物像が最優先であり、態度はその人柄の口調・性根の枠内で滲ませること。";
+
+/**
+ * <npc_state> に添える好感度ブロック(好感度の数値 + 段階名 + 段階別態度指示 + 人物設定優先の注記)。
+ * 好感度は数値、段階名・態度指示は固定定数のため、いずれも neutralizeTags 不要(上記の流儀)。
+ */
+function formatAffinityBlock(affinity: number): string {
+  const tier = affinityTier(affinity);
+  const label = affinityTierDefinition(tier).label;
+  return (
+    `好感度: ${affinity}(0-100)/ 段階: ${label}\n` +
+    `${AFFINITY_ATTITUDE_INSTRUCTIONS[tier]}\n` +
+    AFFINITY_ATTITUDE_PERSONA_NOTE
+  );
+}
 
 /** タグ本体を組み立てる小ヘルパー(可変テキストは呼び出し側で neutralize 済みにする) */
 function tag(name: string, body: string): string {
@@ -98,12 +139,12 @@ function buildUserPrompt(context: DreamMasterContext): string {
     case "conversation": {
       const name = NPC_DISPLAY_NAMES[context.partnerNpcId];
       const topic = context.topic ?? DEFAULT_NPC_TOPICS[context.partnerNpcId];
-      const affinityLine =
-        context.affinity !== undefined ? `\n旅人への好感度: ${context.affinity}(0-100)` : "";
+      const affinityBlock =
+        context.affinity !== undefined ? `\n${formatAffinityBlock(context.affinity)}` : "";
       const parts = [
         tag(
           "npc_state",
-          `あなたは今、${name}として旅人と向き合っている。\n人物: ${NPC_PERSONA[context.partnerNpcId]}\n今日の話題: ${neutralizeTags(topic)}${affinityLine}`
+          `あなたは今、${name}として旅人と向き合っている。\n人物: ${NPC_PERSONA[context.partnerNpcId]}\n今日の話題: ${neutralizeTags(topic)}${affinityBlock}`
         )
       ];
       if (context.memorySummary !== undefined && context.memorySummary.trim().length > 0) {
@@ -177,17 +218,23 @@ function buildUserPrompt(context: DreamMasterContext): string {
     }
     case "summary": {
       const name = NPC_DISPLAY_NAMES[context.partnerNpcId];
-      const existing =
-        context.existingSummary.trim().length > 0
-          ? neutralizeTags(context.existingSummary)
-          : "(まだ要約はない)";
+      const hasExisting = context.existingSummary.trim().length > 0;
+      const existing = hasExisting ? neutralizeTags(context.existingSummary) : "(まだ要約はない)";
+      // 既存要約がある場合のみ「古い情報の圧縮を優先し、新しい約束を落とさない」指示を足す。
+      const compressionNote = hasExisting
+        ? "既存の要約にある古い出来事は思い切って圧縮してよいが、今回新たに生まれた約束・依頼・貸し借りは必ず残すこと。"
+        : "";
       return [
         tag("npc_state", `会話相手: ${name}`),
         tag("memory", existing),
         tag("conversation", formatConversation(context.exchanges, name)),
         tag(
           "task",
-          "既存の要約と未要約の往復を踏まえ、この会話の記憶を200字以内の日本語で要約しなさい。要約はテキストで出力し、ツールは使わないこと。"
+          `${name}が次に旅人と会ったとき、この会話を自然に思い出せるよう、二人の記憶を${SUMMARY_MAX_LENGTH}字以内の日本語で要約しなさい。` +
+            "次の優先順で拾うこと:(1)交わした事実——約束・依頼・貸し借り、(2)旅人の呼び名や口調の癖、(3)この会話でNPCが抱いた感情の変化。" +
+            "日時・金額・品名などの具体は残し、挨拶や社交辞令は省く。" +
+            compressionNote +
+            `要約は常に1件のテキストとして出力し、過去の要約に継ぎ足さず既存の要約を置き換えること(連結しない)。${SUMMARY_MAX_LENGTH}字以内に収め、ツールは使わないこと。`
         )
       ].join("\n");
     }
