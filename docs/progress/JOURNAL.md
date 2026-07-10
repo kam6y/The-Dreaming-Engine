@@ -1661,3 +1661,33 @@
   立ち絵 npc-<id>・マップスプライト sprite-<id>(4方向)も未生成=M16-5のcodex委譲で
   生成(現状はプレースホルダー退避で描画される)。第2エリア到達E2Eは
   忘れ野西門(0,8)経由の経路(x=11縦断→横枝道)で書く
+
+## [57] 2026-07-10 M16-4: 第2エリアのクライアント反映+到達E2E(UI=オーケストレーター)
+
+- やったこと:
+  - tile-frames.ts: categoryOf が新3マップを全て "dungeon" 区分に落とすバグを修正
+    (琥珀郷が裂け目と同じ見た目になっていた)。フレームは既存3区分を流用
+    (琥珀郷=town系・沈み野=field系・坑=dungeon系)し、土地の空気は
+    TILE_TINT_OVERRIDES のマップ別tintで差別化: 琥珀郷=0xb5a488(琥珀の残光の暖色)、
+    沈み野=0x7b8474(霧の沈む冷えた低地)、灯還りの坑=0x887b82(裂け目より
+    僅かに暖かい暗い坑道)。値はM14-2と同じ合成プレビュー方式の目視で選定
+  - 探索BGM: 琥珀郷=bgm-town・沈み野=bgm-field・坑=bgm-dungeon(既存5曲を流用。
+    新曲追加なし)
+  - 会話内装: INTERIOR_BY_NPC へ caretaker=inn-interior・artisan=shop-interior
+    (既存内装の流用)。warden は坑口の屋外のため内装なし=暗幕のまま(裁量)
+  - E2E: second-area.spec(13本目)=灯町→忘れ野→西門(0,8)→沈み野→琥珀郷の到達。
+    門へ正確に立つ必要があるため1マスずつ確定歩行(press→座標poll)方式
+    (長押し+pollはオーバーシュートで門を外すため)。noSymbols=1で安定化
+  - unit: tile-frames.test へM16-4の区分・tint差別化テストを追加(既存ファイルへ追記)
+- 裁量事項: tint 3値、warden の内装なし、戦闘背景は変更不要
+  (mapId.startsWith("dungeon") が dungeon-4 を、非dungeonが field-2 を正しく拾う)
+- 検証: `pnpm check` 緑(unit 783)・`pnpm test:e2e` **13/13緑**(新スモーク一発通過)
+- 次にやること: M16-5(アセットのcodex委譲=新NPC3人のマップスプライト
+  **4方向セット**(asset-pipeline.md M17注記)+立ち絵 npc-caretaker/artisan/warden、
+  必要なら集落背景。検収→クライアントは自動で拾う(sprite-<npcId>とnpc-<npcId>の
+  命名でmanifest登録すれば mapSprite/conversation-overlay が既存コードのまま表示)。
+  完了時にBACKLOG「第2エリア」チェック+M16ゲート(test:e2e:full)。
+  外見典拠は world-lore.md 3.6〜3.8。codex委譲は前回同様 `codex exec`(MCPはセッション
+  再起動後に復旧見込み=JOURNAL[55])。立ち絵の会話表示はAI会話フローで出る
+  (トワ=会話のみなので即確認可、イルマ/ガロはoverlay型UI=宿・店では立ち絵枠なし、
+  AI会話時のみ表示される点に注意)
