@@ -959,6 +959,23 @@ describe("メインクエスト進行(司祭・ボス・エンディング)", ()
     expect(store.saved).toHaveLength(0);
   });
 
+  it("第2章の各段階でもボスは非アクティブ(dream-eater-defeated 以降=再戦しない)", async () => {
+    // isBossDefeated の順序判定一般化により、ch2-* でもボスマーカーは再活性化しない
+    for (const stage of ["ch2-stirring", "ch2-vigil-song", "ch2-beyond"] as const) {
+      const { session } = await bossSession({ stage });
+      // interact: 戦闘にならず撃破後スクリプトで戻す(snapshot は必ず返る)
+      const viaInteract = await session.handle({ type: "interact" });
+      expect(firstSnapshot(viaInteract).mode).toBe("exploration");
+      const dialogs = dialogsOf(viaInteract);
+      expect(dialogs).toHaveLength(1);
+      expect(dialogs[0]?.body).toContain("静か");
+      // move で踏み込んでも戦闘にならない
+      const viaMove = await session.handle({ type: "move", direction: "down" });
+      expect(firstSnapshot(viaMove).mode).toBe("exploration");
+      expect(mustView(session).mode).toBe("exploration");
+    }
+  });
+
   /** dungeon-3・撃破済み(dream-eater-defeated)状態を組む(acknowledge-ending 用) */
   function dreamEaterDefeatedState(): GameState {
     const state = createNewGameState();
@@ -966,6 +983,97 @@ describe("メインクエスト進行(司祭・ボス・エンディング)", ()
     state.mainQuestStage = "dream-eater-defeated";
     return state;
   }
+});
+
+// ===========================================================================
+// メインクエスト第2章「灯の還る先」(M18-2。導管の間 d4-conduit・番人トワの唄=決定論)
+// ===========================================================================
+
+describe("メインクエスト第2章(導管・トワの唄)", () => {
+  /** 灯還りの坑「導管の間」の d4-conduit (11,17) の北隣 (11,16) 向き down に立つ(段階を注入) */
+  async function conduitSession(stage: GameState["mainQuestStage"]): Promise<SessionContext> {
+    const ctx = createSession(); // gatekeeper 未注入(第2章の主線は AI 非依存)
+    const state = createNewGameState();
+    state.location = { mapId: "dungeon-4", position: { x: 11, y: 16 }, facing: "down" };
+    state.mainQuestStage = stage;
+    ctx.store.loadResult = { ok: true, state };
+    await ctx.session.handle({ type: "continue" });
+    return ctx;
+  }
+
+  it("epilogue 以前の各段階で導管を調べても段階は進まず既存の定型文(第2章は始まらない)", async () => {
+    for (const stage of ["arrival", "rift-revealed", "dream-eater-defeated"] as const) {
+      const { session } = await conduitSession(stage);
+      const msgs = await session.handle({ type: "interact" });
+      expect(mustState(session).mainQuestStage).toBe(stage); // 進まない
+      const dialogs = dialogsOf(msgs);
+      expect(dialogs).toHaveLength(1);
+      expect(dialogs[0]?.body).toContain("かすかに温かい"); // map 定義の既存定型文
+    }
+  });
+
+  it("正常系遷移: epilogue→導管(ch2-stirring)→トワ(ch2-vigil-song)→導管(ch2-beyond)。各遷移で snapshot 更新+即時セーブ", async () => {
+    const { session, store } = await conduitSession("epilogue");
+
+    // (1) 導管を調べる → ch2-stirring(第2章開始)。snapshot 先出しで新段階を伝える
+    const m1 = await session.handle({ type: "interact" });
+    expect(firstSnapshot(m1).mainQuestStage).toBe("ch2-stirring");
+    expect(mustState(session).mainQuestStage).toBe("ch2-stirring");
+    expect(dialogsOf(m1).length).toBeGreaterThanOrEqual(2);
+    expect(dialogsOf(m1).some((d) => d.body.includes("脈打"))).toBe(true);
+
+    // (2) 坑口のトワへ移動して会話 → ch2-vigil-song(唄の続き「灯の還る先」。決定論スクリプト)
+    mustState(session).location = { mapId: "settlement", position: { x: 13, y: 7 }, facing: "right" };
+    const m2 = await session.handle({ type: "interact" });
+    expect(firstSnapshot(m2).mainQuestStage).toBe("ch2-vigil-song");
+    expect(mustState(session).mainQuestStage).toBe("ch2-vigil-song");
+    const d2 = dialogsOf(m2);
+    expect(d2.length).toBeGreaterThanOrEqual(2);
+    expect(d2.every((d) => d.speaker === NPC_DISPLAY_NAMES.warden)).toBe(true);
+    expect(d2.some((d) => d.body.includes("灯の還る先"))).toBe(true);
+    // 決定論スクリプトのため AI 会話 overlay は開かない
+    expect(mustView(session).interaction).toBeUndefined();
+
+    // (3) 導管の間へ戻って再び調べる → ch2-beyond(第2章クリア)+即時セーブ
+    const savedBefore = store.saved.length;
+    mustState(session).location = { mapId: "dungeon-4", position: { x: 11, y: 16 }, facing: "down" };
+    const m3 = await session.handle({ type: "interact" });
+    expect(firstSnapshot(m3).mainQuestStage).toBe("ch2-beyond");
+    expect(mustState(session).mainQuestStage).toBe("ch2-beyond");
+    expect(dialogsOf(m3).some((d) => d.body.includes("確証"))).toBe(true);
+    // ch2-beyond 到達で saves へ永続化(mainQuestStage 確認。テスト用の FakeSaveStore)
+    expect(store.saved.length).toBe(savedBefore + 1);
+    expect(store.saved[store.saved.length - 1]?.mainQuestStage).toBe("ch2-beyond");
+  });
+
+  it("ch2-stirring で導管を再び調べても段階は進まない(トワの唄待ちへ促す)", async () => {
+    const { session } = await conduitSession("ch2-stirring");
+    const msgs = await session.handle({ type: "interact" });
+    expect(mustState(session).mainQuestStage).toBe("ch2-stirring"); // 進まない
+    const dialogs = dialogsOf(msgs);
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]?.body).toContain("トワ"); // トワの唄へ促す
+  });
+
+  it("クリア後(ch2-beyond)に導管を再び調べても余韻の定型文のみ(段階不変・章は再発しない)", async () => {
+    const { session, store } = await conduitSession("ch2-beyond");
+    const savedBefore = store.saved.length;
+    const msgs = await session.handle({ type: "interact" });
+    expect(mustState(session).mainQuestStage).toBe("ch2-beyond"); // 進まない
+    expect(dialogsOf(msgs)).toHaveLength(1);
+    expect(store.saved.length).toBe(savedBefore); // 再セーブしない(段階不変)
+  });
+
+  it("ch2-stirring 以外でトワに話しても唄は明かさない(gatekeeper 未注入=定型ダイアログ。回帰)", async () => {
+    // epilogue(第2章前)ではトワは従来どおり定型のみ=段階も進めない
+    const { session } = await conduitSession("epilogue");
+    mustState(session).location = { mapId: "settlement", position: { x: 13, y: 7 }, facing: "right" };
+    const msgs = await session.handle({ type: "interact" });
+    expect(msgs).toHaveLength(1);
+    expect(dialogsOf(msgs)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.warden);
+    expect(dialogsOf(msgs)[0]?.body.includes("灯の還る先")).toBe(false);
+    expect(mustState(session).mainQuestStage).toBe("epilogue"); // 進まない
+  });
 });
 
 // ===========================================================================

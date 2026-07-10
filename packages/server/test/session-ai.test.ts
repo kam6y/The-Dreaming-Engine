@@ -943,3 +943,34 @@ describe("番人トワ(第2エリア)の会話(M16。gatekeeper 注入時)", () 
     if (msg?.type === "error") expect(msg.code).toBe("no-quests-here");
   });
 });
+
+// ===========================================================================
+// 番人トワの会話(第2章 M18-2 の回帰: ch2-stirring 以外は従来の AI 会話のまま)
+// ===========================================================================
+
+describe("番人トワの会話(第2章スクリプトの発火境界)", () => {
+  function wardenState(stage: GameState["mainQuestStage"]): GameState {
+    const state = createNewGameState();
+    // 坑口傍 (13,7) から東の warden (14,7) へ向く
+    state.location = { mapId: "settlement", position: { x: 13, y: 7 }, facing: "right" };
+    state.mainQuestStage = stage;
+    return state;
+  }
+
+  it("ch2-stirring 以外(ch2-vigil-song / arrival)ではトワは従来の AI 会話を開き段階を進めない(モック)", async () => {
+    for (const stage of ["ch2-vigil-song", "arrival"] as const) {
+      const { session, store } = makeAiSession();
+      store.loadResult = { ok: true, state: wardenState(stage) };
+      await session.handle({ type: "continue" });
+      const msgs = await session.handle({ type: "interact" });
+      await tick(); // 非同期の挨拶生成の完了ハンドラを流す(inFlight を跨ぐ)
+      // 唄の決定論スクリプトではなく AI 会話 overlay が開く(即時 snapshot に反映)
+      const snap = msgs.find((m) => m.type === "snapshot");
+      if (snap?.type !== "snapshot") throw new Error("snapshot が無い");
+      expect(snap.view.interaction?.kind).toBe("conversation");
+      expect(mustView(session).interaction?.kind).toBe("conversation");
+      // 段階は進めない(ch2-vigil-song 以降でトワの唄は再発しない)
+      expect(mustState(session).mainQuestStage).toBe(stage);
+    }
+  });
+});

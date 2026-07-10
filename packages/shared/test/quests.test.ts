@@ -12,6 +12,9 @@ import {
   gameStateSchema,
   INVENTORY_CAPACITY,
   isReportReady,
+  isStageAtOrAfter,
+  MAIN_QUEST_STAGES,
+  mainQuestStageIndex,
   occupiesQuestSlot,
   recordHuntKill,
   removeQuestFromList,
@@ -21,7 +24,7 @@ import {
   SUB_QUEST_REWARD_GOLD_PER_COUNT,
   usedSpace
 } from "../src/index.js";
-import type { QuestProposalDraft, SubQuest } from "../src/index.js";
+import type { MainQuestStage, QuestProposalDraft, SubQuest } from "../src/index.js";
 
 // ---------------------------------------------------------------------------
 // テスト用ファクトリ(有効な既定値。over で個別に上書き)
@@ -356,5 +359,66 @@ describe("多周回(報告=除去による受注枠の再利用)", () => {
     // セーブに載せても gameStateSchema.parse が成功する
     const state = { ...createNewGameState(), subQuests: quests };
     expect(gameStateSchema.safeParse(state).success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// メインクエスト段階の順序判定(第2章 M18-2。enum 末尾追記の後方互換)
+// ---------------------------------------------------------------------------
+
+describe("メインクエスト段階(順序判定・enum 後方互換)", () => {
+  it("MAIN_QUEST_STAGES は第1章4段階の後ろに第2章3段階が単調接続する(既存順序不変)", () => {
+    // 第1章の既存4段階は先頭に同順で保たれる(旧セーブ互換の要)
+    expect(MAIN_QUEST_STAGES.slice(0, 4)).toEqual([
+      "arrival",
+      "rift-revealed",
+      "dream-eater-defeated",
+      "epilogue"
+    ]);
+    // 第2章の3段階が末尾に追記されている
+    expect(MAIN_QUEST_STAGES.slice(4)).toEqual(["ch2-stirring", "ch2-vigil-song", "ch2-beyond"]);
+  });
+
+  it("mainQuestStageIndex は宣言順のインデックスを返す(単調増加)", () => {
+    const indices = MAIN_QUEST_STAGES.map((s) => mainQuestStageIndex(s));
+    expect(indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("isStageAtOrAfter は base 以降(base を含む)で真", () => {
+    // dream-eater-defeated 以降(=ボス撃破済み)は第2章の各段階でも真
+    expect(isStageAtOrAfter("dream-eater-defeated", "dream-eater-defeated")).toBe(true);
+    expect(isStageAtOrAfter("epilogue", "dream-eater-defeated")).toBe(true);
+    expect(isStageAtOrAfter("ch2-stirring", "dream-eater-defeated")).toBe(true);
+    expect(isStageAtOrAfter("ch2-vigil-song", "dream-eater-defeated")).toBe(true);
+    expect(isStageAtOrAfter("ch2-beyond", "dream-eater-defeated")).toBe(true);
+    // base より前は偽
+    expect(isStageAtOrAfter("arrival", "dream-eater-defeated")).toBe(false);
+    expect(isStageAtOrAfter("rift-revealed", "dream-eater-defeated")).toBe(false);
+    // 同一段階も含む・自身との比較は常に真
+    for (const s of MAIN_QUEST_STAGES) expect(isStageAtOrAfter(s, s)).toBe(true);
+  });
+
+  it("旧セーブ(第1章の各段階)は enum 追記後も gameStateSchema でパースできる(後方互換)", () => {
+    const legacyStages: MainQuestStage[] = [
+      "arrival",
+      "rift-revealed",
+      "dream-eater-defeated",
+      "epilogue"
+    ];
+    for (const stage of legacyStages) {
+      const state = { ...createNewGameState(), mainQuestStage: stage };
+      const parsed = gameStateSchema.safeParse(state);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.mainQuestStage).toBe(stage);
+    }
+  });
+
+  it("第2章の新段階も gameStateSchema でパースできる(セーブに載る)", () => {
+    for (const stage of ["ch2-stirring", "ch2-vigil-song", "ch2-beyond"] as const) {
+      const state = { ...createNewGameState(), mainQuestStage: stage };
+      const parsed = gameStateSchema.safeParse(state);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.mainQuestStage).toBe(stage);
+    }
   });
 });

@@ -21,18 +21,49 @@ import type { Inventory } from "./inventory.js";
 // ---------------------------------------------------------------------------
 
 /**
- * メインクエスト段階(game-design.md「メインクエスト」手順1-5 を最小の enum で表す。語彙は裁量):
+ * メインクエスト段階(第1章=game-design.md「メインクエスト」手順1-5 / 第2章=同「メインクエスト第2章
+ * (拡張: M18)」。語彙は裁量)。**末尾追記のみ**で既存値・順序は不変(旧セーブは既存値のみを持つため
+ * 後方互換。GAME_STATE_VERSION は据え置き):
  * - arrival             : オープニング後。記憶を失った旅人が街に流れ着いた(手順1)
  * - rift-revealed       : 司祭との会話で「綻びの原因は夢喰い」と知った(手順2。以降ダンジョン攻略=手順3)
  * - dream-eater-defeated: ボス「夢喰い」撃破(手順4)
- * - epilogue            : エンディング視聴済み(手順5)
+ * - epilogue            : エンディング視聴済み(手順5。ここまでが第1章)
+ * - ch2-stirring        : 【第2章開始】導管の間で脈打つ導管の異変に気づいた(epilogue 段階で d4-conduit を調べる)
+ * - ch2-vigil-song      : 番人トワが唄の続き「灯の還る先」を明かした(ch2-stirring 段階でトワと会話)
+ * - ch2-beyond          : 【第2章クリア】導管の間へ戻り、機関の外にまだ夢を紡ぐ何かがある確証を得た(ch2-vigil-song 段階で d4-conduit を再び調べる)
  */
-export const MAIN_QUEST_STAGES = ["arrival", "rift-revealed", "dream-eater-defeated", "epilogue"] as const;
+export const MAIN_QUEST_STAGES = [
+  "arrival",
+  "rift-revealed",
+  "dream-eater-defeated",
+  "epilogue",
+  "ch2-stirring",
+  "ch2-vigil-song",
+  "ch2-beyond"
+] as const;
 export const mainQuestStageSchema = z.enum(MAIN_QUEST_STAGES);
 export type MainQuestStage = z.infer<typeof mainQuestStageSchema>;
 
 /** 新規ゲームのメインクエスト段階 */
 export const MAIN_QUEST_INITIAL_STAGE: MainQuestStage = "arrival";
+
+/**
+ * メインクエスト段階の順序インデックス(MAIN_QUEST_STAGES の並び順=単調な進行順)。
+ * 第1章(arrival→epilogue)に第2章(ch2-stirring→ch2-beyond)が単調接続する。
+ * 未知値は入り得ない(zod パース済み)が、防御的に -1 を返す。
+ */
+export function mainQuestStageIndex(stage: MainQuestStage): number {
+  return MAIN_QUEST_STAGES.indexOf(stage);
+}
+
+/**
+ * stage が base 段階以降(base を含む)まで進んでいるか(段階の順序判定)。
+ * 例: isStageAtOrAfter(state.mainQuestStage, "dream-eater-defeated") で
+ * 「ボス撃破済み(第2章の各段階でも真)」を等値ではなく順序で表す。
+ */
+export function isStageAtOrAfter(stage: MainQuestStage, base: MainQuestStage): boolean {
+  return mainQuestStageIndex(stage) >= mainQuestStageIndex(base);
+}
 
 // ---------------------------------------------------------------------------
 // サブクエスト: 定数・スキーマ

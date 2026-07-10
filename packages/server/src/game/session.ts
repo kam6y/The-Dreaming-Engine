@@ -29,6 +29,7 @@ import {
   innFeeFor,
   interactionTarget,
   isInShopStock,
+  isStageAtOrAfter,
   lootForChest,
   lootForGather,
   neighbor,
@@ -182,6 +183,49 @@ const BOSS_DEFEATED_LINE = "裂け目の奥は、もう静かだ。飢えは終�
 /** 中ボス撃破後にその場所へ近づいた時のスクリプト(再戦不可。M10) */
 const MID_BOSS_DEFEATED_LINE =
   "崩れた織機の残骸が、糸を垂らしたまま動かない。空回りは、もう止まっている。";
+
+// ---------------------------------------------------------------------------
+// メインクエスト第2章「灯の還る先」の決定論スクリプト(M18-2)
+// 物語的な正: world-lore.md 1.6 / game-design.md「メインクエスト第2章(拡張: M18)」。
+// すべて選択肢会話・調べイベントの決定論で運ぶ(AI 非依存。司祭 PRIEST_REVEAL_LINES と同方式)。
+// 開示の高度はフック#2(「灯の還る先」が在るという確証)まで。トワ個人の最奥(3.8 の70以上)・
+// フック#1(旅人の正体)は匂わせを越えない。トーンは6節の語りのトーンガイドに従う。
+// ---------------------------------------------------------------------------
+
+/** 灯還りの坑「導管の間」の調べオブジェクト id(第2章の起点/結び。dungeon4.ts と一致) */
+const CONDUIT_OBJECT_ID = "d4-conduit";
+
+/** 【第2章開始】epilogue で導管の間を再訪して調べた時の気づき(ch2-stirring へ) */
+const CONDUIT_STIRRING_LINES: readonly string[] = [
+  "以前はただ「かすかに温かい」だけだった導管が、脈打っている。ひとつ、またひとつと、闇の奥へ熱を送り出している。",
+  "この温もりは、ここで生まれているのではない。どこかへ運ばれ、どこかで受け取られている――そう、確かに感じる。",
+  "坑の異変を知る者がいるとすれば、坑口の番人トワだろう。あの唄には、まだ続きがある気がする。"
+];
+
+/** ch2-stirring で導管を再び調べた時(段階は進めない=トワの唄待ちへ促す) */
+const CONDUIT_AWAIT_SONG_LINE =
+  "導管は変わらず脈打ち、遠い彼方へ温もりを送り続けている。この行き先を知るには、まず坑口のトワの唄を聴くべきだ。";
+
+/** 【第2章クリア】ch2-vigil-song でトワの唄を胸に導管の間へ戻った時の結び(ch2-beyond へ+即時セーブ) */
+const CONDUIT_BEYOND_LINES: readonly string[] = [
+  "トワの唄を胸に導管の前に立つと、脈打つ導管は問いに応えるように、いっそう強く温もりを送り出した。",
+  "得られたのは答えではなく、確証だった。灯町も、琥珀郷も、裂け目も、機関が紡ぐ夢のごく一部に過ぎない。",
+  "その外に、まだ夢を紡ぐ何かが確かにある。どこへ通じ、その先で誰が夢を見ているのかは、まだわからない。",
+  "旅人は予感だけを胸に、導管の間を後にした。灯は、還るべき先へ還っていく。"
+];
+
+/** 第2章クリア後(ch2-beyond)に導管を再び調べた時の余韻(段階不変・章は再発しない) */
+const CONDUIT_AFTERGLOW_LINE =
+  "導管は今も、静かに脈打っている。灯は還るべき先へ還り、その先でなお、誰かが夢を見ている。";
+
+/** ch2-stirring でトワに話しかけた時、唄の続き「灯の還る先」を明かす(ch2-vigil-song へ) */
+const WARDEN_VIGIL_SONG_LINES: readonly string[] = [
+  "「坑の奥が、脈を打ちはじめた。……あんたも、あれに気づいたんだね」",
+  "「なら、誰も歌わなくなった唄の続きを、あんたにだけ聴かせよう。『灯の還る先』――そういう節さ」",
+  "「消えた灯は、この郷でも、あの裂け目でもない、どこかへ還る。そこでは今も夢が紡がれている……と、唄はそう伝えている」",
+  "「どこの、とは唄わない。誰も知らないからね。あたしはただ、坑の奥のまだ温かいものを、静かに見ているだけ」",
+  "「導管の間へお戻り。あの脈動が、唄が本当かどうかを、あんたに答えてくれるはずだよ」"
+];
 
 export class GameSession {
   private readonly saveStore: SaveStore;
@@ -525,10 +569,14 @@ export class GameSession {
     this.activeInteraction = null;
   }
 
-  /** ボス撃破済みか(dream-eater-defeated 以降。ボスマーカーの非アクティブ判定に使う) */
+  /**
+   * ボス撃破済みか(dream-eater-defeated 以降。ボスマーカーの非アクティブ判定に使う)。
+   * 第2章段階(ch2-*)を epilogue の後ろへ足したため、等値ではなく**順序判定**で
+   * 「dream-eater-defeated 以降」を表す(さもないと第2章中にボスマーカーが再活性化する:
+   * game-design.md「メインクエスト第2章」実装上の要注意点)。
+   */
   private isBossDefeated(): boolean {
-    const stage = this.requireState().mainQuestStage;
-    return stage === "dream-eater-defeated" || stage === "epilogue";
+    return isStageAtOrAfter(this.requireState().mainQuestStage, "dream-eater-defeated");
   }
 
   // =========================================================================
@@ -682,11 +730,8 @@ export class GameSession {
         }
         return this.openConversation("informant");
       case "warden":
-        // 番人トワ。店・宿は持たず会話のみ(サブクエスト窓口は従来どおりカイのみ=quest-request を増やさない)。
-        if (this.gatekeeper === null) {
-          return [this.dialogMsg(NPC_DISPLAY_NAMES.warden, PLACEHOLDER_WARDEN_LINE)];
-        }
-        return this.openConversation("warden");
+        // 番人トワ。第2章 ch2-stirring では唄の続きを決定論スクリプトで明かす。それ以外は従来の会話。
+        return this.interactWarden();
       case "priest":
         // 司祭フィオル(メインクエスト進行役)。arrival はスクリプトの明かしで rift-revealed へ。
         return this.interactPriest();
@@ -746,6 +791,29 @@ export class GameSession {
       return [this.dialogMsg(NPC_DISPLAY_NAMES.priest, PRIEST_ENCOURAGE_LINE)];
     }
     return this.openConversation("priest");
+  }
+
+  /**
+   * 番人トワへの interact。店・宿は持たず会話のみ(サブクエスト窓口は従来どおりカイのみ)。
+   * - ch2-stirring(第2章): 唄の続き「灯の還る先」を決定論スクリプト(AI 非依存)で明かし
+   *   mainQuestStage を ch2-vigil-song へ進める。司祭リビールと同じ「snapshot 先出し→dialog 列」方式。
+   * - それ以外の段階: 従来どおり(gatekeeper 未注入=定型ダイアログ / 注入=AI 会話)。
+   *   進行済み(ch2-vigil-song 以降)でも唄は再発しない=AI 会話へ戻る(章の主線は決定論・深部は好感度会話)。
+   */
+  private interactWarden(): ServerMessage[] {
+    const state = this.requireState();
+    if (state.mainQuestStage === "ch2-stirring") {
+      // 決定論の進行。スナップショットで新段階(ch2-vigil-song)を先に伝え、唄の続きの dialog 列を続ける
+      this.state = { ...state, mainQuestStage: "ch2-vigil-song" };
+      return [
+        this.snapshotMsg(),
+        ...WARDEN_VIGIL_SONG_LINES.map((line) => this.dialogMsg(NPC_DISPLAY_NAMES.warden, line))
+      ];
+    }
+    if (this.gatekeeper === null) {
+      return [this.dialogMsg(NPC_DISPLAY_NAMES.warden, PLACEHOLDER_WARDEN_LINE)];
+    }
+    return this.openConversation("warden");
   }
 
   // =========================================================================
@@ -968,10 +1036,12 @@ export class GameSession {
     return [this.snapshotMsg()];
   }
 
-  private interactObject(object: MapObject): ServerMessage[] {
+  private async interactObject(object: MapObject): Promise<ServerMessage[]> {
     const state = this.requireState();
     switch (object.kind) {
       case "sign":
+        // 灯還りの坑「導管の間」の導管は第2章の起点/結び(調べイベント)。それ以外の看板は既存どおり。
+        if (object.id === CONDUIT_OBJECT_ID) return this.interactConduit(object.message);
         return [this.dialogMsg(null, object.message)];
       case "chest": {
         if (state.gimmicks.includes(object.id)) {
@@ -989,6 +1059,42 @@ export class GameSession {
           this.gatheredThisVisit.add(object.id);
         });
       }
+    }
+  }
+
+  /**
+   * 導管の間の導管(d4-conduit)を調べた時の第2章進行(決定論。段階で分岐):
+   * - epilogue      : 【第2章開始】ch2-stirring へ進め、脈打つ導管への気づきを dialog 列で返す(snapshot 先出し)
+   * - ch2-stirring  : トワの唄待ち(段階不変)。トワへ促す1行を返す
+   * - ch2-vigil-song: 【第2章クリア】ch2-beyond へ進め、確証の結びを返す+即時セーブ(acknowledgeEnding の先例)
+   * - ch2-beyond    : クリア後の余韻1行(段階不変・章は再発しない=BOSS_DEFEATED_LINE と同運用)
+   * - それ以前(arrival/rift-revealed/dream-eater-defeated): 既存の定型文(map の message)のまま(第2章は始まらない)
+   */
+  private async interactConduit(defaultMessage: string): Promise<ServerMessage[]> {
+    const state = this.requireState();
+    switch (state.mainQuestStage) {
+      case "epilogue":
+        this.state = { ...state, mainQuestStage: "ch2-stirring" };
+        return [
+          this.snapshotMsg(),
+          ...CONDUIT_STIRRING_LINES.map((line) => this.dialogMsg(null, line))
+        ];
+      case "ch2-stirring":
+        return [this.dialogMsg(null, CONDUIT_AWAIT_SONG_LINE)];
+      case "ch2-vigil-song":
+        this.state = { ...state, mainQuestStage: "ch2-beyond" };
+        // 第2章クリアは即時セーブでフリープレイへ確定する(acknowledgeEnding と同じ締め方)
+        this.accruePlaytime();
+        await this.saveStore.save(this.requireState());
+        return [
+          this.snapshotMsg(),
+          ...CONDUIT_BEYOND_LINES.map((line) => this.dialogMsg(null, line))
+        ];
+      case "ch2-beyond":
+        return [this.dialogMsg(null, CONDUIT_AFTERGLOW_LINE)];
+      default:
+        // arrival / rift-revealed / dream-eater-defeated: 既存の定型文のまま(第2章は始まらない)
+        return [this.dialogMsg(null, defaultMessage)];
     }
   }
 
