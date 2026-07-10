@@ -742,5 +742,167 @@
     "promptFile": "assets/prompts/sprite-priest-right.md",
     "createdAt": "2026-07-10",
     "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "symbol-mist-wolf-up",
+    "path": "assets/sprites/symbol-mist-wolf-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-mist-wolf-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/背面)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-mist-wolf-left",
+    "path": "assets/sprites/symbol-mist-wolf-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-mist-wolf-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-mist-wolf-right",
+    "path": "assets/sprites/symbol-mist-wolf-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-mist-wolf-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-wisp-flame-up",
+    "path": "assets/sprites/symbol-wisp-flame-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-wisp-flame-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/奥向きの流れ)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-wisp-flame-left",
+    "path": "assets/sprites/symbol-wisp-flame-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-wisp-flame-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向きの流れ)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-wisp-flame-right",
+    "path": "assets/sprites/symbol-wisp-flame-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-wisp-flame-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向きの流れ・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-candle-eater-up",
+    "path": "assets/sprites/symbol-candle-eater-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-candle-eater-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/奥向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-candle-eater-left",
+    "path": "assets/sprites/symbol-candle-eater-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-candle-eater-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-candle-eater-right",
+    "path": "assets/sprites/symbol-candle-eater-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-candle-eater-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-whisper-mask-up",
+    "path": "assets/sprites/symbol-whisper-mask-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-whisper-mask-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/背面空洞)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-whisper-mask-left",
+    "path": "assets/sprites/symbol-whisper-mask-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-whisper-mask-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-whisper-mask-right",
+    "path": "assets/sprites/symbol-whisper-mask-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-whisper-mask-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-rust-eater-up",
+    "path": "assets/sprites/symbol-rust-eater-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-rust-eater-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/奥向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-rust-eater-left",
+    "path": "assets/sprites/symbol-rust-eater-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-rust-eater-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-rust-eater-right",
+    "path": "assets/sprites/symbol-rust-eater-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-rust-eater-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-creaking-doll-up",
+    "path": "assets/sprites/symbol-creaking-doll-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-creaking-doll-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/背面)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-creaking-doll-left",
+    "path": "assets/sprites/symbol-creaking-doll-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-creaking-doll-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-creaking-doll-right",
+    "path": "assets/sprites/symbol-creaking-doll-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-creaking-doll-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
   }
 ]
