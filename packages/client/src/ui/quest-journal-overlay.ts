@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-import type { SnapshotView, SubQuestView } from "@dreaming-engine/shared";
+import type { MainQuestStage, SnapshotView, SubQuestView } from "@dreaming-engine/shared";
 
 import { UI_FONT_FAMILY } from "./font.js";
 
@@ -15,6 +15,25 @@ const PANEL_HEIGHT = 420;
 const STATUS_LABELS: Record<string, string> = {
   active: "進行中",
   completed: "達成・報告待ち"
+};
+
+/**
+ * メインクエスト段階の現況1行(M18-3。全段階を網羅=テストで欠落を検知)。
+ * 第2章(ch2-*)は開示の掟(world-lore.md 1.6: 地名・核心・フック#1の断定なし)に従い、
+ * 次の行き先の示唆までに留める。
+ */
+export const MAIN_QUEST_JOURNAL: Record<MainQuestStage, string> = {
+  arrival: "記憶を失い、灯町に流れ着いた。教会『灯守堂』の司祭が、何かを知っているようだ。",
+  "rift-revealed":
+    "夢の綻びの源は、裂け目の最深部に巣食う『夢喰い』。ダンジョンを降り、これを討つ。",
+  "dream-eater-defeated": "夢喰いは崩れて消えた。灯は、わずかに戻りはじめている。",
+  epilogue: "夢喰いとの戦いは終わり、街には静かな日々が戻った。……機関の夢には、まだ続きがある気がする。",
+  "ch2-stirring":
+    "灯還りの坑・導管の間の導管が、脈打ちはじめた。坑口の番人トワが、唄の続きを知っているかもしれない。",
+  "ch2-vigil-song":
+    "トワの唄は『灯の還る先』を語った。導管の間へ戻り、あの脈動にもう一度向き合おう。",
+  "ch2-beyond":
+    "確証を得た――機関の外に、まだ夢を紡ぐ何かがある。旅の続きは、まだ誰も歌っていない。"
 };
 
 /**
@@ -51,7 +70,7 @@ export class QuestJournalOverlay {
       fontSize: "20px"
     });
 
-    this.bodyText = scene.add.text(panelX + 20, panelY + 54, this.describe(options.snapshot.subQuests), {
+    this.bodyText = scene.add.text(panelX + 20, panelY + 54, this.describe(options.snapshot), {
       color: "#f1eee4",
       fontFamily: UI_FONT_FAMILY,
       fontSize: "15px",
@@ -77,7 +96,13 @@ export class QuestJournalOverlay {
     this.container.destroy(true);
   }
 
-  private describe(subQuests: readonly SubQuestView[]): string {
+  private describe(snapshot: SnapshotView): string {
+    // メインクエストの現況を先頭に常設する(M18-3。段階の正はサーバーの mainQuestStage)
+    const main = `【メインクエスト】\n  ${MAIN_QUEST_JOURNAL[snapshot.mainQuestStage]}`;
+    return `${main}\n\n${this.describeSubQuests(snapshot.subQuests)}`;
+  }
+
+  private describeSubQuests(subQuests: readonly SubQuestView[]): string {
     if (subQuests.length === 0) {
       return "受注中の依頼はない。\n\n情報屋(カイ)に「仕事はあるか」と尋ねてみよう。";
     }

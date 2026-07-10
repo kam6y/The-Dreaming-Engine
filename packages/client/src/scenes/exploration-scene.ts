@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import {
   ENEMY_DISPLAY_NAMES,
   isEquipment,
+  isStageAtOrAfter,
   isWallLike,
   MAPS,
   midBossDefeatFlag,
@@ -175,6 +176,9 @@ export class ExplorationScene extends Phaser.Scene {
     (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image | Phaser.GameObjects.Arc)[]
   >();
 
+  /** 第2章: 導管の脈動演出を適用済みか(1シーン1回。M18-3) */
+  private conduitPulseApplied = false;
+
   private symbolViews: Phaser.GameObjects.GameObject[] = [];
 
   /** 描画済みシンボルのキー(差分がある時だけ再描画する) */
@@ -228,6 +232,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
+    this.conduitPulseApplied = false;
 
     this.cameras.main.setBackgroundColor("#0b0d12");
 
@@ -242,6 +247,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.drawMidBoss();
     this.updateEnemySymbols();
     this.updateResolvedObjects();
+    this.updateConduitPulse();
     this.createPlayer();
     this.setupHud();
     this.setupCamera();
@@ -422,6 +428,7 @@ export class ExplorationScene extends Phaser.Scene {
     }
     this.updateEnemySymbols();
     this.updateResolvedObjects();
+    this.updateConduitPulse();
     this.updateInteraction(view);
     this.shopOverlay?.refresh(view);
     this.inventoryOverlay?.refresh(view);
@@ -865,6 +872,39 @@ export class ExplorationScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * 第2章: 導管の間の「調べられる灯」を脈動へ強める(M18-3)。
+   * ch2-stirring 以降(=脈打つ導管に気づいた後)、d4-conduit の灯を大きく・暖かく・
+   * 速い明滅にする。段階はシーン中でも進む(調べた瞬間)ため、snapshot 更新毎に
+   * 未適用なら適用する(1シーン1回)。仕様の「実装対象外」(発光スプライト等)は作らず、
+   * 既存の灯マーカー(circle+tween)の流用に留める。
+   */
+  private updateConduitPulse(): void {
+    if (this.conduitPulseApplied) {
+      return;
+    }
+    if (!isStageAtOrAfter(this.snapshot.mainQuestStage, "ch2-stirring")) {
+      return;
+    }
+    const cue = this.objectViews.get("d4-conduit")?.[1];
+    if (!(cue instanceof Phaser.GameObjects.Arc)) {
+      return;
+    }
+    this.conduitPulseApplied = true;
+    this.tweens.killTweensOf(cue);
+    cue.setRadius(4);
+    cue.setFillStyle(0xe8a95c, 1);
+    this.tweens.add({
+      targets: cue,
+      alpha: 0.35,
+      scale: 1.6,
+      duration: 620,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut"
+    });
+  }
+
   /** 解決済み(開封済み宝箱・採取済み採取点)のオブジェクトを非表示にする */
   private updateResolvedObjects(): void {
     const resolved = new Set(this.snapshot.resolvedObjectIds);
@@ -1262,6 +1302,8 @@ export class ExplorationScene extends Phaser.Scene {
     // E2E 用: 現在の対話種別(shop/inn/conversation/none)と受注中クエスト数
     game.dataset["interaction"] = view.interaction?.kind ?? "none";
     game.dataset["questCount"] = String(view.subQuests.length);
+    // E2E 用: メインクエスト段階(第2章スモークが段階遷移を観測する。M18-3)
+    game.dataset["mainQuestStage"] = view.mainQuestStage;
     // E2E 用: 地の文/NPC ダイアログの開閉(dialog-only 応答は snapshot を伴わないため
     // これで開閉を観測して移動可否の回帰を決定論的にテストする)
     game.dataset["dialog"] = this.dialog.isOpen ? "open" : "closed";
