@@ -1575,3 +1575,8 @@
   npcIdSchema拡張・NPC_DISPLAY_NAMES・NPC_PERSONA・琥珀郷への配置・
   寄り屋の宿代5G・琥珀工房の品揃え(ITEMS実在品のみ)・M11割引の適用。
   ai-guardrails.mdの防御要件は不変で
+- 人間確認待ち(push保留): originへのpushが403で失敗。ghのアクティブアカウントが
+  Kan6yee(リポジトリ所有はkam6y)のため。アカウント切替はClaude側で行わない
+  (認証の切替は人間の判断)。`gh auth switch --user kam6y` 実行後に
+  `git push origin cluade/loop` で未pushコミットがまとめて送られる。
+  ループはローカルコミットで継続する
