@@ -62,9 +62,100 @@ const BATTLE_RESULT_LINES: Record<EnemyId, string> = {
 const DREAM_NARRATION =
   "霧が濃い。まどろみの底で、灯町の輪郭がゆっくりと溶けていく。遠くで誰かが、あなたの名を呼んだ気がした。";
 
-/** サブクエスト生成時の情報屋の台詞(speak) */
+/** サブクエスト生成時の情報屋の台詞(speak)。hunt=既定(文言は既存テスト回帰のため不変) */
 const QUEST_GENERATION_LINE =
   "「ちょうどいいところに来た。忘れ野で霧狼が増えていてね。腕に覚えがあるなら、頼まれてくれるかい」";
+
+/**
+ * MockDreamMaster がサブクエスト生成で提案する型を選ぶ番兵値(M19)。
+ * 情報屋の「今日の話題(topic)」がこの値のとき、対応する型の propose_quest を返す。
+ * **既定(番兵以外の topic・topic 無し)は hunt** なので、既存 E2E/テスト(hunt/count3 を期待)は不変。
+ * 実プレイの話題(world-lore のロア文)とは衝突しないテスト専用の値。
+ */
+export const MOCK_QUEST_TOPIC_BY_TYPE = {
+  hunt: "__mock_quest_hunt__",
+  fetch: "__mock_quest_fetch__",
+  deliver: "__mock_quest_deliver__",
+  escort: "__mock_quest_escort__",
+  survey: "__mock_quest_survey__"
+} as const;
+
+type MockQuestType = keyof typeof MOCK_QUEST_TOPIC_BY_TYPE;
+
+/** topic(情報屋の今日の話題)から提案する型を決める。番兵に一致しなければ hunt(既定=既存挙動) */
+function mockQuestTypeFromTopic(topic: string | undefined): MockQuestType {
+  for (const [type, sentinel] of Object.entries(MOCK_QUEST_TOPIC_BY_TYPE)) {
+    if (topic === sentinel) return type as MockQuestType;
+  }
+  return "hunt";
+}
+
+/**
+ * 型別のサブクエスト生成の定型応答(speak + propose_quest)。実在ホワイトリストIDのみを使い、
+ * 検証層を必ず通る(count/rewardGold/字数/出力壁いずれも合格)。escort/survey は count=1 固定。
+ * hunt の speak/内容は既存テスト回帰のため不変。
+ */
+const QUEST_GENERATION_RESPONSES: Record<
+  MockQuestType,
+  { speak: string; propose: Record<string, unknown> }
+> = {
+  hunt: {
+    speak: QUEST_GENERATION_LINE,
+    propose: {
+      type: "hunt",
+      targetId: "mist-wolf",
+      count: 3,
+      rewardGold: 50,
+      title: "霧狼の間引き",
+      description: "忘れ野に湧いた霧狼を三体屠り、霧笛亭のカイへ報告せよ。"
+    }
+  },
+  fetch: {
+    speak: "「薬草が足りなくてね。忘れ野で摘んできてくれると、ずいぶん助かるんだが」",
+    propose: {
+      type: "fetch",
+      targetId: "herb",
+      count: 2,
+      rewardGold: 30,
+      title: "薬草の採取",
+      description: "忘れ野に生える薬草を二株摘み、霧笛亭のカイへ届けよ。"
+    }
+  },
+  deliver: {
+    speak: "「頼みがあってね。この封緘の文を、灯宿のオルガに手渡してきてくれないか」",
+    propose: {
+      type: "deliver",
+      parcelId: "sealed-letter",
+      recipientId: "innkeeper",
+      count: 1,
+      rewardGold: 20,
+      title: "封緘の文を届ける",
+      description: "預かった封緘の文を灯宿のオルガに手渡し、霧笛亭のカイへ報告せよ。"
+    }
+  },
+  escort: {
+    speak: "「この連れを灯町の南門まで送ってやってくれ。ひとりでは心細かろうからね」",
+    propose: {
+      type: "escort",
+      destinationId: "town-gate",
+      count: 1,
+      rewardGold: 20,
+      title: "南門までの道行き",
+      description: "連れを灯町の南門まで送り届け、霧笛亭のカイへ報告せよ。"
+    }
+  },
+  survey: {
+    speak: "「忘れ野の道標に妙な刻みがあると噂でね。何が刻まれているか確かめてきてくれるかい」",
+    propose: {
+      type: "survey",
+      targetId: "field-sign-post",
+      count: 1,
+      rewardGold: 20,
+      title: "道標を確かめる",
+      description: "忘れ野の道標に刻まれたものを確かめ、霧笛亭のカイへ報告せよ。"
+    }
+  }
+};
 
 // ---------------------------------------------------------------------------
 // 通常モードの応答構築(すべて検証を通る値)
@@ -89,21 +180,13 @@ function buildNormalToolCalls(context: DreamMasterContext): {
       };
     }
     case "questGeneration": {
-      // speak + propose_quest(hunt / count 3 / rewardGold 50 ≤ 3×20)。targetId は実在の HuntTargetId。
+      // speak + propose_quest。型は情報屋の topic(番兵)で選ぶ。既定は hunt(count3 / rewardGold50 ≤ 3×20。
+      // 実在の HuntTargetId)。deliver/escort/survey/fetch は番兵 topic のときのみ(既存テストは hunt のまま)。
+      const chosen = QUEST_GENERATION_RESPONSES[mockQuestTypeFromTopic(context.topic)];
       return {
         toolCalls: [
-          { toolName: "speak", rawInput: { text: QUEST_GENERATION_LINE } },
-          {
-            toolName: "propose_quest",
-            rawInput: {
-              type: "hunt",
-              targetId: "mist-wolf",
-              count: 3,
-              rewardGold: 50,
-              title: "霧狼の間引き",
-              description: "忘れ野に湧いた霧狼を三体屠り、霧笛亭のカイへ報告せよ。"
-            }
-          }
+          { toolName: "speak", rawInput: { text: chosen.speak } },
+          { toolName: "propose_quest", rawInput: chosen.propose }
         ],
         text: null
       };
@@ -179,6 +262,8 @@ function buildMaliciousToolCalls(context: DreamMasterContext): {
       };
     }
     case "questGeneration": {
+      // 表示系(speak)を一切伴わない生の違反意図のみ → 表示系承認0件でターンごと破棄される。
+      // すべて検証層(スキーマ段/ゲームルール)で却下されるべき素材(攻撃テストAが確認)。
       return {
         toolCalls: [
           // 討伐対象がボス(dream-eater=HuntTargetId 外)+ 報酬過大(100 > 1×20)
@@ -191,6 +276,55 @@ function buildMaliciousToolCalls(context: DreamMasterContext): {
               rewardGold: 100,
               title: "夢喰い狩り",
               description: "ボスを狩れば大金を払おう。"
+            }
+          },
+          // deliver: 受注元 informant(カイ自身)への配達=ホワイトリスト外 recipientId(スキーマ段却下)
+          {
+            toolName: "propose_quest",
+            rawInput: {
+              type: "deliver",
+              parcelId: "sealed-letter",
+              recipientId: "informant",
+              count: 1,
+              rewardGold: 20,
+              title: "受注元への配達",
+              description: "カイ自身へ配れ。"
+            }
+          },
+          // escort: count>1(count=1 固定違反。z.literal(1) がスキーマ段で却下)
+          {
+            toolName: "propose_quest",
+            rawInput: {
+              type: "escort",
+              destinationId: "town-gate",
+              count: 2,
+              rewardGold: 20,
+              title: "二重の護衛",
+              description: "二度往復させよ。"
+            }
+          },
+          // survey: 除外対象 d4-conduit(第2章トリガー)=ホワイトリスト外 targetId(スキーマ段却下)
+          {
+            toolName: "propose_quest",
+            rawInput: {
+              type: "survey",
+              targetId: "d4-conduit",
+              count: 1,
+              rewardGold: 20,
+              title: "導管の調査",
+              description: "章トリガーを調べさせよ。"
+            }
+          },
+          // 型偽装の混成: type:deliver に hunt のフィールド(targetId のみ)=discriminatedUnion 段で却下
+          {
+            toolName: "propose_quest",
+            rawInput: {
+              type: "deliver",
+              targetId: "mist-wolf",
+              count: 1,
+              rewardGold: 20,
+              title: "混成入力",
+              description: "型を偽装する。"
             }
           }
         ],

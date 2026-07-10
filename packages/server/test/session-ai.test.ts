@@ -6,7 +6,9 @@ import {
   BATTLE_RESULT_FALLBACK_TEXT,
   DREAM_FALLBACK_TEXT,
   NPC_DISPLAY_NAMES,
+  addItem,
   countOf,
+  countQuestItem,
   createNewGameState,
   samePosition,
   type Direction,
@@ -21,7 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AuditLog } from "../src/ai/audit-log.js";
 import { loadAiConfig, type AiConfig, type DeepPartial } from "../src/ai/config.js";
-import { MockDreamMaster } from "../src/ai/dream-master/index.js";
+import { MockDreamMaster, MOCK_QUEST_TOPIC_BY_TYPE } from "../src/ai/dream-master/index.js";
 import type {
   DreamMaster,
   DreamMasterContext,
@@ -972,5 +974,285 @@ describe("番人トワの会話(第2章スクリプトの発火境界)", () => {
       // 段階は進めない(ch2-vigil-song 以降でトワの唄は再発しない)
       expect(mustState(session).mainQuestStage).toBe(stage);
     }
+  });
+});
+
+// ===========================================================================
+// 新型サブクエスト(deliver/escort/survey)の server 統合(M19-3)
+// 受諾→遂行→報告・放棄回収・不干渉条件。遂行はすべて決定論(AI 非依存)。
+// ===========================================================================
+
+/** active な deliver クエスト(受取NPC=recipientId / 預かり品=parcelId) */
+function activeDeliver(
+  id: string,
+  recipientId: "innkeeper" | "merchant" | "priest" | "artisan",
+  parcelId: "sealed-letter" | "warm-oil-flask" | "amber-charm",
+  count: number
+): SubQuest {
+  return {
+    type: "deliver",
+    id,
+    recipientId,
+    parcelId,
+    count,
+    progress: 0,
+    rewardGold: 20,
+    title: "預かり品を届ける",
+    description: "預かった品を指定の相手に手渡せ。",
+    status: "active"
+  };
+}
+
+/** active な escort クエスト(目的地=destinationId) */
+function activeEscort(id: string, destinationId: "town-gate" | "settlement-gate" | "field-crossroads"): SubQuest {
+  return {
+    type: "escort",
+    id,
+    destinationId,
+    count: 1,
+    progress: 0,
+    rewardGold: 20,
+    title: "南門への道行き",
+    description: "連れを目的地まで送り届けよ。",
+    status: "active"
+  };
+}
+
+/** active な survey クエスト(調査対象=targetId) */
+function activeSurvey(
+  id: string,
+  targetId: "field-sign-post" | "d1-sign" | "town-sign-tavern" | "settlement-sign-mine"
+): SubQuest {
+  return {
+    type: "survey",
+    id,
+    targetId,
+    count: 1,
+    progress: 0,
+    rewardGold: 20,
+    title: "対象を確かめる",
+    description: "現地の対象を調べよ。",
+    status: "active"
+  };
+}
+
+/** 灯町を舞台にした GameState(location は各テストで上書きする) */
+function townState(mutate: (s: GameState) => void): GameState {
+  const s = createNewGameState();
+  mutate(s);
+  return s;
+}
+
+describe("deliver: 受諾で預かり品を別枠へ受領", () => {
+  it("情報屋が deliver を提案→受諾で subQuests へ active + 預かり品を別枠へ受領", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    // モックの提案型を deliver に切替える番兵 topic(既定は hunt)。実プレイのロア文とは衝突しない
+    mustState(session).npcs.informant.topic = MOCK_QUEST_TOPIC_BY_TYPE.deliver;
+    await talkTo(session, "informant");
+
+    await session.handle({ type: "quest-request" });
+    const reqView = mustView(session);
+    if (reqView.interaction?.kind !== "conversation") throw new Error("会話 interaction がない");
+    expect(reqView.interaction.pendingProposal?.type).toBe("deliver");
+
+    await session.handle({ type: "conversation-choose", choice: "accept" });
+    const st = mustState(session);
+    expect(st.subQuests).toHaveLength(1);
+    expect(st.subQuests[0]?.type).toBe("deliver");
+    expect(st.subQuests[0]?.status).toBe("active");
+    // 預かり品はクエスト用アイテム別枠へ受領(所持上限対象外)
+    expect(countQuestItem(st.inventory, "sealed-letter")).toBe(1);
+  });
+
+  it("escort / survey も番兵 topic で提案され、受諾で count=1 の active になる(預かり品なし)", async () => {
+    for (const type of ["escort", "survey"] as const) {
+      const { session } = makeAiSession();
+      await session.handle({ type: "new-game" });
+      mustState(session).npcs.informant.topic = MOCK_QUEST_TOPIC_BY_TYPE[type];
+      await talkTo(session, "informant");
+      await session.handle({ type: "quest-request" });
+      const view = mustView(session);
+      if (view.interaction?.kind !== "conversation") throw new Error("会話 interaction がない");
+      expect(view.interaction.pendingProposal?.type).toBe(type);
+
+      await session.handle({ type: "conversation-choose", choice: "accept" });
+      const st = mustState(session);
+      expect(st.subQuests).toHaveLength(1);
+      expect(st.subQuests[0]?.type).toBe(type);
+      expect(st.subQuests[0]?.status).toBe("active");
+      expect(st.subQuests[0]?.count).toBe(1); // escort/survey は count=1 固定
+    }
+  });
+});
+
+describe("deliver: 受取NPC への納品(決定論)", () => {
+  it("受取NPC(灯宿オルガ)に話しかけると納品され(completed・別枠から消える)、宿の overlay へ進む", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.subQuests = [activeDeliver("pq-1", "innkeeper", "sealed-letter", 1)];
+        s.inventory = addItem(s.inventory, "sealed-letter", 1).inventory; // 別枠へ
+      })
+    };
+    await session.handle({ type: "continue" });
+    expect(countQuestItem(mustState(session).inventory, "sealed-letter")).toBe(1);
+
+    const msgs = await talkTo(session, "innkeeper");
+    const st = mustState(session);
+    expect(st.subQuests[0]?.status).toBe("completed"); // 納品で completed
+    expect(countQuestItem(st.inventory, "sealed-letter")).toBe(0); // 預かり品が別枠から消える
+    // 手渡しの dialog が含まれ、その後に宿の overlay が開く(納品後に通常フローへ)
+    const dialogs = msgs.filter((m): m is Extract<ServerMessage, { type: "dialog" }> => m.type === "dialog");
+    expect(dialogs.some((d) => d.body.includes("手渡した"))).toBe(true);
+    expect(mustView(session).interaction?.kind).toBe("inn");
+  });
+
+  it("受取NPC以外(渡り物屋レンド)に話しかけても納品は起きない(quest active・預かり品は手元)", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.subQuests = [activeDeliver("pq-1", "innkeeper", "sealed-letter", 1)];
+        s.inventory = addItem(s.inventory, "sealed-letter", 1).inventory;
+      })
+    };
+    await session.handle({ type: "continue" });
+    await talkTo(session, "merchant"); // 受取NPCでない
+    const st = mustState(session);
+    expect(st.subQuests[0]?.status).toBe("active"); // 納品されない
+    expect(countQuestItem(st.inventory, "sealed-letter")).toBe(1); // 預かり品は手元のまま
+    expect(mustView(session).interaction?.kind).toBe("shop"); // 通常どおり店は開く
+  });
+});
+
+describe("escort: 目的地への到達(決定論)", () => {
+  it("目的地(灯町・南門 town(11,13))に移動で到達すると completed になり通知が出る", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.location = { mapId: "town", position: { x: 11, y: 12 }, facing: "down" };
+        s.subQuests = [activeEscort("pq-1", "town-gate")];
+      })
+    };
+    await session.handle({ type: "continue" });
+    const msgs = await session.handle({ type: "move", direction: "down" });
+
+    const st = mustState(session);
+    expect(st.location.position).toEqual({ x: 11, y: 13 });
+    expect(st.subQuests[0]?.status).toBe("completed");
+    expect(msgs.some((m) => m.type === "dialog")).toBe(true); // 到達通知
+  });
+
+  it("目的地に別クエスト無しで到達しても何も起きない(エラーなし・subQuests 不変)", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.location = { mapId: "town", position: { x: 11, y: 12 }, facing: "down" };
+        s.subQuests = [];
+      })
+    };
+    await session.handle({ type: "continue" });
+    const msgs = await session.handle({ type: "move", direction: "down" });
+
+    expect(mustState(session).location.position).toEqual({ x: 11, y: 13 });
+    expect(mustState(session).subQuests).toHaveLength(0);
+    expect(msgs.every((m) => m.type !== "error")).toBe(true);
+    expect(msgs.every((m) => m.type !== "dialog")).toBe(true); // 到達通知も出ない
+  });
+});
+
+describe("survey: 対象の調べ(決定論)", () => {
+  it("対象(霧笛亭の看板)を調べると completed になり、既存の調べメッセージは維持される", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        // 霧笛亭の看板 town(2,10) の東隣 (3,10) から左を向いて調べる
+        s.location = { mapId: "town", position: { x: 3, y: 10 }, facing: "left" };
+        s.subQuests = [activeSurvey("pq-1", "town-sign-tavern")];
+      })
+    };
+    await session.handle({ type: "continue" });
+    const msgs = await session.handle({ type: "interact" });
+
+    const st = mustState(session);
+    expect(st.subQuests[0]?.status).toBe("completed");
+    const dialogs = msgs.filter((m): m is Extract<ServerMessage, { type: "dialog" }> => m.type === "dialog");
+    // 既存の看板メッセージ(調べ演出)はそのまま + 達成通知
+    expect(dialogs.some((d) => d.body.includes("霧笛亭"))).toBe(true);
+    expect(dialogs.some((d) => d.body.includes("果たした"))).toBe(true);
+  });
+});
+
+describe("放棄: deliver の未納品の預かり品を回収(消滅)", () => {
+  it("active な deliver を放棄すると受注リストから外れ、預かり品が別枠から消える", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.subQuests = [activeDeliver("pq-1", "innkeeper", "sealed-letter", 2)];
+        s.inventory = addItem(s.inventory, "sealed-letter", 2).inventory;
+      })
+    };
+    await session.handle({ type: "continue" });
+    expect(countQuestItem(mustState(session).inventory, "sealed-letter")).toBe(2);
+
+    await session.handle({ type: "abandon-quest", questId: "pq-1" });
+    const st = mustState(session);
+    expect(st.subQuests).toHaveLength(0); // 即時に受注枠を解放
+    expect(countQuestItem(st.inventory, "sealed-letter")).toBe(0); // 未納品の預かり品を回収(消滅)
+  });
+});
+
+describe("報告: 新型は報告時にインベントリ削除を伴わない(報酬のみ付与)", () => {
+  it("納品済み(completed)deliver を報告すると受注リストから外れ、報酬 gold+item を受領(所持品削除なし)", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.subQuests = [
+          {
+            type: "deliver",
+            id: "pq-1",
+            recipientId: "innkeeper",
+            parcelId: "sealed-letter",
+            count: 1,
+            progress: 0,
+            rewardGold: 20,
+            rewardItemId: "potion-small",
+            title: "文を届けた",
+            description: "届け終えた。",
+            status: "completed" // 納品済み(預かり品は既に手を離れている)
+          }
+        ];
+      })
+    };
+    await session.handle({ type: "continue" });
+    const goldBefore = mustState(session).player.gold;
+    const potionBefore = countOf(mustState(session).inventory, "potion-small");
+
+    await session.handle({ type: "report-quest", questId: "pq-1" });
+    const st = mustState(session);
+    expect(st.subQuests).toHaveLength(0); // reported は受注リストから外れる
+    expect(st.player.gold).toBe(goldBefore + 20); // 報酬 gold
+    expect(countOf(st.inventory, "potion-small")).toBe(potionBefore + 1); // 報酬アイテムを受領(削除ではなく付与)
+  });
+
+  it("未達成(active)の escort を報告しようとすると却下される(quest-not-ready)", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.subQuests = [activeEscort("pq-1", "town-gate")]; // 未到達
+      })
+    };
+    await session.handle({ type: "continue" });
+    const res = await session.handle({ type: "report-quest", questId: "pq-1" });
+    expect(res.some((m) => m.type === "error" && m.code === "quest-not-ready")).toBe(true);
+    expect(mustState(session).subQuests).toHaveLength(1); // 受注は維持
   });
 });

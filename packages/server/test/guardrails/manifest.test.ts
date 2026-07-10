@@ -61,6 +61,13 @@ export const REQUIRED_ATTACK_TEST_IDS: readonly string[] = [
   "ATK-quest-nonexistent-target",
   "ATK-subquest-fourth",
   "ATK-propose-second-pending",
+  // 新型サブクエスト(deliver/escort/survey)の却下(拡張: M19。ai-guardrails.md 259-271)
+  "ATK-quest-deliver-whitelist",
+  "ATK-quest-escort-whitelist",
+  "ATK-quest-survey-whitelist",
+  "ATK-quest-mixed-fields",
+  "ATK-quest-escort-survey-count",
+  "ATK-quest-newtype-limits",
   "ATK-nonpositive-count",
   "ATK-non-integer",
   "ATK-world-event-fourth",

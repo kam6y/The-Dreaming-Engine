@@ -320,6 +320,26 @@ export const clientConversationEndMessageSchema = z.object({ type: z.literal("co
 export const clientQuestRequestMessageSchema = z.object({ type: z.literal("quest-request") });
 
 /**
+ * 受注中サブクエストの放棄(クエストジャーナルからの操作。game-design.md 170 行「いつでも放棄」)。
+ * サーバーは deliver の未納品の預かり品を回収してから受注リストから外す(ai-integration.md「5b」放棄時)。
+ * ジャーナルの放棄ボタン(クライアント UI)は M19-4 で配線する。
+ */
+export const clientAbandonQuestMessageSchema = z.object({
+  type: z.literal("abandon-quest"),
+  questId: z.string().min(1)
+});
+
+/**
+ * 達成済みサブクエストの報告(報告先=情報屋カイ。ai-integration.md「達成の意味論」)。
+ * サーバーは達成判定・報酬付与・満杯時の受領保留を行い、成功で受注リストから外す。
+ * 報告の起点(カイの窓口 UI)は M19-4 で配線する。
+ */
+export const clientReportQuestMessageSchema = z.object({
+  type: z.literal("report-quest"),
+  questId: z.string().min(1)
+});
+
+/**
  * エンディング視聴の確認(クライアントがエンディング演出を見せ終えた合図)。
  * サーバーは dream-eater-defeated 段階のときのみ epilogue へ進めてセーブに永続化する
  * (それ以外の段階では冪等に無視)。M6-B のボス撃破→エンディング契約の締めに使う。
@@ -344,6 +364,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   clientConversationChooseMessageSchema,
   clientConversationEndMessageSchema,
   clientQuestRequestMessageSchema,
+  clientAbandonQuestMessageSchema,
+  clientReportQuestMessageSchema,
   clientAcknowledgeEndingMessageSchema
 ]);
 

@@ -285,6 +285,125 @@ describe("攻撃テストA: propose_quest の達成可能性・回数(第1層)",
 });
 
 // ---------------------------------------------------------------------------
+// propose_quest 新型(deliver/escort/survey): ホワイトリスト外参照・型偽装・既存上限(拡張: M19)
+// ai-guardrails.md 259-271。既存の上限・ホワイトリスト・クールダウンは不変、追加の却下のみを検証する。
+// ---------------------------------------------------------------------------
+
+/** 新型の検証を通る妥当な入力(限度テストで「限度以外は妥当」の素材に使う) */
+const validDeliver = {
+  type: "deliver",
+  parcelId: "sealed-letter",
+  recipientId: "innkeeper",
+  count: 2,
+  rewardGold: 40, // 2×20 ちょうど(比検証の境界)
+  title: "封緘の文を届ける",
+  description: "灯宿のオルガへ封緘の文を手渡せ。"
+};
+const validEscort = {
+  type: "escort",
+  destinationId: "town-gate",
+  count: 1,
+  rewardGold: 20,
+  title: "南門への道行き",
+  description: "連れを灯町の南門まで送り届けよ。"
+};
+
+/** questGeneration へ propose_quest を投げる短縮(情報屋セッション + persistent 部分上書き) */
+function propose(input: unknown, persistent: Partial<PersistentStateContext> = {}) {
+  return validateToolCall("questGeneration", "propose_quest", input, {
+    session: session({ partnerNpcId: "informant", affinityAtOpen: 30 }),
+    persistent: persistentBase(persistent)
+  });
+}
+
+describe("攻撃テストA: 新型サブクエストのホワイトリスト外参照(第1層。M19)", () => {
+  it("[ATK-quest-deliver-whitelist] deliver: 受注元 informant・存在しない recipientId・ホワイトリスト外 parcelId は却下", () => {
+    // 受注元カイ自身への配達(informant は DeliverRecipientId 外)
+    expect(propose({ ...validDeliver, recipientId: "informant" }).ok).toBe(false);
+    // 存在しない/ホワイトリスト外の受取NPC(warden は会話可だが受取ホワイトリスト外)
+    expect(propose({ ...validDeliver, recipientId: "warden" }).ok).toBe(false);
+    expect(propose({ ...validDeliver, recipientId: "phantom" }).ok).toBe(false);
+    // ホワイトリスト外の預かり品(old-key は一点物=DeliverParcelId 外 / potion-small は預かり品でない)
+    expect(propose({ ...validDeliver, parcelId: "old-key" }).ok).toBe(false);
+    expect(propose({ ...validDeliver, parcelId: "potion-small" }).ok).toBe(false);
+  });
+
+  it("[ATK-quest-escort-whitelist] escort: 存在しない/通行不能な destinationId は却下", () => {
+    expect(propose({ ...validEscort, destinationId: "nowhere" }).ok).toBe(false);
+    expect(propose({ ...validEscort, destinationId: "d4-conduit" }).ok).toBe(false);
+  });
+
+  it("[ATK-quest-survey-whitelist] survey: 存在しない targetId・除外対象 d4-conduit/chest/gather は却下", () => {
+    const base = { type: "survey", count: 1, rewardGold: 20, title: "調査", description: "対象を調べよ。" };
+    // 第2章トリガー d4-conduit(除外)
+    expect(propose({ ...base, targetId: "d4-conduit" }).ok).toBe(false);
+    // 存在しない対象
+    expect(propose({ ...base, targetId: "phantom-sign" }).ok).toBe(false);
+    // sign 以外(chest/gather は SurveyTargetId 外)
+    expect(propose({ ...base, targetId: "town-chest" }).ok).toBe(false);
+  });
+});
+
+describe("攻撃テストA: 新型サブクエストの型偽装・count=1固定違反(第1層。M19)", () => {
+  it("[ATK-quest-mixed-fields] 型偽装の混成入力(deliver に hunt の targetId のみ / survey に deliver の2参照)は却下", () => {
+    // type:deliver に hunt のフィールド(targetId だけ)=parcelId/recipientId 欠落 → discriminatedUnion で却下
+    expect(
+      propose({ type: "deliver", targetId: "mist-wolf", count: 1, rewardGold: 20, title: "混成", description: "偽装する。" }).ok
+    ).toBe(false);
+    // type:survey に deliver の2参照(parcelId/recipientId)=targetId 欠落 → 却下
+    expect(
+      propose({
+        type: "survey",
+        parcelId: "sealed-letter",
+        recipientId: "innkeeper",
+        count: 1,
+        rewardGold: 20,
+        title: "混成",
+        description: "偽装する。"
+      }).ok
+    ).toBe(false);
+  });
+
+  it("[ATK-quest-escort-survey-count] escort/survey の count>1(count=1固定違反)は却下", () => {
+    expect(propose({ ...validEscort, count: 2 }).ok).toBe(false);
+    expect(
+      propose({ type: "survey", targetId: "field-sign-post", count: 2, rewardGold: 20, title: "調査", description: "対象を調べよ。" }).ok
+    ).toBe(false);
+    // 参考: escort/survey は count=1 固定のため rewardGold は 20(=1×20)以下でなければ比検証で却下
+    expect(reasonOf(propose({ ...validEscort, rewardGold: 40 }))).toContain("報酬");
+  });
+});
+
+describe("攻撃テストA: 新型でも既存上限が適用される(第1層。M19)", () => {
+  it("[ATK-quest-newtype-limits] 新型(deliver)でも受注枠4件目・未受諾中2件目・日4件目・rewardGold超過が却下", () => {
+    // 受注枠が満杯(3件)→ 4件目の deliver は却下
+    expect(
+      reasonOf(propose(validDeliver, { subQuests: [activeHuntQuest("a"), activeHuntQuest("b"), activeHuntQuest("c")] }))
+    ).toContain("受注枠");
+    // 未受諾提案が残っている間の2件目 deliver は却下(pendingProposal は session 側)
+    const pending: SubQuest = { ...activeHuntQuest("pending"), status: "proposed" };
+    expect(
+      reasonOf(
+        validateToolCall("questGeneration", "propose_quest", validDeliver, {
+          session: session({ partnerNpcId: "informant", pendingProposal: pending }),
+          persistent: persistentBase()
+        })
+      )
+    ).toContain("未受諾");
+    // 1日の発行上限(3件)超過 → 4件目の deliver は却下
+    expect(
+      reasonOf(
+        propose(validDeliver, {
+          aiDaily: { ...createDefaultAiDailyCounters(), proposeQuestCount: 3 }
+        })
+      )
+    ).toContain("発行上限");
+    // rewardGold が count×20 超過(deliver count2 で 41)→ 却下
+    expect(reasonOf(propose({ ...validDeliver, rewardGold: 41 }))).toContain("報酬");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 数量系フィールドの整数・非負制約
 // ---------------------------------------------------------------------------
 

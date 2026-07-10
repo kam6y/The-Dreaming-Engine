@@ -355,16 +355,23 @@ describe("MockDreamMaster 悪意モード", () => {
     expect(dispatched.ok).toBe(false);
   });
 
-  it("questGeneration: ボス対象・報酬過大の propose_quest 違反意図を出す", async () => {
+  it("questGeneration: ボス対象・ホワイトリスト外・混成・count>1 の propose_quest 違反意図を出す(全却下)", async () => {
+    // 悪意モードの questGeneration は hunt(ボス)+ 新3型(deliver 受注元/escort count>1/survey 除外対象)
+    // + 型偽装の混成、いずれも検証層で却下されるべき生の違反意図を出す(M19)。
     const result = successOf(await dm.run(questGenCtx));
-    const propose = oneCallOf(result, "propose_quest");
-    expect(validateProposeQuest(propose.rawInput, {
-      subQuests: [],
-      pendingProposal: null,
-      proposeQuestCount: 0,
-      rewardItemProposalCount: 0,
-      questId: "q-test"
-    }).ok).toBe(false);
+    const proposes = callsOf(result, "propose_quest");
+    expect(proposes.length).toBeGreaterThanOrEqual(5);
+    for (const propose of proposes) {
+      expect(
+        validateProposeQuest(propose.rawInput, {
+          subQuests: [],
+          pendingProposal: null,
+          proposeQuestCount: 0,
+          rewardItemProposalCount: 0,
+          questId: "q-test"
+        }).ok
+      ).toBe(false);
+    }
   });
 
   it("dream: 出力壁逸脱の narrate と上限超過 rumor の違反意図を出す", async () => {

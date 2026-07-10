@@ -1,9 +1,13 @@
 import {
   activeQuestSlotCount,
   createProposedQuest,
+  deliverParcelIdSchema,
+  deliverRecipientIdSchema,
+  escortDestinationIdSchema,
   fetchTargetIdSchema,
   giftableItemIdSchema,
   huntTargetIdSchema,
+  surveyTargetIdSchema,
   SUB_QUEST_COUNT_MAX,
   SUB_QUEST_COUNT_MIN,
   SUB_QUEST_DESCRIPTION_MAX_LENGTH,
@@ -26,13 +30,15 @@ import {
 } from "./types.js";
 
 /**
- * propose_quest: サブクエスト発行(ai-integration.md「propose_quest」)。
+ * propose_quest: サブクエスト発行(ai-integration.md「propose_quest」/「5b. 型拡張」)。
  * - count は整数 1..5、rewardGold は整数 10..100 かつ count×20 以下(報酬対難度の比)
  * - rewardItemId は贈答ホワイトリスト内。rewardItemId 付き提案はゲーム内1日1件まで
- * - targetId は type 別ホワイトリスト(hunt=HuntTargetId / fetch=FetchTargetId。
- *   discriminatedUnion がスキーマ段で強制。違反は綺麗に却下)
- * - 受注枠占有中サブクエストが3件未満・未受諾提案が残っていない・発行はゲーム内1日3件まで
- * - title 40字以内・description 200字以内・両方出力壁通過
+ * - targetId 系フィールドは type 別ホワイトリスト(hunt=HuntTargetId / fetch=FetchTargetId /
+ *   deliver=DeliverParcelId+DeliverRecipientId / escort=EscortDestinationId / survey=SurveyTargetId。
+ *   discriminatedUnion がスキーマ段で強制。型不一致・混成フィールドは綺麗に却下)
+ * - escort/survey は count=1 固定(count≠1 は count: z.literal(1) でスキーマ段却下。sharedスキーマと二重防御)
+ * - 受注枠占有中サブクエストが3件未満・未受諾提案が残っていない・発行はゲーム内1日3件まで(全型に適用)
+ * - title 40字以内・description 200字以内・両方出力壁通過(全型に適用)
  * - effect は createProposedQuest で作った「提案」状態の SubQuest
  */
 
@@ -46,7 +52,27 @@ const proposeQuestBaseShape = {
 
 const proposeQuestInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("hunt"), targetId: huntTargetIdSchema, ...proposeQuestBaseShape }),
-  z.object({ type: z.literal("fetch"), targetId: fetchTargetIdSchema, ...proposeQuestBaseShape })
+  z.object({ type: z.literal("fetch"), targetId: fetchTargetIdSchema, ...proposeQuestBaseShape }),
+  z.object({
+    type: z.literal("deliver"),
+    parcelId: deliverParcelIdSchema,
+    recipientId: deliverRecipientIdSchema,
+    ...proposeQuestBaseShape
+  }),
+  // escort/survey は count=1 固定(1回の道行き / 1地点の調査)。z.literal(1) が base の count を上書きし、
+  // count≠1 をスキーマ段で却下する(shared の subQuestSchema と同じ二重防御)。
+  z.object({
+    type: z.literal("escort"),
+    destinationId: escortDestinationIdSchema,
+    ...proposeQuestBaseShape,
+    count: z.literal(1)
+  }),
+  z.object({
+    type: z.literal("survey"),
+    targetId: surveyTargetIdSchema,
+    ...proposeQuestBaseShape,
+    count: z.literal(1)
+  })
 ]);
 
 export function validateProposeQuest(
@@ -95,26 +121,32 @@ export function validateProposeQuest(
 
   const rewardItemPart =
     data.rewardItemId !== undefined ? { rewardItemId: data.rewardItemId } : {};
-  const draft: QuestProposalDraft =
-    data.type === "hunt"
-      ? {
-          type: "hunt",
-          targetId: data.targetId,
-          count: data.count,
-          rewardGold: data.rewardGold,
-          title: titleCheck.normalized,
-          description: descCheck.normalized,
-          ...rewardItemPart
-        }
-      : {
-          type: "fetch",
-          targetId: data.targetId,
-          count: data.count,
-          rewardGold: data.rewardGold,
-          title: titleCheck.normalized,
-          description: descCheck.normalized,
-          ...rewardItemPart
-        };
+  // 全型に共通の検証済みフィールド(count / rewardGold / 出力壁正規化済みの title/description)
+  const common = {
+    count: data.count,
+    rewardGold: data.rewardGold,
+    title: titleCheck.normalized,
+    description: descCheck.normalized,
+    ...rewardItemPart
+  };
+  let draft: QuestProposalDraft;
+  switch (data.type) {
+    case "hunt":
+      draft = { type: "hunt", targetId: data.targetId, ...common };
+      break;
+    case "fetch":
+      draft = { type: "fetch", targetId: data.targetId, ...common };
+      break;
+    case "deliver":
+      draft = { type: "deliver", parcelId: data.parcelId, recipientId: data.recipientId, ...common };
+      break;
+    case "escort":
+      draft = { type: "escort", destinationId: data.destinationId, ...common };
+      break;
+    case "survey":
+      draft = { type: "survey", targetId: data.targetId, ...common };
+      break;
+  }
 
   const quest = createProposedQuest(ctx.questId, draft);
   return { ok: true, effect: { kind: "propose_quest", quest } };

@@ -7,6 +7,7 @@ import {
   MAPS,
   NPC_DISPLAY_NAMES,
   TOWN_WAKE_POINT,
+  abandonQuest,
   acceptProposal,
   addItem,
   advanceDay,
@@ -33,9 +34,16 @@ import {
   lootForChest,
   lootForGather,
   neighbor,
+  receiveQuestParcel,
+  reclaimQuestParcel,
+  recordDelivery,
+  recordEscortArrival,
   recordHuntKill,
   recordNarratedEnemy,
+  recordSurvey,
   removeItem,
+  removeQuestFromList,
+  reportQuest,
   resolveTurn,
   subQuestTargetLabel,
   sampleEnemySymbols,
@@ -378,6 +386,10 @@ export class GameSession {
         return this.conversationEnd();
       case "quest-request":
         return this.questRequest();
+      case "abandon-quest":
+        return this.abandonSubQuest(message.questId);
+      case "report-quest":
+        return this.reportSubQuest(message.questId);
       case "acknowledge-ending":
         return this.acknowledgeEnding();
     }
@@ -513,7 +525,32 @@ export class GameSession {
         this.enterCurrentMap();
       }
     }
-    return [this.snapshotMsg()];
+    // 護衛(escort)の到達判定(移動処理後。到達地点=目的地の(mapId,座標)なら達成)
+    return [this.snapshotMsg(), ...this.recordEscortArrivalHere()];
+  }
+
+  /**
+   * 護衛(escort)の到達判定(move の後処理。ai-integration.md「5b」達成の意味論)。
+   * 現在地(mapId, position)が active な escort の目的地に一致すれば completed にし、達成を通知する。
+   * 目的地に別クエスト無し・到達していない場合は無変化・空配列(何も起きない)。
+   */
+  private recordEscortArrivalHere(): ServerMessage[] {
+    const state = this.requireState();
+    const before = state.subQuests;
+    const after = recordEscortArrival(before, state.location.mapId, state.location.position);
+    // active→completed になった escort だけを拾う(recordEscortArrival は毎回新配列を返すため id で比較)
+    const completed = after.filter((q) => {
+      if (q.type !== "escort" || q.status !== "completed") return false;
+      return before.find((p) => p.id === q.id)?.status === "active";
+    });
+    if (completed.length === 0) return [];
+    this.state = { ...state, subQuests: after };
+    return completed.map((q) =>
+      this.dialogMsg(
+        null,
+        `${subQuestTargetLabel(q)}に辿り着いた。同行者は無事に送り届けられた。「${q.title}」を果たした――カイに報告しよう。`
+      )
+    );
   }
 
   private beginBattle(symbolIndex: number): void {
@@ -714,7 +751,26 @@ export class GameSession {
     return this.approachBoss(target.boss);
   }
 
+  /**
+   * NPC への interact。**deliver の納品を先行**させてから通常フロー(店/宿/会話/スクリプト)へ合流する。
+   * 受取NPC(recipientId)に active な deliver クエストがあれば決定論の納品イベント(AI 非依存)を先に処理し、
+   * その手渡し dialog を通常フローの先頭 snapshot 直後に差し込む(宿・店 overlay を持つ NPC も納品後に開く)。
+   * 受取NPC以外・預かり品を持たない相手では納品は起きない(deliverPendingParcel が無変化・空を返す)。
+   */
   private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
+    const deliveryDialogs = this.deliverPendingParcel(npcId);
+    const normal = await this.openNpcInteraction(npcId);
+    if (deliveryDialogs.length === 0) return normal;
+    // 納品の手渡しを snapshot(納品反映済み)直後に差し込む。snapshot が無い経路は先頭に補う。
+    const idx = normal.findIndex((m) => m.type === "snapshot");
+    if (idx >= 0) {
+      return [...normal.slice(0, idx + 1), ...deliveryDialogs, ...normal.slice(idx + 1)];
+    }
+    return [this.snapshotMsg(), ...deliveryDialogs, ...normal];
+  }
+
+  /** NPC 種別ごとの通常 interact(店/宿/会話/メインクエストスクリプト)。deliver 納品は interactNpc が先行する */
+  private async openNpcInteraction(npcId: NpcId): Promise<ServerMessage[]> {
     switch (npcId) {
       case "merchant":
       case "artisan":
@@ -737,6 +793,46 @@ export class GameSession {
         // 司祭フィオル(メインクエスト進行役)。arrival はスクリプトの明かしで rift-revealed へ。
         return this.interactPriest();
     }
+  }
+
+  /**
+   * 受取NPC への話しかけ時の決定論の納品イベント(deliver。ai-integration.md「5b」達成の意味論。AI 非依存)。
+   * active な deliver クエストの対象が npcId なら recordDelivery で預かり品を別枠から削除し completed にする。
+   * 対象が無ければ無変化・空配列を返す(受取NPC以外・情報屋/番人/世話役への話しかけでは何も起きない)。
+   * 返すのは手渡し+達成通知の dialog 列(snapshot は呼び出し側 interactNpc が通常フローと合流させる)。
+   */
+  private deliverPendingParcel(npcId: NpcId): ServerMessage[] {
+    const state = this.requireState();
+    const target = state.subQuests.find(
+      (q) => q.type === "deliver" && q.status === "active" && q.recipientId === npcId
+    );
+    if (target === undefined || target.type !== "deliver") return [];
+    const result = recordDelivery(state.subQuests, state.inventory, npcId);
+    this.state = { ...state, subQuests: result.quests, inventory: result.inventory };
+    return [
+      this.dialogMsg(null, `${ITEMS[target.parcelId].name}を${NPC_DISPLAY_NAMES[npcId]}に手渡した。`),
+      this.dialogMsg(null, `「${target.title}」を果たした――カイに報告しよう。`)
+    ];
+  }
+
+  /**
+   * 調査(survey)の達成判定(sign 調べの後処理。ai-integration.md「5b」達成の意味論。AI 非依存)。
+   * 調べた objectId が active な survey の対象なら completed にし、達成を通知する。
+   * 対象でなければ無変化・空配列(既存の看板の調べ挙動は変えない)。
+   */
+  private recordSurveyHere(objectId: string): ServerMessage[] {
+    const state = this.requireState();
+    const before = state.subQuests;
+    const after = recordSurvey(before, objectId);
+    const completed = after.filter((q) => {
+      if (q.type !== "survey" || q.status !== "completed") return false;
+      return before.find((p) => p.id === q.id)?.status === "active";
+    });
+    if (completed.length === 0) return [];
+    this.state = { ...state, subQuests: after };
+    return completed.map((q) =>
+      this.dialogMsg(null, `${subQuestTargetLabel(q)}を確かめた。「${q.title}」を果たした――カイに報告しよう。`)
+    );
   }
 
   /**
@@ -933,12 +1029,18 @@ export class GameSession {
         this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「あんたはもう手一杯のようだね。今の依頼を片付けてから、また来ておくれ」")
       ];
     }
-    this.state = { ...state, subQuests: res.quests };
-    this.activeInteraction = this.buildConversationInteraction(npcId);
-    return [
-      this.snapshotMsg(),
+    let next: GameState = { ...state, subQuests: res.quests };
+    const dialogs: ServerMessage[] = [
       this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「恩に着るよ。……無理だけはしないようにね」")
     ];
+    // deliver は受諾時に預かり品を別枠へ受領する(所持上限対象外=満杯でも受領可: ai-integration.md「5b」)
+    if (proposal.type === "deliver") {
+      next = { ...next, inventory: receiveQuestParcel(proposal, next.inventory) };
+      dialogs.push(this.dialogMsg(null, `${ITEMS[proposal.parcelId].name}を預かった。`));
+    }
+    this.state = next;
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), ...dialogs];
   }
 
   /**
@@ -1020,6 +1122,64 @@ export class GameSession {
   }
 
   /**
+   * サブクエストの放棄(クエストジャーナルからの操作。game-design.md「メインクエスト」放棄規定)。
+   * 未納品の預かり品(deliver active)は abandonQuest の前に reclaimQuestParcel で別枠から回収(消滅)する
+   * (escort/survey・納品済みは副作用なし)。即時に受注枠を解放しペナルティなし。
+   * 副作用の順序(回収→除去)は shared 純関数の合成として server が担う(ai-integration.md「5b」放棄時)。
+   * ※クライアントの放棄操作(ジャーナルのボタン)は M19-4(UI)で配線する。本ハンドラは server 側の合成のみ。
+   */
+  private abandonSubQuest(questId: string): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    const quest = state.subQuests.find((q) => q.id === questId);
+    if (quest === undefined) return this.errorMsgs("no-such-quest", "その依頼は、もう手元にない。");
+    const inventory = reclaimQuestParcel(quest, state.inventory);
+    const subQuests = abandonQuest(state.subQuests, questId);
+    this.state = { ...state, inventory, subQuests };
+    return [this.snapshotMsg(), this.dialogMsg(null, `依頼「${quest.title}」を諦めた。`)];
+  }
+
+  /**
+   * サブクエストの報告(達成→報酬付与。ai-integration.md「達成の意味論」。報告先は情報屋カイ)。
+   * reportQuest が達成判定・fetch のみ納品削除・報酬(gold+任意 rewardItem)付与・満杯時の受領保留を担う
+   * (deliver/escort/survey は報告時のインベントリ削除を伴わない=納品/到達/調べで達成済み)。
+   * 成功したら removeQuestFromList で受注リストから外す(reported は subQuests に永続化しない)。
+   * ※報告の起点(カイの窓口 UI)は M19-4。本ハンドラは questId を受けて server 側の合成のみを行う
+   *   (窓口=カイの提示・場所制約は UI 側の責務。裁量: JOURNAL 記録)。
+   */
+  private reportSubQuest(questId: string): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    const quest = state.subQuests.find((q) => q.id === questId);
+    if (quest === undefined) return this.errorMsgs("no-such-quest", "その依頼は、もう手元にない。");
+    const result = reportQuest(quest, state.inventory);
+    if (!result.ok) {
+      if (result.reason === "inventory_full") {
+        return this.errorMsgs("inventory-full", "褒美を受け取る手が塞がっている。荷を空けてから、また来るといい。");
+      }
+      return this.errorMsgs("quest-not-ready", "まだ、報告できる首尾ではないようだ。");
+    }
+    this.state = {
+      ...state,
+      subQuests: removeQuestFromList(state.subQuests, questId),
+      inventory: result.inventory,
+      player: { ...state.player, gold: state.player.gold + result.goldGained }
+    };
+    const dialogs: ServerMessage[] = [
+      this.dialogMsg(
+        NPC_DISPLAY_NAMES.informant,
+        `「よくやってくれた。約束の${result.goldGained}ゴールドだ。……恩に着るよ」`
+      )
+    ];
+    if (result.rewardItemGranted && quest.rewardItemId !== undefined) {
+      dialogs.push(this.dialogMsg(null, `${ITEMS[quest.rewardItemId].name}を受け取った。`));
+    }
+    return [this.snapshotMsg(), ...dialogs];
+  }
+
+  /**
    * エンディング視聴の確認(クライアントがエンディング演出を見せ終えた合図)。
    * dream-eater-defeated → epilogue へ進めてセーブに永続化する。それ以外の段階では冪等に無視する。
    * プレイヤーは動かさない(段階を進めて保存するだけ。M6-B のエンディング契約の締め)。
@@ -1040,10 +1200,14 @@ export class GameSession {
   private async interactObject(object: MapObject): Promise<ServerMessage[]> {
     const state = this.requireState();
     switch (object.kind) {
-      case "sign":
+      case "sign": {
         // 灯還りの坑「導管の間」の導管は第2章の起点/結び(調べイベント)。それ以外の看板は既存どおり。
         if (object.id === CONDUIT_OBJECT_ID) return this.interactConduit(object.message);
-        return [this.dialogMsg(null, object.message)];
+        // 調査(survey)の達成判定。既存の調べメッセージは維持したまま、達成時のみ通知+snapshot を足す
+        const survey = this.recordSurveyHere(object.id);
+        if (survey.length === 0) return [this.dialogMsg(null, object.message)];
+        return [this.snapshotMsg(), this.dialogMsg(null, object.message), ...survey];
+      }
       case "chest": {
         if (state.gimmicks.includes(object.id)) {
           return [this.dialogMsg(null, "空っぽの箱だ。もう何も残っていない。")];
