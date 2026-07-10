@@ -904,5 +904,185 @@
     "promptFile": "assets/prompts/symbol-creaking-doll-right.md",
     "createdAt": "2026-07-10",
     "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "npc-caretaker",
+    "path": "assets/portraits/npc-caretaker.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-caretaker.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5世話役イルマ立ち絵。背景透過。M16-5/M17スプライトのcanonical identityアンカー"
+  },
+  {
+    "id": "npc-artisan",
+    "path": "assets/portraits/npc-artisan.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-artisan.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5職人ガロ立ち絵。背景透過。M16-5/M17スプライトのcanonical identityアンカー"
+  },
+  {
+    "id": "npc-warden",
+    "path": "assets/portraits/npc-warden.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-warden.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5番人トワ立ち絵。背景透過。深いフード影で年齢不詳を保持するcanonical identityアンカー"
+  },
+  {
+    "id": "sprite-caretaker",
+    "path": "assets/sprites/sprite-caretaker.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(down/正面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-caretaker-up",
+    "path": "assets/sprites/sprite-caretaker-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(up/背面・顔なし)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-caretaker-left",
+    "path": "assets/sprites/sprite-caretaker-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-caretaker-right",
+    "path": "assets/sprites/sprite-caretaker-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(right/右向き・個別生成)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan",
+    "path": "assets/sprites/sprite-artisan.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(down/正面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan-up",
+    "path": "assets/sprites/sprite-artisan-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(up/背面・顔なし)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan-left",
+    "path": "assets/sprites/sprite-artisan-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan-right",
+    "path": "assets/sprites/sprite-artisan-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(right/右向き・個別生成)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden",
+    "path": "assets/sprites/sprite-warden.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(down/正面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden-up",
+    "path": "assets/sprites/sprite-warden-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(up/背面・顔なし)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden-left",
+    "path": "assets/sprites/sprite-warden-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden-right",
+    "path": "assets/sprites/sprite-warden-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(right/右向き・個別生成)。背景透過。マップ上32px表示"
   }
 ]
