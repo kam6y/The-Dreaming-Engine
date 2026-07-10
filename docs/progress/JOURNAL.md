@@ -1908,3 +1908,41 @@
   悪意応答(ホワイトリスト外・混成・count>1)+攻撃リグレッションテスト/
   clientのdescribeQuest/describeProposalは二分岐のため新型が「調達」誤表記=
   型別描画はM19-4(UI=オーケストレーター)で対応
+
+## [65] 2026-07-11 M19-3: サブクエスト3型のserver統合(subagent委譲=Opus)
+
+- やったこと(実装=subagent、検収・コミット=オーケストレーター):
+  - propose_quest検証層: discriminatedUnionへ3ブランチ追加(escort/surveyは
+    count: z.literal(1) でsharedと二重防御)。既存の全検証(count/rewardGold比・
+    rewardItem日1件・受注枠3件・未受諾1件・日3件・字数・出力壁)は値不変のまま
+    全型に適用
+  - session.ts: interactNpcを薄いラッパ化し deliver納品を先行(recordDelivery→
+    手渡しdialogをsnapshot直後に挿入。宿/店overlayは納品後に開く)。移動後の
+    recordEscortArrival・sign調べ時のrecordSurvey・受諾時のreceiveQuestParcel・
+    放棄時のreclaimQuestParcel合成を配線
+  - **発見(pre-existing gap)**: reportQuest/abandonQuestはhunt/fetchでも
+    serverにゼロ配線だった。abandon-quest/report-quest クライアントメッセージ
+    (questId)+ハンドラを新規配線(仕様の「いつでも放棄」「報告で報酬」の実装。
+    クライアントのボタンはM19-4)
+  - MockDreamMaster: 番兵topic方式(MOCK_QUEST_TOPIC_BY_TYPE。既定=hunt不変
+    のため既存E2E/テスト無影響)で型別定型応答。悪意モードへ新型攻撃4種
+    (informant受取/escort count>1/d4-conduit調査/型偽装混成)追加
+  - テスト16件追加(攻撃6+フロー10)=unit 842。攻撃テストID6種をmanifest登録
+    (ATK-quest-{deliver,escort,survey}-whitelist/mixed-fields/escort-survey-count/
+    newtype-limits)
+- 裁量で決めたこと: 報告のserver側は場所非強制(窓口=カイの提示はUI側の責務に
+  委譲)/納品dialogは先頭対象のパーセル名で表示/escort・survey完了検出はid基準/
+  台詞・通知文言(手渡し・到達・調査・放棄・報告の各定型文。world-loreトーン)
+- 検証: pnpm check 緑(unit 842)・pnpm test:e2e 14/14緑
+  (subagent実行+オーケストレーター再実行の二重確認)。ガードレールは追加のみ
+- 次にやること: M19-4(クライアントUI+E2E。**UI=オーケストレーター自身**)。
+  申し送り: ジャーナルの型別現況表示(deliver=「〈受取NPC〉へ 預かり品×N」/
+  escort=「〈目的地〉まで同行中」/survey=「〈対象〉を調べる」。viewは全5型の
+  type/targetName/countを既に運ぶ)/describeQuest・describeProposalの二分岐が
+  新型を「調達」誤表記=型別描画へ/放棄・報告ボタンの配線(server: abandon-quest/
+  report-quest。**報告導線はカイ窓口に寄せる**=serverが場所非強制のためUI側で
+  担保する)/escort同行者マーカー(既存スプライト流用・追従・到達で消える)/
+  E2Eスモーク1本(番兵topic MOCK_QUEST_TOPIC_BY_TYPE で型提案を誘発可能)。
+  **live用の残作業**: prompt.tsのformatQuestTargets(quest_targets候補)が
+  hunt/fetchのみ=liveで新3型を提案させるには候補enumの追加が必要
+  (防御に関わらないprompt拡張。M19-4のイテレーション内で対応)

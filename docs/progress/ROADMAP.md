@@ -399,9 +399,12 @@ JOURNALへ「仕様変更提案」として記録する)。
       預かり品の別枠管理)+実在性ドリフト検知を含むユニットテスト(subagent)
       (discriminatedUnion末尾追加・escort/surveyはcount=z.literal(1)・
       removeQuestItem新設・テスト33件追加=unit 826。JOURNAL[64])
-- [ ] M19-3: サーバー統合(propose_quest検証層の3型対応・納品/到達/調査のイベント
+- [x] M19-3: サーバー統合(propose_quest検証層の3型対応・納品/到達/調査のイベント
       処理・モック応答への新型+悪意応答追加)+攻撃リグレッションテスト拡張
       (subagent)。既存の上限・ホワイトリスト・クールダウンは不変
+      (abandon-quest/report-questハンドラの新規配線(pre-existing gap回収)・
+      モックは番兵topic方式で既存E2E不変・攻撃ID6種登録・テスト16件=unit 842。
+      JOURNAL[65])
 - [ ] M19-4: クライアントUI(ジャーナルの型別現況表示・deliver納品の選択肢会話・
       escort同行者マーカー・survey達成マーク。UI=オーケストレーター)+E2Eスモーク。
       完了時にBACKLOG側へチェック+M19ゲート(test:e2e:full)
