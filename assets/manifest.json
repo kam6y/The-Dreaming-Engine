@@ -562,5 +562,185 @@
     "promptFile": "assets/prompts/prop-gather.md",
     "createdAt": "2026-07-07",
     "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-player-up",
+    "path": "assets/sprites/sprite-player-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-player-left",
+    "path": "assets/sprites/sprite-player-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-player-right",
+    "path": "assets/sprites/sprite-player-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-innkeeper-up",
+    "path": "assets/sprites/sprite-innkeeper-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-innkeeper-left",
+    "path": "assets/sprites/sprite-innkeeper-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-innkeeper-right",
+    "path": "assets/sprites/sprite-innkeeper-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-merchant-up",
+    "path": "assets/sprites/sprite-merchant-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-merchant-left",
+    "path": "assets/sprites/sprite-merchant-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-merchant-right",
+    "path": "assets/sprites/sprite-merchant-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-informant-up",
+    "path": "assets/sprites/sprite-informant-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-informant-left",
+    "path": "assets/sprites/sprite-informant-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-informant-right",
+    "path": "assets/sprites/sprite-informant-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-priest-up",
+    "path": "assets/sprites/sprite-priest-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-priest-left",
+    "path": "assets/sprites/sprite-priest-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-priest-right",
+    "path": "assets/sprites/sprite-priest-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
   }
 ]
