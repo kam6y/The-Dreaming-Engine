@@ -15,7 +15,7 @@ import { gameLocationSchema } from "./game-state.js";
 import { directionSchema } from "./geometry.js";
 import { enemyIdSchema, npcIdSchema } from "./ids.js";
 import { affinityTierSchema } from "./npc.js";
-import { mainQuestStageSchema, subQuestStatusSchema } from "./quests.js";
+import { mainQuestStageSchema, subQuestStatusSchema, subQuestTypeSchema } from "./quests.js";
 
 export const GAME_TITLE = "The Dreaming Engine";
 
@@ -109,7 +109,7 @@ export type RewardItemView = z.infer<typeof rewardItemViewSchema>;
 
 /** 提案中サブクエストの表示情報(受諾前。会話 overlay に提示する) */
 export const pendingProposalViewSchema = z.object({
-  type: z.enum(["hunt", "fetch"]),
+  type: subQuestTypeSchema,
   title: z.string(),
   description: z.string(),
   count: z.number().int(),
@@ -163,11 +163,12 @@ export type ActiveInteraction = z.infer<typeof activeInteractionSchema>;
 
 /**
  * 受注中サブクエストの表示情報(クエストジャーナル用)。SnapshotView.subQuests に含める。
- * targetName は type 別の表示名(hunt=敵名 / fetch=アイテム名)。
+ * targetName は type 別の表示名(hunt=敵名 / fetch=アイテム名 / deliver=受取NPC名 /
+ * escort=目的地名 / survey=調査対象名。shared の subQuestTargetLabel が解決する)。
  */
 export const subQuestViewSchema = z.object({
   id: z.string(),
-  type: z.enum(["hunt", "fetch"]),
+  type: subQuestTypeSchema,
   targetName: z.string(),
   progress: z.number().int(),
   count: z.number().int(),

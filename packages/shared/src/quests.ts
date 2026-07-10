@@ -1,14 +1,29 @@
 import { z } from "zod";
 
+import { deliverParcelIdSchema, deliverRecipientIdSchema } from "./ai/deliver.js";
 import { fetchTargetIdSchema } from "./ai/fetch.js";
 import { giftableItemIdSchema } from "./ai/giftable.js";
 import { huntTargetIdSchema } from "./ai/hunt.js";
+import {
+  ESCORT_DESTINATIONS,
+  ESCORT_DESTINATION_NAMES,
+  escortDestinationIdSchema
+} from "./ai/escort.js";
+import { SURVEY_TARGET_NAMES, surveyTargetIdSchema } from "./ai/survey.js";
+import type { DeliverParcelId, DeliverRecipientId } from "./ai/deliver.js";
 import type { FetchTargetId } from "./ai/fetch.js";
 import type { GiftableItemId } from "./ai/giftable.js";
 import type { HuntTargetId } from "./ai/hunt.js";
-import type { EnemyId } from "./ids.js";
-import { addItem, countOf, freeSpace, removeItem } from "./inventory.js";
+import type { EscortDestinationId } from "./ai/escort.js";
+import type { SurveyTargetId } from "./ai/survey.js";
+import { ITEMS } from "./combat/items.js";
+import { samePosition } from "./geometry.js";
+import type { Position } from "./geometry.js";
+import { ENEMY_DISPLAY_NAMES, NPC_DISPLAY_NAMES } from "./ids.js";
+import type { EnemyId, NpcId } from "./ids.js";
+import { addItem, countOf, freeSpace, removeItem, removeQuestItem } from "./inventory.js";
 import type { Inventory } from "./inventory.js";
+import type { MapId } from "./map.js";
 
 /**
  * クエストエンジン(メインクエスト段階 + サブクエスト状態機械)。
@@ -87,11 +102,20 @@ export const SUB_QUEST_DESCRIPTION_MAX_LENGTH = 200;
  * サブクエスト状態(語彙は裁量。JOURNAL 記録対象):
  * - proposed : AI が提案し未受諾(同時1件。未受諾のまま会話終了で破棄=セーブに載らない)
  * - active   : 受諾済み・進行中(受注枠を占有)
- * - completed: 達成条件到達(hunt=討伐数到達。fetch は報告時に所持数で判定するため active のまま。受注枠を占有)
+ * - completed: 達成条件到達。hunt=討伐数到達 / deliver=納品済み / escort=到達済み / survey=調べ済み。
+ *              fetch は報告時に所持数で判定するため active のまま(受注枠を占有)
  * - reported : 情報屋へ報告済み(報酬受領済み。受注枠から外れる)
  */
 export const subQuestStatusSchema = z.enum(["proposed", "active", "completed", "reported"]);
 export type SubQuestStatus = z.infer<typeof subQuestStatusSchema>;
+
+/**
+ * サブクエストの型(M19 で hunt/fetch に deliver/escort/survey を追加。上位集合化=旧セーブ互換)。
+ * `subQuestSchema` の discriminatedUnion の判別子リテラルと一致することをユニットテストで担保する
+ * (`messages.ts` の表示ビュー(pendingProposalView/subQuestView)の type 列もこの列挙を使う)。
+ */
+export const subQuestTypeSchema = z.enum(["hunt", "fetch", "deliver", "escort", "survey"]);
+export type SubQuestType = z.infer<typeof subQuestTypeSchema>;
 
 const subQuestBaseShape = {
   id: z.string().min(1),
@@ -112,12 +136,34 @@ const subQuestBaseShape = {
 } as const;
 
 /**
- * サブクエスト。targetId は type 別の達成可能ホワイトリスト
- * (hunt=HuntTargetId / fetch=FetchTargetId)でのみ構成できる。
+ * サブクエスト。型別の参照フィールドは各 type 専用のホワイトリストでのみ構成できる
+ * (hunt=HuntTargetId / fetch=FetchTargetId / deliver=DeliverParcelId+DeliverRecipientId /
+ * escort=EscortDestinationId / survey=SurveyTargetId。ai-integration.md「5b」)。
+ * escort/survey は count=1 固定(1回の道行き / 1地点の調査。count≠1 はスキーマ段で却下)。
+ * discriminatedUnion なので型不一致・混成フィールドはスキーマ段で綺麗に却下される。
+ * hunt/fetch のみの旧セーブは上位集合化により引き続きパースできる(GAME_STATE_VERSION 据え置き)。
  */
 export const subQuestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("hunt"), targetId: huntTargetIdSchema, ...subQuestBaseShape }),
-  z.object({ type: z.literal("fetch"), targetId: fetchTargetIdSchema, ...subQuestBaseShape })
+  z.object({ type: z.literal("fetch"), targetId: fetchTargetIdSchema, ...subQuestBaseShape }),
+  z.object({
+    type: z.literal("deliver"),
+    parcelId: deliverParcelIdSchema,
+    recipientId: deliverRecipientIdSchema,
+    ...subQuestBaseShape
+  }),
+  z.object({
+    type: z.literal("escort"),
+    destinationId: escortDestinationIdSchema,
+    ...subQuestBaseShape,
+    count: z.literal(1)
+  }),
+  z.object({
+    type: z.literal("survey"),
+    targetId: surveyTargetIdSchema,
+    ...subQuestBaseShape,
+    count: z.literal(1)
+  })
 ]);
 export type SubQuest = z.infer<typeof subQuestSchema>;
 
@@ -128,32 +174,31 @@ export type PendingProposal = SubQuest | null;
 // 提案の生成・受諾・辞退
 // ---------------------------------------------------------------------------
 
-/** 検証層を通過した propose_quest 入力(title/description は出力壁の正規化済みテキスト) */
+/** propose_quest の型共通フィールド(検証済み。title/description は出力壁の正規化済みテキスト) */
+type QuestProposalCommon = {
+  count: number;
+  rewardGold: number;
+  rewardItemId?: GiftableItemId | undefined;
+  title: string;
+  description: string;
+};
+
+/**
+ * 検証層を通過した propose_quest 入力(型別の判別可能 union)。
+ * escort/survey の count は仕様上 1 固定だが、DTO では number として受け、
+ * createProposedQuest が 1 に確定する(count≠1 の却下はスキーマ・検証層の責務)。
+ */
 export type QuestProposalDraft =
-  | {
-      type: "hunt";
-      targetId: HuntTargetId;
-      count: number;
-      rewardGold: number;
-      rewardItemId?: GiftableItemId | undefined;
-      title: string;
-      description: string;
-    }
-  | {
-      type: "fetch";
-      targetId: FetchTargetId;
-      count: number;
-      rewardGold: number;
-      rewardItemId?: GiftableItemId | undefined;
-      title: string;
-      description: string;
-    };
+  | ({ type: "hunt"; targetId: HuntTargetId } & QuestProposalCommon)
+  | ({ type: "fetch"; targetId: FetchTargetId } & QuestProposalCommon)
+  | ({ type: "deliver"; parcelId: DeliverParcelId; recipientId: DeliverRecipientId } & QuestProposalCommon)
+  | ({ type: "escort"; destinationId: EscortDestinationId } & QuestProposalCommon)
+  | ({ type: "survey"; targetId: SurveyTargetId } & QuestProposalCommon);
 
 /** 検証済みの propose_quest 入力から「提案」状態のサブクエストを作る(id は呼び出し側が採番) */
 export function createProposedQuest(id: string, draft: QuestProposalDraft): SubQuest {
   const common = {
     id,
-    count: draft.count,
     progress: 0,
     rewardGold: draft.rewardGold,
     title: draft.title,
@@ -161,10 +206,26 @@ export function createProposedQuest(id: string, draft: QuestProposalDraft): SubQ
     status: "proposed" as const,
     ...(draft.rewardItemId !== undefined ? { rewardItemId: draft.rewardItemId } : {})
   };
-  if (draft.type === "hunt") {
-    return { type: "hunt", targetId: draft.targetId, ...common };
+  switch (draft.type) {
+    case "hunt":
+      return { type: "hunt", targetId: draft.targetId, count: draft.count, ...common };
+    case "fetch":
+      return { type: "fetch", targetId: draft.targetId, count: draft.count, ...common };
+    case "deliver":
+      return {
+        type: "deliver",
+        parcelId: draft.parcelId,
+        recipientId: draft.recipientId,
+        count: draft.count,
+        ...common
+      };
+    case "escort":
+      // escort は count=1 固定(1回の道行き)
+      return { type: "escort", destinationId: draft.destinationId, count: 1, ...common };
+    case "survey":
+      // survey は count=1 固定(1地点の調査)
+      return { type: "survey", targetId: draft.targetId, count: 1, ...common };
   }
-  return { type: "fetch", targetId: draft.targetId, ...common };
 }
 
 /** 受注枠を占有するか(active / completed が枠を使う。proposed は未受諾、reported は解放済み) */
@@ -189,6 +250,18 @@ export function acceptProposal(proposal: SubQuest, quests: readonly SubQuest[]):
   if (proposal.status !== "proposed") return { ok: false, reason: "not_proposed" };
   if (activeQuestSlotCount(quests) >= SUB_QUEST_MAX_ACTIVE) return { ok: false, reason: "slots_full" };
   return { ok: true, quests: [...quests, { ...proposal, status: "active", progress: 0 }] };
+}
+
+/**
+ * 受諾時の預かり品受領(deliver のみ)。預かり品 count 個をクエスト用アイテムの
+ * 別枠へ受領する(所持上限対象外=満杯でも受諾可: ai-integration.md「5b」受諾時)。
+ * deliver 以外・受領物のない型(hunt/fetch/escort/survey)はインベントリを変えずに返す。
+ * acceptProposal はリスト側の受諾のみを担うため、預かり品の授受はこの純関数で分離する
+ * (呼び出し側(server)が acceptProposal 成功時に本関数でインベントリを更新する)。
+ */
+export function receiveQuestParcel(quest: SubQuest, inventory: Inventory): Inventory {
+  if (quest.type !== "deliver") return inventory;
+  return addItem(inventory, quest.parcelId, quest.count).inventory;
 }
 
 /**
@@ -218,6 +291,65 @@ export function recordHuntKill(quests: readonly SubQuest[], enemyId: EnemyId): S
   });
 }
 
+/** deliver 納品の結果(受注中リストと預かり品を消した後のインベントリ) */
+export interface DeliveryResult {
+  quests: SubQuest[];
+  inventory: Inventory;
+}
+
+/**
+ * deliver 納品: 受取NPC recipientId に話しかけた時、対象が一致する受注中(active)の
+ * deliver クエストを completed にし、預かり品を別枠から count 個削除する
+ * (ai-integration.md「5b」達成の意味論。納品は原子的=progress は使わない)。
+ * 受注前(proposed)・納品済み(completed)・報告後(reported)は対象外。
+ */
+export function recordDelivery(
+  quests: readonly SubQuest[],
+  inventory: Inventory,
+  recipientId: NpcId
+): DeliveryResult {
+  let inv = inventory;
+  const next = quests.map((quest) => {
+    if (quest.type !== "deliver" || quest.status !== "active" || quest.recipientId !== recipientId) {
+      return quest;
+    }
+    inv = removeQuestItem(inv, quest.parcelId, quest.count).inventory;
+    return { ...quest, status: "completed" as const };
+  });
+  return { quests: next, inventory: inv };
+}
+
+/**
+ * escort 到達: プレイヤーが現在地 (mapId, position) に至った時、目的地が一致する
+ * 受注中(active)の escort クエストを completed にする(到達は原子的)。
+ */
+export function recordEscortArrival(
+  quests: readonly SubQuest[],
+  mapId: MapId,
+  position: Position
+): SubQuest[] {
+  return quests.map((quest) => {
+    if (quest.type !== "escort" || quest.status !== "active") return quest;
+    const dest = ESCORT_DESTINATIONS[quest.destinationId];
+    if (dest.mapId !== mapId || !samePosition(dest.position, position)) return quest;
+    return { ...quest, status: "completed" as const };
+  });
+}
+
+/**
+ * survey 調べ: プレイヤーが調べオブジェクト objectId を調べた時、対象が一致する
+ * 受注中(active)の survey クエストを completed にする(調べは原子的)。
+ * objectId は調べたオブジェクトの id(string)。survey 対象でなければどの quest も変わらない。
+ */
+export function recordSurvey(quests: readonly SubQuest[], objectId: string): SubQuest[] {
+  return quests.map((quest) => {
+    if (quest.type !== "survey" || quest.status !== "active" || quest.targetId !== objectId) {
+      return quest;
+    }
+    return { ...quest, status: "completed" as const };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 報告(達成判定・納品・報酬付与)
 // ---------------------------------------------------------------------------
@@ -226,11 +358,20 @@ export function recordHuntKill(quests: readonly SubQuest[], enemyId: EnemyId): S
  * 報告時の達成判定:
  * - hunt : 受注後の討伐数が count に到達していること
  * - fetch: 報告時点で対象アイテムを count 個所持していること
+ * - deliver/escort/survey: 達成が原子的なため status==="completed"(納品/到達/調べ済み)を条件とする
  */
 export function isReportReady(quest: SubQuest, inventory: Inventory): boolean {
   if (quest.status !== "active" && quest.status !== "completed") return false;
-  if (quest.type === "hunt") return quest.progress >= quest.count;
-  return countOf(inventory, quest.targetId) >= quest.count;
+  switch (quest.type) {
+    case "hunt":
+      return quest.progress >= quest.count;
+    case "fetch":
+      return countOf(inventory, quest.targetId) >= quest.count;
+    case "deliver":
+    case "escort":
+    case "survey":
+      return quest.status === "completed";
+  }
 }
 
 export type ReportQuestResult =
@@ -246,8 +387,11 @@ export type ReportQuestResult =
   | { ok: false; reason: "not_ready" | "inventory_full" };
 
 /**
- * 報告処理。fetch は納品(対象 count 個削除)→報酬付与の順で処理し、
- * 納品で空いた所持枠を報酬アイテムの受領に使える(ai-integration.md「達成の意味論」)。
+ * 報告処理。**インベントリからの削除(納品)を伴うのは fetch のみ**。
+ * fetch は納品(対象 count 個削除)→報酬付与の順で処理し、納品で空いた所持枠を
+ * 報酬アイテムの受領に使える(ai-integration.md「達成の意味論」)。
+ * deliver/escort/survey は報告時の削除を伴わない(deliver の納品は受取NPCへの手渡し時に
+ * 完結済み)。報酬(gold+任意 rewardItem)のみ付与する。
  * 報酬アイテムが入らない場合は受領を保留し、何も変更せず ok:false を返す
  * (クエストは達成状態を維持し、納品物も報酬も消失しない: game-design.md「成長・経済」)。
  */
@@ -295,7 +439,45 @@ export function removeQuestFromList(quests: readonly SubQuest[], questId: string
  * 放棄: 受注中サブクエストはクエストジャーナルからいつでも放棄できる
  * (即時に受注枠を解放。ペナルティなし: game-design.md「メインクエスト」)。
  * 進行度は失われ、fetch の所持アイテムはそのまま残る(納品していないため)。
+ * deliver の未納品の預かり品回収は副作用があるため、呼び出し側(server)が本関数の前に
+ * reclaimQuestParcel でインベントリを更新する(escort/survey は副作用なし)。
  */
 export function abandonQuest(quests: readonly SubQuest[], questId: string): SubQuest[] {
   return removeQuestFromList(quests, questId);
+}
+
+/**
+ * 放棄時の預かり品回収(deliver の未納品=active のときのみ)。
+ * 未納品の預かり品を別枠から count 個削除(消滅)する。売却/破棄不可の品が放棄後に
+ * 残って所持を圧迫しないため(ai-integration.md「5b」放棄時 / game-design.md)。
+ * 納品済み(completed/reported)なら別枠に無いので対象なし=無変化。
+ * deliver 以外(hunt/fetch/escort/survey)は副作用がないため無変化で返す。
+ */
+export function reclaimQuestParcel(quest: SubQuest, inventory: Inventory): Inventory {
+  if (quest.type !== "deliver" || quest.status !== "active") return inventory;
+  return removeQuestItem(inventory, quest.parcelId, quest.count).inventory;
+}
+
+// ---------------------------------------------------------------------------
+// 表示ラベル(クエストジャーナル・プロンプトの現況表示)
+// ---------------------------------------------------------------------------
+
+/**
+ * サブクエストの対象を1語で表す表示ラベル(型別):
+ * hunt=敵名 / fetch=アイテム名 / deliver=受取NPC名 / escort=目的地名 / survey=調査対象名。
+ * サーバーのクエストジャーナル表示・プロンプトの受注中一覧で用いる(全型を網羅)。
+ */
+export function subQuestTargetLabel(quest: SubQuest): string {
+  switch (quest.type) {
+    case "hunt":
+      return ENEMY_DISPLAY_NAMES[quest.targetId];
+    case "fetch":
+      return ITEMS[quest.targetId].name;
+    case "deliver":
+      return NPC_DISPLAY_NAMES[quest.recipientId];
+    case "escort":
+      return ESCORT_DESTINATION_NAMES[quest.destinationId];
+    case "survey":
+      return SURVEY_TARGET_NAMES[quest.targetId];
+  }
 }

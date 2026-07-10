@@ -8,6 +8,7 @@ import {
   ITEMS,
   NPC_DISPLAY_NAMES,
   STREET_EVENTS,
+  subQuestTargetLabel,
   SUMMARY_MAX_LENGTH,
   type AffinityTier,
   type ConversationExchange,
@@ -125,7 +126,7 @@ function formatQuestTargets(): string {
 /** 受注中サブクエストの一覧(<quest_journal>。文脈提示・重複依頼の回避に使う) */
 function formatSubQuests(quests: readonly SubQuest[]): string {
   const lines = quests.map((q) => {
-    const target = q.type === "hunt" ? ENEMY_DISPLAY_NAMES[q.targetId] : ITEMS[q.targetId].name;
+    const target = subQuestTargetLabel(q);
     return `・[${q.type}] ${neutralizeTags(q.title)}(対象:${target} ${q.progress}/${q.count} 状態:${q.status})`;
   });
   return lines.join("\n");

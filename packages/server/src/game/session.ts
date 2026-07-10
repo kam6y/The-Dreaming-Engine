@@ -37,6 +37,7 @@ import {
   recordNarratedEnemy,
   removeItem,
   resolveTurn,
+  subQuestTargetLabel,
   sampleEnemySymbols,
   samePosition,
   shopStockEntries,
@@ -1559,7 +1560,7 @@ export class GameSession {
     return state.subQuests.map((q) => ({
       id: q.id,
       type: q.type,
-      targetName: q.type === "hunt" ? ENEMY_DISPLAY_NAMES[q.targetId] : ITEMS[q.targetId].name,
+      targetName: subQuestTargetLabel(q),
       progress: q.progress,
       count: q.count,
       rewardGold: q.rewardGold,

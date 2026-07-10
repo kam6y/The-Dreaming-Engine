@@ -12,6 +12,9 @@ import type { StatusId } from "./status.js";
  * - ore         : 鉱石。採取ポイントで得る素材(売却用)。将来のfetchクエスト対象候補。
  * - old-key     : 古びた鍵。クエスト用アイテム(売却・破棄不可・所持上限対象外の別枠)。
  *                 M3では入手経路を持たない構造定義(別枠ロジックの検証・M6の仕掛け用の器)。
+ * - sealed-letter / warm-oil-flask / amber-charm:
+ *                 配達(deliver)サブクエストの預かり品(M19)。クエスト用アイテム
+ *                 (別枠・所持上限対象外・売却/破棄不可)。受諾で別枠へ受領し納品で消える器。
  * - worn-blade  : 錆びた片刃。初級の武器(weapon スロット。M8-1)。
  * - amber-blade : 琥珀刃。上級の武器(weapon スロット。M8-1)。
  * - worn-cloak  : 擦り切れた外套。初級の防具(armor スロット。M8-1)。
@@ -40,6 +43,9 @@ export const itemIdSchema = z.enum([
   "herb",
   "ore",
   "old-key",
+  "sealed-letter",
+  "warm-oil-flask",
+  "amber-charm",
   "worn-blade",
   "amber-blade",
   "worn-cloak",
@@ -125,6 +131,27 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
     id: "old-key",
     name: "古びた鍵",
     description: "誰かが握りしめたまま忘れていったような、錆びた鍵。手放してはいけない気がする。",
+    buyPrice: 0,
+    questItem: true
+  },
+  "sealed-letter": {
+    id: "sealed-letter",
+    name: "封緘の文",
+    description: "蝋で固く封じられた一通の文。宛先の名だけが、掠れた墨で記されている。",
+    buyPrice: 0,
+    questItem: true
+  },
+  "warm-oil-flask": {
+    id: "warm-oil-flask",
+    name: "灯火の油壺",
+    description: "手に持つとほのかに温かい油の壺。誰かの灯を絶やさぬよう、届けを頼まれた。",
+    buyPrice: 0,
+    questItem: true
+  },
+  "amber-charm": {
+    id: "amber-charm",
+    name: "琥珀の護符",
+    description: "灯の亡骸を磨いた小さな護符。贈り主の願いが、鈍い橙の奥で眠っている。",
     buyPrice: 0,
     questItem: true
   },

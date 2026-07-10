@@ -151,3 +151,15 @@ export function removeItem(inv: Inventory, itemId: ItemId, qty: number): RemoveR
   const { stacks, removed } = removeFromStacks(inv.items, itemId, qty);
   return { inventory: { ...inv, items: stacks }, removed };
 }
+
+/**
+ * クエスト用アイテムを別枠(`questItems`)から取り除く(不変)。
+ * deliver サブクエストの納品(受取NPCへの手渡し)と、放棄時の預かり品回収で使う(M19)。
+ * `addItem` が別枠へ加える機構(questItem フラグで振り分け)と対を成す除去経路。
+ * プレイヤー操作の売却・破棄はクエスト用アイテムを対象にしない(この関数はゲーム進行側専用)。
+ */
+export function removeQuestItem(inv: Inventory, itemId: ItemId, qty: number): RemoveResult {
+  if (qty <= 0) return { inventory: inv, removed: 0 };
+  const { stacks, removed } = removeFromStacks(inv.questItems, itemId, qty);
+  return { inventory: { ...inv, questItems: stacks }, removed };
+}

@@ -1,25 +1,45 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALL_MAPS,
   CHEST_CONTENTS,
+  DELIVER_PARCEL_IDS,
+  DELIVER_RECIPIENT_IDS,
+  deliverParcelIdSchema,
+  deliverRecipientIdSchema,
+  ESCORT_DESTINATION_IDS,
+  ESCORT_DESTINATION_NAMES,
+  ESCORT_DESTINATIONS,
+  escortDestinationIdSchema,
   FETCH_TARGET_IDS,
   fetchTargetIdSchema,
   GATHER_CONTENTS,
+  getMap,
   GIFTABLE_ITEM_IDS,
   giftableItemIdSchema,
   HUNT_TARGET_IDS,
   huntTargetIdSchema,
+  isDeliverParcel,
+  isDeliverRecipient,
+  isEscortDestination,
   isFetchTarget,
   isGiftableItem,
   isHuntTarget,
+  isSellable,
   isStreetEvent,
+  isSurveyTarget,
+  isWalkable,
   ITEMS,
   itemIdSchema,
+  npcIdSchema,
   RESPAWNABLE_ENEMY_IDS,
   SHOP_STOCK,
   STREET_EVENT_IDS,
   STREET_EVENTS,
   streetEventIdSchema,
+  SURVEY_TARGET_IDS,
+  SURVEY_TARGET_NAMES,
+  surveyTargetIdSchema,
   type ItemId
 } from "../src/index.js";
 
@@ -127,5 +147,123 @@ describe("StreetEventId(街頭演出)", () => {
     expect(streetEventIdSchema.safeParse("dragon").success).toBe(false);
     expect(isStreetEvent("peddler")).toBe(true);
     expect(isStreetEvent("dragon")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M19: サブクエスト3型拡充のホワイトリスト(実在性ドリフト検知)
+// ---------------------------------------------------------------------------
+
+describe("DeliverRecipientId(配達の受取NPCホワイトリスト。M19)", () => {
+  it("すべて実在 NpcId で、情報屋 informant を含まない(受注元への配達を防ぐ)", () => {
+    for (const id of DELIVER_RECIPIENT_IDS) {
+      expect(npcIdSchema.safeParse(id).success).toBe(true);
+    }
+    expect(DELIVER_RECIPIENT_IDS as readonly string[]).not.toContain("informant");
+    expect(deliverRecipientIdSchema.safeParse("informant").success).toBe(false);
+  });
+
+  it("初期候補は innkeeper/merchant/priest/artisan(caretaker/warden は含めない)", () => {
+    expect([...DELIVER_RECIPIENT_IDS].sort()).toEqual(["artisan", "innkeeper", "merchant", "priest"]);
+  });
+
+  it("スキーマ・型ガードが一致する", () => {
+    expect(isDeliverRecipient("innkeeper")).toBe(true);
+    expect(isDeliverRecipient("informant")).toBe(false);
+    expect(isDeliverRecipient("dragon")).toBe(false);
+  });
+});
+
+describe("DeliverParcelId(配達の預かり品ホワイトリスト。M19)", () => {
+  it("すべて実在 ItemId かつクエスト用(questItem)=売却/破棄不可", () => {
+    for (const id of DELIVER_PARCEL_IDS) {
+      expect(itemIdSchema.safeParse(id).success).toBe(true);
+      expect(ITEMS[id].questItem).toBe(true);
+      expect(isSellable(id)).toBe(false);
+    }
+  });
+
+  it("一点物 old-key・贈答/納品ホワイトリストの品は含まない", () => {
+    expect(DELIVER_PARCEL_IDS as readonly string[]).not.toContain("old-key");
+    for (const id of DELIVER_PARCEL_IDS) {
+      expect(GIFTABLE_ITEM_IDS as readonly string[]).not.toContain(id);
+      expect(FETCH_TARGET_IDS as readonly string[]).not.toContain(id);
+    }
+  });
+
+  it("スキーマ・型ガードが一致する", () => {
+    expect(isDeliverParcel("sealed-letter")).toBe(true);
+    expect(deliverParcelIdSchema.safeParse("potion-small").success).toBe(false);
+    expect(isDeliverParcel("old-key")).toBe(false);
+  });
+});
+
+describe("EscortDestinationId(護衛の目的地ホワイトリスト。M19)", () => {
+  it("各目的地の座標が該当マップで walkable(実在・通行可能)", () => {
+    for (const id of ESCORT_DESTINATION_IDS) {
+      const dest = ESCORT_DESTINATIONS[id];
+      expect(isWalkable(getMap(dest.mapId), dest.position)).toBe(true);
+    }
+  });
+
+  it("目的地は仕様の実在地点と一致する(town-gate/settlement-gate/field-crossroads)", () => {
+    expect(ESCORT_DESTINATIONS["town-gate"]).toEqual({ mapId: "town", position: { x: 11, y: 13 } });
+    expect(ESCORT_DESTINATIONS["settlement-gate"]).toEqual({ mapId: "settlement", position: { x: 8, y: 10 } });
+    expect(ESCORT_DESTINATIONS["field-crossroads"]).toEqual({ mapId: "field", position: { x: 11, y: 8 } });
+  });
+
+  it("ESCORT_DESTINATIONS / ESCORT_DESTINATION_NAMES のキー集合が ID 列と一致(drift 検知)", () => {
+    expect(Object.keys(ESCORT_DESTINATIONS).sort()).toEqual([...ESCORT_DESTINATION_IDS].sort());
+    expect(Object.keys(ESCORT_DESTINATION_NAMES).sort()).toEqual([...ESCORT_DESTINATION_IDS].sort());
+  });
+
+  it("スキーマ・型ガードが一致する", () => {
+    expect(isEscortDestination("town-gate")).toBe(true);
+    expect(escortDestinationIdSchema.safeParse("moon-gate").success).toBe(false);
+  });
+});
+
+describe("SurveyTargetId(調査対象ホワイトリスト。M19)", () => {
+  // 全マップの sign オブジェクト ID を集計(調べが無害・再実行可能な種のみ許可)
+  const signIds = new Set<string>();
+  const allObjectIds = new Set<string>();
+  for (const map of ALL_MAPS) {
+    for (const obj of map.objects) {
+      allObjectIds.add(obj.id);
+      if (obj.kind === "sign") signIds.add(obj.id);
+    }
+  }
+
+  it("すべて実在オブジェクトID かつ kind=sign", () => {
+    for (const id of SURVEY_TARGET_IDS) {
+      expect(allObjectIds.has(id)).toBe(true);
+      expect(signIds.has(id)).toBe(true);
+    }
+  });
+
+  it("d4-conduit(実在の sign だが第2章トリガーのため除外)を含まない", () => {
+    expect(signIds.has("d4-conduit")).toBe(true); // 実在の sign であること
+    expect(SURVEY_TARGET_IDS as readonly string[]).not.toContain("d4-conduit");
+    expect(surveyTargetIdSchema.safeParse("d4-conduit").success).toBe(false);
+  });
+
+  it("chest/gather 種は含まない(sign に限る)", () => {
+    const allObjects = ALL_MAPS.flatMap((m) => m.objects);
+    for (const id of SURVEY_TARGET_IDS) {
+      expect(allObjects.find((o) => o.id === id)?.kind).toBe("sign");
+    }
+    // 宝箱・採取は survey 対象外
+    expect(isSurveyTarget("d1-chest")).toBe(false);
+    expect(isSurveyTarget("field-gather-herb")).toBe(false);
+  });
+
+  it("SURVEY_TARGET_NAMES のキー集合が ID 列と一致(drift 検知)", () => {
+    expect(Object.keys(SURVEY_TARGET_NAMES).sort()).toEqual([...SURVEY_TARGET_IDS].sort());
+  });
+
+  it("スキーマ・型ガードが一致する", () => {
+    expect(isSurveyTarget("field-sign-post")).toBe(true);
+    expect(isSurveyTarget("d4-conduit")).toBe(false);
+    expect(surveyTargetIdSchema.safeParse("moon-sign").success).toBe(false);
   });
 });
