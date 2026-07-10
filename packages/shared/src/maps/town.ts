@@ -35,11 +35,13 @@ export const townMap: MapDefinition = mapDefinitionSchema.parse({
       to: { mapId: "field", position: { x: 11, y: 1 }, facing: "down" }
     }
   ],
+  // facing は「建物を背にした向き」(M17。BACKLOG指示)。北側に建物がある者は南(down)、
+  // 南側に建物がある者は北(up)を向いて通りに立つ
   npcs: [
-    { id: "innkeeper", position: { x: 4, y: 4 }, facing: "up" }, // 灯宿の前
-    { id: "merchant", position: { x: 16, y: 4 }, facing: "up" }, // 渡り物屋の前
-    { id: "informant", position: { x: 4, y: 10 }, facing: "down" }, // 霧笛亭の前
-    { id: "priest", position: { x: 16, y: 10 }, facing: "down" } // 灯守堂の前
+    { id: "innkeeper", position: { x: 4, y: 4 }, facing: "down" }, // 灯宿(北)を背に
+    { id: "merchant", position: { x: 16, y: 4 }, facing: "down" }, // 渡り物屋(北)を背に
+    { id: "informant", position: { x: 4, y: 10 }, facing: "up" }, // 霧笛亭(南)を背に
+    { id: "priest", position: { x: 16, y: 10 }, facing: "up" } // 灯守堂(南)を背に
   ],
   objects: [
     { id: "town-sign-inn", kind: "sign", position: { x: 2, y: 4 }, message: "宿屋『灯宿』。暖炉の火と、階段のきしみが迎えてくれる。" },

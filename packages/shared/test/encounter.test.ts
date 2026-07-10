@@ -11,10 +11,11 @@ import {
   sampleEnemySymbols,
   samePosition,
   townMap,
+  DIRECTIONS,
   MID_BOSS_ENEMY_IDS,
   RESPAWNABLE_ENEMY_IDS
 } from "../src/index.js";
-import type { EnemyId, MapDefinition, Position } from "../src/index.js";
+import type { Direction, EnemyId, MapDefinition, Position } from "../src/index.js";
 
 function forbidden(map: MapDefinition): Position[] {
   const list: Position[] = map.transitions.map((t) => t.position);
@@ -121,6 +122,28 @@ describe("sampleEnemySymbols(敵シンボル配置)", () => {
     const a = sampleEnemySymbols(dungeon3Map, createRng(2024));
     const b = sampleEnemySymbols(dungeon3Map, createRng(2024));
     expect(a).toEqual(b);
+  });
+
+  // -------------------------------------------------------------------------
+  // M17: 見た目の向き(上下左右ランダム)
+  // -------------------------------------------------------------------------
+
+  it("M17: 各シンボルは4方向いずれかの向きを持つ", () => {
+    for (let seed = 1; seed <= 50; seed += 1) {
+      for (const p of sampleEnemySymbols(dungeon3Map, createRng(seed))) {
+        expect(DIRECTIONS).toContain(p.facing);
+      }
+    }
+  });
+
+  it("M17: 向きは偏らずランダムに割り当てられる(複数シードで4方向すべて現れる)", () => {
+    const seen = new Set<Direction>();
+    for (let seed = 1; seed <= 100; seed += 1) {
+      for (const p of sampleEnemySymbols(dungeon3Map, createRng(seed))) {
+        seen.add(p.facing);
+      }
+    }
+    expect([...seen].sort()).toEqual(["down", "left", "right", "up"]);
   });
 
   // -------------------------------------------------------------------------

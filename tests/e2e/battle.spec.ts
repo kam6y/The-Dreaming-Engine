@@ -127,6 +127,9 @@ test("seed=42でフィールドの敵シンボルに接触し、勝利して探�
   await page.goto(`/?seed=${SEED}&skipIntro=1`);
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
+  // スイート先頭テストのフレーク対処(JOURNAL[54]の申し送り): WS確立(接続済み)前に
+  // Enter を送るとタイトルで停止するため、疎通完了を待ってから開始する
+  await expect(page.getByText("サーバー: 接続済み")).toBeVisible({ timeout: 10_000 });
 
   // Phaser のキーボード対象は window。入力を届けるためキャンバスへフォーカスする
   await page.locator("canvas").click();

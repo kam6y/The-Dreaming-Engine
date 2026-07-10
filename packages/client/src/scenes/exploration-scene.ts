@@ -38,6 +38,8 @@ import { ShopOverlay } from "../ui/shop-overlay.js";
 const TILE_SIZE = 32;
 /** 1マス移動のスムーズ補間時間(ミリ秒)。仕様にない細部のため裁量値 */
 const MOVE_DURATION_MS = 140;
+/** プレイヤースプライトの表示サイズ(px)。M13-3の裁量値(向き切替時の再適用でも使う) */
+const PLAYER_SPRITE_SIZE = 42;
 
 /** プレースホルダータイルの種別別カラー(単色+簡易パターン) */
 const TILE_COLORS: Record<TileType, number> = {
@@ -92,7 +94,11 @@ export class ExplorationScene extends Phaser.Scene {
 
   private playerSprite!: Phaser.GameObjects.Container;
 
-  private facingDot!: Phaser.GameObjects.Arc;
+  /**
+   * プレイヤーのスプライト画像(向きでテクスチャを切り替える。M17)。
+   * スプライト未整備で矩形プレースホルダーへ退避した場合は null(向き表示なし)
+   */
+  private playerImage: Phaser.GameObjects.Image | null = null;
 
   /** マップ・キャラ等のワールド描画物(ズームされるカメラで映す) */
   private worldLayer!: Phaser.GameObjects.Container;
@@ -815,6 +821,18 @@ export class ExplorationScene extends Phaser.Scene {
     return image;
   }
 
+  /**
+   * 向き差分テクスチャのid(M17)。down=正面は既存id、up/left/right は `<id>-<向き>`。
+   * 向き差分が未整備の間は正面idへ退避する(asset-pipeline.md のフェイルセーフ)
+   */
+  private directionalTextureId(baseId: string, facing: Direction): string {
+    if (facing === "down") {
+      return baseId;
+    }
+    const id = `${baseId}-${facing}`;
+    return this.textures.exists(id) ? id : baseId;
+  }
+
   private drawObjects(): void {
     for (const object of this.map.objects) {
       const { x, y } = this.tileCenter(object.position);
@@ -857,8 +875,9 @@ export class ExplorationScene extends Phaser.Scene {
   private drawNpcs(): void {
     for (const npc of this.map.npcs) {
       const { x, y } = this.tileCenter(npc.position);
-      // NPCスプライト(sprite-<npcId>。M13-3)。未整備なら従来の円プレースホルダー
-      const sprite = this.mapSprite(`sprite-${npc.id}`, x, y, 42);
+      // NPCスプライト(sprite-<npcId>。M13-3)。未整備なら従来の円プレースホルダー。
+      // 向きはマップ定義の facing(=建物を背にした向き。M17)の差分テクスチャで表現
+      const sprite = this.mapSprite(this.directionalTextureId(`sprite-${npc.id}`, npc.facing), x, y, 42);
       if (sprite !== null) {
         this.worldLayer.add(sprite);
       } else {
@@ -953,7 +972,7 @@ export class ExplorationScene extends Phaser.Scene {
   /** snapshot の敵シンボルを描画へ反映する(差分がある時だけ再構築) */
   private updateEnemySymbols(): void {
     const key = this.snapshot.symbols
-      .map((s) => `${s.enemyId}@${s.position.x},${s.position.y}`)
+      .map((s) => `${s.enemyId}@${s.position.x},${s.position.y}:${s.facing}`)
       .join("|");
     if (key === this.symbolsKey) {
       return;
@@ -965,9 +984,10 @@ export class ExplorationScene extends Phaser.Scene {
     this.symbolViews = [];
     for (const symbol of this.snapshot.symbols) {
       const { x, y } = this.tileCenter(symbol.position);
-      // 敵シンボルのスプライト(symbol-<enemyId>。M13-3)。未整備なら従来の菱形
+      // 敵シンボルのスプライト(symbol-<enemyId>。M13-3)。未整備なら従来の菱形。
+      // 向きはサーバーが湧き時に決めたランダム4方向(M17)の差分テクスチャで表現
       const view: Phaser.GameObjects.GameObject & { scale: number } =
-        this.mapSprite(`symbol-${symbol.enemyId}`, x, y, 34) ??
+        this.mapSprite(this.directionalTextureId(`symbol-${symbol.enemyId}`, symbol.facing), x, y, 34) ??
         this.add
           .polygon(x, y, [0, -12, 12, 0, 0, 12, -12, 0], SYMBOL_COLORS[symbol.enemyId])
           .setStrokeStyle(2, 0x0b0d12);
@@ -986,16 +1006,15 @@ export class ExplorationScene extends Phaser.Scene {
 
   private createPlayer(): void {
     // 主人公スプライト(sprite-player。M13-3)。未整備なら従来の矩形プレースホルダー。
-    // 向き表示は仕様どおり既存の向きドットを継続する(スプライトは正面1枚)
-    const sprite = this.mapSprite("sprite-player", 0, 0, 42);
+    // 向きはスプライトの4方向テクスチャ切替で表現し、向きドット(補助点)は廃止(M17)
+    const sprite = this.mapSprite("sprite-player", 0, 0, PLAYER_SPRITE_SIZE);
+    this.playerImage = sprite;
     const body: Phaser.GameObjects.GameObject =
       sprite ??
       this.add.rectangle(0, 0, TILE_SIZE - 8, TILE_SIZE - 8, 0xd8c98f).setStrokeStyle(2, 0x0b0d12);
-    // 向きドットの色: スプライト(暗色の外套)上では明るい琥珀、金色の矩形上では暗色
-    this.facingDot = this.add.circle(0, 0, 3, sprite !== null ? 0xd8c98f : 0x0b0d12);
 
     const { x, y } = this.tileCenter(this.renderedPosition);
-    this.playerSprite = this.add.container(x, y, [body, this.facingDot]).setDepth(10);
+    this.playerSprite = this.add.container(x, y, [body]).setDepth(10);
     this.worldLayer.add(this.playerSprite);
     this.applyFacing(this.snapshot.location.facing);
   }
@@ -1202,15 +1221,19 @@ export class ExplorationScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * プレイヤーの向きをスプライトのテクスチャ切替で反映する(M17。向きドットは廃止)。
+   * 未整備の向きは正面へ退避し、矩形プレースホルダー時は向き表示を持たない
+   */
   private applyFacing(facing: Direction): void {
-    const offset = TILE_SIZE / 2 - 9;
-    const delta: Record<Direction, { x: number; y: number }> = {
-      up: { x: 0, y: -offset },
-      down: { x: 0, y: offset },
-      left: { x: -offset, y: 0 },
-      right: { x: offset, y: 0 }
-    };
-    this.facingDot.setPosition(delta[facing].x, delta[facing].y);
+    if (this.playerImage === null) {
+      return;
+    }
+    const textureId = this.directionalTextureId("sprite-player", facing);
+    if (this.playerImage.texture.key !== textureId) {
+      this.playerImage.setTexture(textureId);
+      this.playerImage.setDisplaySize(PLAYER_SPRITE_SIZE, PLAYER_SPRITE_SIZE);
+    }
   }
 
   /** E2E・デバッグ用に現在状態をDOMデータ属性へ反映する(#game要素) */

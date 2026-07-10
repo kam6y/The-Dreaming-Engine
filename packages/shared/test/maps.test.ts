@@ -6,9 +6,11 @@ import {
   NEW_GAME_START,
   isWalkable,
   mapDefinitionSchema,
+  neighbor,
+  tileTypeAt,
   transitionAt
 } from "../src/index.js";
-import type { MapDefinition, MapId } from "../src/index.js";
+import type { Direction, MapDefinition, MapId } from "../src/index.js";
 import {
   isAdjacentReachable,
   isCellReachable,
@@ -94,6 +96,24 @@ describe("配置(NPC・オブジェクト・ボス)", () => {
         expect(map.boss?.enemyId).toBe("dream-eater");
       } else {
         expect(map.boss).toBeUndefined();
+      }
+    }
+  });
+
+  it("NPCは建物を背にして立つ(背後のマスが壁。M17)", () => {
+    const OPPOSITE: Record<Direction, Direction> = {
+      up: "down",
+      down: "up",
+      left: "right",
+      right: "left"
+    };
+    for (const map of ALL_MAPS) {
+      for (const npc of map.npcs) {
+        const behind = neighbor(npc.position, OPPOSITE[npc.facing]);
+        expect(
+          tileTypeAt(map, behind),
+          `${map.id} の ${npc.id} の背後 (${behind.x},${behind.y}) は建物(壁)であるべき`
+        ).toBe("wall");
       }
     }
   });

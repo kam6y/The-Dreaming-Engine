@@ -1,16 +1,20 @@
 import { z } from "zod";
 
-import { positionSchema, samePosition } from "../geometry.js";
+import { DIRECTIONS, directionSchema, positionSchema, samePosition } from "../geometry.js";
 import type { Position } from "../geometry.js";
 import { enemyIdSchema, RESPAWNABLE_ENEMY_IDS } from "../ids.js";
 import { isWalkable } from "../map.js";
 import type { MapDefinition } from "../map.js";
 import type { Rng } from "../rng.js";
 
-/** 敵シンボルの配置(マップ上に置く1体分) */
+/**
+ * 敵シンボルの配置(マップ上に置く1体分)。
+ * facing はマップ上の見た目の向き(M17: 上下左右ランダム。戦闘には影響しない)。
+ */
 export const enemySymbolPlacementSchema = z.object({
   position: positionSchema,
-  enemyId: enemyIdSchema
+  enemyId: enemyIdSchema,
+  facing: directionSchema
 });
 export type EnemySymbolPlacement = z.infer<typeof enemySymbolPlacementSchema>;
 
@@ -44,7 +48,9 @@ export function sampleEnemySymbols(map: MapDefinition, rng: Rng): EnemySymbolPla
   for (const position of chosen) {
     const enemyId = species[rng.int(0, species.length - 1)];
     if (!enemyId) continue; // species は非空を保証済み(noUncheckedIndexedAccess 対策)
-    placements.push({ position, enemyId });
+    // 見た目の向きは上下左右ランダム(M17。BACKLOG「敵は上下左右ランダムな方向」)
+    const facing = DIRECTIONS[rng.int(0, DIRECTIONS.length - 1)] ?? "down";
+    placements.push({ position, enemyId, facing });
   }
   return placements;
 }

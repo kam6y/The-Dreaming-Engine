@@ -1349,7 +1349,7 @@ export class GameSession {
       questItems: state.inventory.questItems.map(toView),
       inventoryCapacity: INVENTORY_CAPACITY,
       inventoryUsed: usedSpace(state.inventory),
-      symbols: this.symbols.map((s) => ({ position: { ...s.position }, enemyId: s.enemyId })),
+      symbols: this.symbols.map((s) => ({ position: { ...s.position }, enemyId: s.enemyId, facing: s.facing })),
       resolvedObjectIds: this.resolvedObjectIdsForCurrentMap(),
       subQuests: this.buildSubQuestViews()
     };
