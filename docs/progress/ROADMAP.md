@@ -393,10 +393,12 @@ JOURNALへ「仕様変更提案」として記録する)。
       ジャーナル表示・不干渉条件 / ai-guardrails.md=攻撃リグレッション3ブロック追加
       (追加方向のみ。既存の上限・ホワイトリスト・クールダウンは不変)
       (escort/surveyはcount=1固定、報告先は全型カイ、遂行は全て決定論。JOURNAL[63])
-- [ ] M19-2: sharedのクエスト状態機械拡張(subQuestスキーマへ3型追加=旧セーブ互換・
+- [x] M19-2: sharedのクエスト状態機械拡張(subQuestスキーマへ3型追加=旧セーブ互換・
       新ホワイトリスト4列挙(DeliverRecipientId/DeliverParcelId/EscortDestinationId/
       SurveyTargetId)の新設・受諾/納品/到達/調査/放棄/報告の純ロジック・
       預かり品の別枠管理)+実在性ドリフト検知を含むユニットテスト(subagent)
+      (discriminatedUnion末尾追加・escort/surveyはcount=z.literal(1)・
+      removeQuestItem新設・テスト33件追加=unit 826。JOURNAL[64])
 - [ ] M19-3: サーバー統合(propose_quest検証層の3型対応・納品/到達/調査のイベント
       処理・モック応答への新型+悪意応答追加)+攻撃リグレッションテスト拡張
       (subagent)。既存の上限・ホワイトリスト・クールダウンは不変

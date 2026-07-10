@@ -1868,3 +1868,43 @@
   abandonQuestの回収・reportQuestの型分岐(fetchのみ報告時削除)・
   isReportReadyはdeliver/escort/surveyでcompletedゲート・サーバー側検証は
   propose-quest.tsに3ブランチ+escort/surveyのcount=1固定チェック
+
+## [64] 2026-07-11 M19-2: サブクエスト3型のshared状態機械(subagent委譲=Opus)
+
+- やったこと(実装=subagent、検収・コミット=オーケストレーター):
+  - shared/src/ai/ に新列挙3ファイル(既存hunt/fetch/giftableと同パターン=
+    zod enum+isガード+satisfiesで実在ID担保): deliver.ts(DELIVER_RECIPIENT_IDS=
+    innkeeper/merchant/priest/artisan、DELIVER_PARCEL_IDS=3種)/escort.ts
+    (ESCORT_DESTINATIONS=id→{mapId,position}+表示名)/survey.ts(sign4種+表示名)
+  - combat/items.ts へ預かり品3種(sealed-letter/warm-oil-flask/amber-charm。
+    questItem:true=別枠・売却/破棄不可)、inventory.ts へ removeQuestItem
+    (別枠除去。addItemの別枠振り分けと対。ゲーム進行側専用)
+  - quests.ts: subQuestスキーマのdiscriminatedUnionへ3ブランチ末尾追加
+    (escort/surveyは count: z.literal(1) でスキーマ段却下)。純関数の追加=
+    receiveQuestParcel(受諾時受領)/reclaimQuestParcel(放棄時回収)/
+    recordDelivery(納品→completed+別枠削除)/recordEscortArrival(到達判定)/
+    recordSurvey(調べ判定)/subQuestTargetLabel(全型の表示ラベル)。
+    isReportReadyは新3型をcompletedゲートに。acceptProposal/abandonQuest/
+    reportQuest/recordHuntKillのシグネチャ・既存挙動は不変
+  - messages.ts の表示ビューtype列を5型へ拡張。server 2箇所(session.ts/prompt.ts)の
+    表示ラベル三項式を subQuestTargetLabel 呼び出しへ置換(union拡張による
+    型エラー連鎖への最小修正=検収で妥当と判断)
+  - テスト33件追加(4ホワイトリストの実在性drift検知: informant不含・
+    escort座標walkable・d4-conduit不含・parcelのquestItem:true / 3型状態機械・
+    放棄回収・count≠1却下・既存不変・旧セーブ互換)= unit 826
+- 裁量で決めたこと: caretaker/wardenは受取ホワイトリストから除外(仕様の初期候補
+  4名に一致・最小に保つ。wardenは語り部で窓口なし)/受諾・放棄の副作用は
+  シグネチャ不変のため別関数に分離しserverが合成する設計/目的地・調査対象の
+  表示名語彙(灯町・南門/琥珀郷・南門/忘れ野・十字路/忘れ野の道標/
+  裂け目一層の刻印/霧笛亭の看板/坑口の看板)
+- 検証: pnpm check 緑(unit 826)・pnpm test:e2e 14/14緑
+  (subagent実行+オーケストレーター再実行の二重確認)。ガードレール不変
+- 次にやること: M19-3(server統合。subagent委譲)。申し送り:
+  propose-quest検証層に3ブランチ+escort/surveyのcount=1確認(比検証等の正は
+  server検証層。既存の全上限は全型に適用)/受諾フローで acceptProposal 成功後に
+  receiveQuestParcel、放棄フローで abandonQuest 前に reclaimQuestParcel を合成/
+  遂行トリガー配線=会話開始時のrecordDelivery(受取NPC話しかけ)・移動後の
+  recordEscortArrival・調べ時のrecordSurvey/MockDreamMasterへ新型定型応答+
+  悪意応答(ホワイトリスト外・混成・count>1)+攻撃リグレッションテスト/
+  clientのdescribeQuest/describeProposalは二分岐のため新型が「調達」誤表記=
+  型別描画はM19-4(UI=オーケストレーター)で対応
