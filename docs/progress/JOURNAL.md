@@ -1751,3 +1751,30 @@
   (interactObject の sign 分岐・interactNpc の warden 分岐。第1章 interactPriest の
   「snapshot先出し→dialog列」方式を踏襲)+ch2-beyond 到達時の即時セーブ+テスト
   (骨子のテスト観点5項目を参照)。台詞文言は骨子の裁量範囲=JOURNALに記録
+
+## [60] 2026-07-11 M18-2: 第2章のクエスト状態機械(subagent委譲=Opus)
+
+- やったこと(実装=subagent、検収・コミット=オーケストレーター):
+  - shared: MAIN_QUEST_STAGES 末尾へ ch2-stirring/ch2-vigil-song/ch2-beyond を追記
+    (既存値不変=旧セーブ互換・GAME_STATE_VERSION据え置き)。
+    mainQuestStageIndex / isStageAtOrAfter 純関数+テスト
+  - server: **isBossDefeated を順序判定へ一般化**(骨子の要注意点どおり。
+    第2章中の夢喰い再戦・ボスマーカー再活性を防止)。
+    導管(d4-conduit)の段階分岐 interactConduit: epilogue→ch2-stirring(気づき3行)/
+    ch2-stirring 再調べ=促し1行(裁量追加: 旧定型文は脈動気づき後に矛盾するため)/
+    ch2-vigil-song→ch2-beyond(結び4行+**即時セーブ**)/ch2-beyond=余韻1行。
+    トワ(warden)は ch2-stirring のみ決定論スクリプト5行(唄の続き。3.8の70以上帯は
+    「滲ませ」の範囲=1.6の明示許可内)、他段階は従来のAI会話(回帰テスト付き)
+  - テスト12件追加(旧セーブ後方互換・epilogue前の不発・正常系3遷移・
+    第2章中のボス非活性・ch2-beyond の永続化・トワAI会話回帰・純関数)= unit 791
+  - 台詞全文は session.ts の定数(CONDUIT_STIRRING_LINES 等)に記録。
+    開示の掟(地名・核心・フック#1の断定なし)を検収で確認
+- 検証: `pnpm check` 緑(unit 791)・`pnpm test:e2e` 13/13緑
+  (subagent実行+オーケストレーター再実行の二重確認)。ガードレール不変
+- 次にやること: M18-3(演出・クライアント対応。**UI=オーケストレーター自身**)。
+  subagentの申し送り: 決定論会話は既存dialogチャネルで流れるため進行への
+  クライアント改修は不要。M18-3の候補は「第2章の進行がプレイヤーに見える」最小のUI=
+  クエストジャーナル(Q)のメインクエスト表示に第2章段階の文言があるか確認・追記、
+  導管の脈動の軽い演出(既存tweenの流用可否)、章クリアの合図。仕様の
+  「実装対象外」リスト(発光スプライト・専用夢シーン・記念品・専用BGM)は作らない。
+  M18-4のE2E最短経路: 導管=dungeon-4、トワ=settlement(13,7)から(14,7)
