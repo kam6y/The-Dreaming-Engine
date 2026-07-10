@@ -405,9 +405,13 @@ JOURNALへ「仕様変更提案」として記録する)。
       (abandon-quest/report-questハンドラの新規配線(pre-existing gap回収)・
       モックは番兵topic方式で既存E2E不変・攻撃ID6種登録・テスト16件=unit 842。
       JOURNAL[65])
-- [ ] M19-4: クライアントUI(ジャーナルの型別現況表示・deliver納品の選択肢会話・
+- [x] M19-4: クライアントUI(ジャーナルの型別現況表示・deliver納品の選択肢会話・
       escort同行者マーカー・survey達成マーク。UI=オーケストレーター)+E2Eスモーク。
       完了時にBACKLOG側へチェック+M19ゲート(test:e2e:full)
+      (ジャーナルにカーソル+Enter報告+X放棄(確認付き)・reportReadyビュー・
+      「連れの灯」マーカー・deliver E2E=15本目・liveプロンプト候補はsubagent委譲。
+      納品会話はM19-3実装済みのdialog列で足りると判断。ゲート全緑=M19完了。
+      JOURNAL[66])
 
 完了条件: propose_questで3型(deliver/escort/survey)が発行・受諾・遂行・報告でき、
 防御検証が3型に拡張され(既存要件は不変)、旧セーブと既存E2E(スモーク14本+full)が

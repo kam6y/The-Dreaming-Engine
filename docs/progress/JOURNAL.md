@@ -1946,3 +1946,42 @@
   **live用の残作業**: prompt.tsのformatQuestTargets(quest_targets候補)が
   hunt/fetchのみ=liveで新3型を提案させるには候補enumの追加が必要
   (防御に関わらないprompt拡張。M19-4のイテレーション内で対応)
+
+## [66] 2026-07-11 M19-4: サブクエスト3型のUI+E2E(UI=オーケストレーター。M19完了)
+
+- やったこと(UI実装・E2E・デバッグ=オーケストレーター自身、
+  liveプロンプト候補追加=subagentへ並行委譲):
+  - ジャーナル(Q)の操作化: ↑↓カーソル・Enter=報告(reportReady時のみ送信。
+    未達成はクライアント内ヒント)・X=放棄(ConfirmDialogで確認)。操作後は
+    ジャーナルを閉じてserver応答dialogを表示。フッターに操作ヒント。
+    型別の見出し(討伐/調達/配達/護衛/調査=SUB_QUEST_KIND_LABELS)と
+    遂行内容1行(describeSubQuestObjective)+網羅ユニットテスト
+  - ビュー最小拡張: subQuestView.reportReady(server: isReportReadyの1行。
+    M11-3の「view拡張は最小限」先例の範囲)。data-menuへ journal を追加
+    (E2Eの同期点。open/close時にsyncDomState)
+  - escort同行者マーカー「連れの灯」: activeなescortの間、暖色光点(circle+tween
+    流用・呼吸明滅)がプレイヤーへ緩やかに追従(update内lerp)。放棄・到達で消滅
+  - 会話overlayのdescribeProposalを5型対応(kindラベル共通化)
+  - liveプロンプト: formatQuestTargets(quest_targets)へ3型の候補ID・表示名・
+    count=1固定の記述を追加+テスト5件(subagent委譲。hunt/fetch行はバイト不変)
+  - E2E 15本目 quest-types.spec: deliverの最短経路(番兵topicフィクスチャ+
+    つづきから→カイ受注→オルガへ納品→ジャーナルEnter報告でgold 30→50)。
+    初回失敗をdev:mock+Playwright MCPで再現デバッグ→原因はタイミング依存
+    (宿確認出現前のEsc空振り→Qガード→Enterが宿確認に落ちる)。data-menu同期点+
+    Q先行リトライで決定論化
+  - 実プレイ目視: 連れの灯の表示・追従・放棄後の消滅、ジャーナルの護衛表示・
+    カーソル・確認ダイアログ→受注枠解放(スクリーンショットで確認)
+- 裁量で決めたこと: 報告導線はジャーナルのEnterに集約(serverは場所非強制=
+  M19-3裁量の続き。「カイ窓口」は応答がカイの台詞で返ること+「Enter カイへ報告」
+  文言で表現)/放棄・報告の操作後はジャーナルを自動で閉じる(状態同期を単純化)/
+  deliver納品の選択肢会話はM19-3の決定論dialog列で足りると判断(専用UIなし)/
+  連れの灯は光点表現(既存スプライトの人型流用は「同一人物が二人」に見えるため回避。
+  プレースホルダー例外の範囲・新アセットなし)
+- M19ゲート: pnpm check 緑(unit 849)・pnpm test:e2e 15/15緑・
+  pnpm test:e2e:full 2/2緑。**M19完了**=BACKLOG「サブクエストのテンプレート拡充」
+  にチェック。ガードレール不変(追加のみ)
+- 次にやること: BACKLOG「優先度: 中」の次点「夢シーンの演出強化
+  (trigger_world_eventの型追加: 市場の変化、失踪、夢の侵食度など)」をM20として
+  展開してから着手。ai-integration.mdの「6. trigger_world_event」(WorldEvent union・
+  解決規則・クランプ)とai-guardrails.mdの夢系検証を必ず読み、防御要件は追加方向のみ。
+  新kindの累積クランプ・同種解決規則・E2E不干渉(既存dream.spec)が骨子の要点
