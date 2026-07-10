@@ -380,3 +380,30 @@ JOURNALへ「仕様変更提案」として記録する)。
 完了条件: エンディング後に第2章を開始でき、選択肢会話のみ(AI非依存)で結びまで
 到達できる。第1章の進行・エンディング・既存セーブ互換が不変。
 `pnpm check`+`pnpm test:e2e`緑(M18完了時は`pnpm test:e2e:full`も)。
+
+## M19: サブクエストのテンプレート拡充(BACKLOG「優先度: 中」3件目の展開。
+## propose_questへdeliver/escort/surveyの3型追加+防御検証の拡張)
+
+- [x] M19-1: 仕様骨子の追記(BACKLOG展開に伴う骨子追記=CLAUDE.mdの例外+
+      ai-integration.md 5節注記自身の予告(「入力スキーマごと拡張する」)に該当。
+      骨子執筆=subagent、検収=オーケストレーター)。
+      ai-integration.md「5b. propose_questの型拡張」=3型の入力スキーマ(discriminated
+      union)・ホワイトリスト4種・達成の意味論・放棄時の預かり品回収・モック方針・
+      旧セーブ互換 / game-design.md「サブクエストの型拡充」=プレイヤー視点の流れ・
+      ジャーナル表示・不干渉条件 / ai-guardrails.md=攻撃リグレッション3ブロック追加
+      (追加方向のみ。既存の上限・ホワイトリスト・クールダウンは不変)
+      (escort/surveyはcount=1固定、報告先は全型カイ、遂行は全て決定論。JOURNAL[63])
+- [ ] M19-2: sharedのクエスト状態機械拡張(subQuestスキーマへ3型追加=旧セーブ互換・
+      新ホワイトリスト4列挙(DeliverRecipientId/DeliverParcelId/EscortDestinationId/
+      SurveyTargetId)の新設・受諾/納品/到達/調査/放棄/報告の純ロジック・
+      預かり品の別枠管理)+実在性ドリフト検知を含むユニットテスト(subagent)
+- [ ] M19-3: サーバー統合(propose_quest検証層の3型対応・納品/到達/調査のイベント
+      処理・モック応答への新型+悪意応答追加)+攻撃リグレッションテスト拡張
+      (subagent)。既存の上限・ホワイトリスト・クールダウンは不変
+- [ ] M19-4: クライアントUI(ジャーナルの型別現況表示・deliver納品の選択肢会話・
+      escort同行者マーカー・survey達成マーク。UI=オーケストレーター)+E2Eスモーク。
+      完了時にBACKLOG側へチェック+M19ゲート(test:e2e:full)
+
+完了条件: propose_questで3型(deliver/escort/survey)が発行・受諾・遂行・報告でき、
+防御検証が3型に拡張され(既存要件は不変)、旧セーブと既存E2E(スモーク14本+full)が
+壊れない。`pnpm check`+`pnpm test:e2e`緑(M19完了時は`pnpm test:e2e:full`も)。

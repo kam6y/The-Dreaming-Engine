@@ -1833,3 +1833,38 @@
   入力スキーマと ai-guardrails.md の検証仕様(ATK-quest系)を必ず読み、
   **防御要件は追加方向のみ**(既存の上限・ホワイトリスト・クールダウンは不変)。
   クエスト状態機械(quests.ts)のテンプレート追加+検証層+モック応答+UI表示が骨子
+
+## [63] 2026-07-11 M19展開+M19-1: サブクエスト型拡充の仕様骨子(subagent委譲=Opus)
+
+- やったこと(骨子執筆=subagent、検収・ROADMAP展開・コミット=オーケストレーター):
+  - BACKLOG「優先度: 中」3件目「サブクエストのテンプレート拡充」をROADMAP M19として
+    展開(M19-1骨子/M19-2 shared/M19-3 server+防御/M19-4 UI+E2Eゲートの4分割)
+  - ai-integration.md「5b. propose_questの型拡張」(+63行): deliver(parcelId+
+    recipientIdの2参照)/escort(destinationId)/survey(targetId)のdiscriminated
+    union追加。既存検証(count 1-5・rewardGold・受注3件・未受諾1件・日3件・字数・
+    出力壁)は全型にそのまま適用し、追加規則のみ新設
+  - game-design.md「サブクエストの型拡充」(+25行): プレイヤー視点の受注→遂行→報告・
+    ジャーナル表示・放棄時の預かり品回収・不干渉条件(第1章/第2章/既存E2E不変)
+  - ai-guardrails.md(+13行): 攻撃リグレッション3ブロック(ホワイトリスト外参照・
+    型偽装の混成入力・既存上限の新型適用)を追加方向のみで追記
+- 裁量で決めたこと(subagent設計を検収して採用):
+  escort/surveyはcount=1固定(報酬上限20G)/報告先は全型カイ・遂行は全て決定論
+  (AI非依存)/deliverの預かり品はクエスト用アイテム別枠(受注時受領・納品時削除・
+  放棄時回収=消滅)/EscortDestinationIdは新ID+実在walkable座標(town-gate/
+  settlement-gate/field-crossroads)/SurveyTargetIdは既存sign限定(d4-conduit・
+  chest・gatherは除外)/DeliverParcelIdは新設(sealed-letter/warm-oil-flask/
+  amber-charm。専用スプライト不要=共用アイコン)/GAME_STATE_VERSION据え置き
+  (unionの上位集合化=旧セーブ後方互換)
+- 検収の要点: 3ファイルとも純追記(既存要件の変更・削除・弱体化なし)・防御は
+  追加方向のみ・記載IDの実在をgrepで機械検証(NpcId5種・sign4種・d4-conduit
+  除外対象の実在・old-key不含)
+- 検証: pnpm check 緑(unit 793。docsのみの変更)
+- 次にやること: M19-2(shared実装。subagent委譲)。申し送り:
+  quests.tsのdiscriminatedUnion末尾へ3ブランチ追加(hunt/fetch不変)・
+  新列挙4種はshared/src/ai/のhunt.ts/fetch.ts/giftable.tsと同パターン
+  (zod enum+isガード+satisfiesで実在ID担保)・実在性テスト必須
+  (recipientにinformant不含/surveyにd4-conduit不含/escort座標がwalkable/
+  預かり品は売却破棄不可)・acceptProposalのdeliver預かり品mint・
+  abandonQuestの回収・reportQuestの型分岐(fetchのみ報告時削除)・
+  isReportReadyはdeliver/escort/surveyでcompletedゲート・サーバー側検証は
+  propose-quest.tsに3ブランチ+escort/surveyのcount=1固定チェック

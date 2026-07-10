@@ -204,6 +204,69 @@
 
 ※`deliver`型(配達)は「何を」「誰に」の2参照が必要で本スキーマでは表現できないため、
 縦切りでは扱わない(BACKLOGの「サブクエストのテンプレート拡充」で入力スキーマごと拡張する)。
+→ この拡張を下記「5b」で展開する(M19)。
+
+### 5b. `propose_quest` の型拡張(拡張: M19)
+
+5節の `hunt`/`fetch` に、BACKLOG「サブクエストのテンプレート拡充」の3型
+(`deliver`/`escort`/`survey`)を**追加**する。既存2型と既存の全検証(count 1-5・
+rewardGold 10-100 かつ `count × 20` 以下・rewardItemId 贈答ホワイトリスト内・
+rewardItemId付き提案1日1件・受注枠3件未満・未受諾提案1件・発行1日3件・
+title40字/description200字・出力壁通過)は**そのまま全型に適用**する(以下は追加規則のみ)。
+発行フロー・ツール許可(サブクエスト生成=speak+propose_quest)・報告先(すべて情報屋カイ)は不変。
+
+**入力スキーマ(discriminated union の追加分)**:
+
+| type | 型固有フィールド(2参照系) | count の意味 |
+|---|---|---|
+| `deliver` | `parcelId: DeliverParcelId`(何を=預かり品)+ `recipientId: DeliverRecipientId`(誰に=受取NPC) | 手渡す預かり品の個数(既存レンジ1-5) |
+| `escort` | `destinationId: EscortDestinationId`(既存マップの指定地点) | **1固定**(1回の道行き。追加規則: count≠1 は却下) |
+| `survey` | `targetId: SurveyTargetId`(既存マップの調べオブジェクト) | **1固定**(1地点の調査。追加規則: count≠1 は却下) |
+
+- 型ごとに `targetId` 系フィールドの**名前と enum が異なる**ため、`hunt`/`fetch` と同じく
+  `discriminatedUnion("type", …)` で表現する(型不一致・混成フィールドはスキーマ段で綺麗に却下)。
+- **ホワイトリスト(すべて `shared` の列挙で定義。`GiftableItemId` と同様)**:
+  - `DeliverRecipientId`: 会話可能NPC(`NpcId`)から**情報屋 `informant` を除いた**部分集合
+    (受注元へ配達する無意味なクエストを防ぐ)。初期候補: `innkeeper`(オルガ)/`merchant`(レンド)/
+    `priest`(フィオル)/`artisan`(ガロ)。
+  - `DeliverParcelId`: 預かり品=**クエスト用アイテムの新設ホワイトリスト**(別枠管理・所持上限対象外・
+    売却/破棄不可。`game-design.md`「成長・経済」)。専用スプライトは必須にせずクエスト用アイテムの
+    共用アイコンでよい(`asset-pipeline.md`)。初期候補(語彙は裁量・M19-2で確定): `sealed-letter`(封緘の文)/
+    `warm-oil-flask`(灯火の油壺)/`amber-charm`(琥珀の護符)。※既存の一点物 `old-key` は含めない。
+  - `EscortDestinationId`: 既存11マップの**通行可能な到達地点**のホワイトリスト(新IDだが座標は実在・walkable)。
+    初期候補: `town-gate`=灯町・南門の内側 `town(11,13)` / `settlement-gate`=琥珀郷・南門の内側 `settlement(8,10)` /
+    `field-crossroads`=忘れ野・十字路 `field(11,8)`。
+  - `SurveyTargetId`: 既存マップの**調べオブジェクト(`sign` 種)**のホワイトリスト。初期候補(実在オブジェクトID):
+    `field-sign-post`(忘れ野の道標)/ `d1-sign`(裂け目一層「灯を絶やすな」)/ `town-sign-tavern`(霧笛亭の看板)/
+    `settlement-sign-mine`(琥珀郷・坑口の看板)。**除外**: `d4-conduit`(第2章開始トリガー=`game-design.md`)、
+    `chest`(一度きり開封)・`gather`(採取=アイテム源)は含めない(調べが無害・再実行可能な `sign` に限る)。
+
+**達成の意味論(`hunt`/`fetch` と同じ粒度。報告先はすべて情報屋カイ・報酬付与は報告時)**:
+
+| type | 受諾時 | 達成(→ `completed`)条件 | 報告時の処理 |
+|---|---|---|---|
+| `deliver` | 情報屋カイから預かり品 `parcelId` を `count` 個受領(クエスト用アイテム別枠へ。所持上限対象外=満杯でも受領可) | 受取NPC `recipientId` に話しかけて**納品**(決定論の選択肢会話。AI非依存)。納品時に預かり品を別枠から削除して `completed` | 報酬(gold+任意 rewardItem)を付与。**納品はすでに済んでいるので所持品の削除はしない** |
+| `escort` | 同行者マーカーが出現しプレイヤーに追従(既存スプライト流用/軽量表示。新アセット不要) | 目的地 `destinationId` の座標に到達で `completed`(同行者は道連れ)。**同行中の戦闘に同行者は関与しない**(戦闘中は待機し戦闘後に再合流) | 報酬を付与(所持品の削除なし) |
+| `survey` | (特別な受領物なし) | 対象 `targetId` を現地で「調べる」で `completed`(既存の調べ演出はそのまま+達成マーク。AI非依存) | 報酬を付与(所持品の削除なし) |
+
+- 報酬アイテム(rewardItem)の受領は既存 `fetch` と同じく**満杯時は受領を保留**する
+  (クエストは `completed` を維持・報酬は消失しない: `game-design.md`「成長・経済」)。
+  `deliver`/`escort`/`survey` は `fetch` と違い**報告時のインベントリ削除(納品)を伴わない**
+  (`deliver` の納品は受取NPCへの手渡し時に完結済み)。
+- `progress` フィールドの意味: `hunt` のみ討伐カウントに使う。`deliver`/`escort`/`survey` は
+  達成が原子的(納品/到達/調べで一気に `completed`)なため `progress` は 0 のまま用いない。
+- **放棄時**: `deliver` は未納品の預かり品を**回収(消滅)**する(別枠から削除。既に納品済みなら回収対象なし)。
+  `escort` は同行者マーカーを消す。`survey` は副作用なし。いずれもペナルティなし・即時に受注枠を解放
+  (`game-design.md`「メインクエスト」放棄規定)。
+
+**モック応答(MockDreamMaster)**: 新型ごとに `speak` + `propose_quest`(実在ホワイトリストIDを使う)を返す
+定型応答と、悪意応答モード(ホワイトリスト外の recipient/destination/target・混成フィールド・
+escort/survey の count>1 等)を追加する(実装はM19-3。検証層の却下をE2E/攻撃テストで通す)。
+
+**旧セーブ互換(GAME_STATE_VERSION 据え置き可)**: `subQuest` スキーマへの union 追加は
+**上位集合化**であり、旧セーブは既存の `hunt`/`fetch` のみを持つため引き続きパースできる(後方互換)。
+`deliver` の預かり品も旧セーブには存在しない(別枠は空)。よって `GAME_STATE_VERSION` は **1 のまま据え置き**でよい
+(本プロジェクトの互換方針は「新コードが旧セーブを壊さない」。新型を含む新セーブを旧コードで読む逆方向は非対象)。
 
 ### 6. `trigger_world_event` — 世界変化(夢シーン専用)
 

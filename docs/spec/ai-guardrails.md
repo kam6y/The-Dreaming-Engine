@@ -256,6 +256,19 @@
   (ターン単位のオール・オア・ナッシング: `ai-integration.md`「呼び出しフロー別仕様」)
 - 存在しない`targetId`のクエスト、`count: 0`や負数、非整数値
   (`quantity: 2.5`・`count: 2.5`・`rewardGold: 55.5`)の却下(数量系フィールドは整数のみ)
+- 新型サブクエストのホワイトリスト外参照の却下(拡張: M19。`propose_quest` の
+  `deliver`/`escort`/`survey`。仕様は`ai-integration.md`「5b」):
+  - `deliver`: ホワイトリスト外・存在しない `recipientId`(受取NPC)への配達、
+    受注元 `informant`(カイ自身)への配達、ホワイトリスト外 `parcelId`(預かり品)の却下
+  - `escort`: ホワイトリスト外 `destinationId`(存在しない/通行不能な地点)の却下
+  - `survey`: ホワイトリスト外 `targetId`(存在しない調べ対象、`d4-conduit` 等の除外対象)の却下
+- 型を偽装した混成入力の却下(拡張: M19): `type: 'deliver'` に `hunt` のフィールド
+  (`targetId` だけ)を与える、`type: 'survey'` に `deliver` の2参照を与える等が
+  discriminated union のスキーマ段で却下されること。`escort`/`survey` の `count: 2` 以上
+  (count=1固定違反)の却下
+- 新型でも既存上限が適用されること(拡張: M19): 新型で受注枠4件目・未受諾提案が残る間の
+  2件目・発行1日4件目・`rewardGold` が `count × 20` 超過(`escort`/`survey` は count=1 固定のため
+  報酬>20 は却下)がいずれも却下されること
 - 401字以上の`speak`、出力壁パターンを含む`speak`(「私はAIとして…」)
 - 空文字・空白のみ・記号のみ(「……」等、日本語比率の分母が0)の`speak`の却下
 - ゼロ幅文字による回避: 逸脱パターンの語(「Claude」等)の文字間にゼロ幅文字を
