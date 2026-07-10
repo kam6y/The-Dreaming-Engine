@@ -1724,3 +1724,30 @@
   大きい項目のため分割必須(骨子→クエスト状態機械→演出→E2Eの順を想定)。
   world-lore 1.5「残された謎」フック#2(機関の全体像=導管の行き先)が第2章の種。
   トワ(3.8)が語り部、灯還りの坑の「導管の間」(d4-conduit)が起点として使える
+
+## [59] 2026-07-10 M18展開+M18-1: 第2章「灯の還る先」の骨子(subagent委譲)
+
+- やったこと: BACKLOG「メインクエスト第2章」をM18として4分割で展開し、
+  M18-1の骨子執筆をsubagent(Opus)へ委譲。検収で純追記127行(削除0)を確認:
+  - world-lore.md 1.6「第2章 — 灯の還る先」(+51行): 起点=エンディング後に
+    脈打ち始めた導管の間の導管/語り部=トワ(唄の続き。3.8の50-69帯と接続、
+    70以上帯とフック#1は匂わせ止まりで温存)/裏付け=フィオル(任意の寄り道)/
+    結び=答えでなく「機関の外にまだ夢を紡ぐ何かがある」**確証**+静かな予感。
+    「語りと開示の掟」を節内に明文化。用語集へ「灯の還る先」1語
+  - game-design.md「メインクエスト第2章(拡張: M18)」(+76行):
+    開始条件=epilogue段階で d4-conduit を調べる/進行段階=enum末尾追記の3段階
+    (ch2-stirring→ch2-vigil-song→ch2-beyond。旧セーブ互換・version据え置き)/
+    すべて選択肢会話・調べイベントの決定論(AI非依存)/不干渉条件
+    (第1章・エンディング・E2E・dungeon_shift/HuntTargetId据え置き)/
+    実装対象外リスト(演出差分・記念品・専用BGM等=必要なら別項目)
+- 検収の要点: トーンガイド遵守・既存節との矛盾なし・実装識別子(d4-conduit/warden)の
+  実在確認済み。**M18-2向けの要注意点も骨子に明記**: isBossDefeated が
+  `=== "dream-eater-defeated" || === "epilogue"` の等値判定のため、新段階追加時に
+  「以降」の順序判定へ一般化しないと第2章中にボスが再戦可能化する
+- 検証: `pnpm check` 緑(unit 783。docsのみの変更)
+- 次にやること: M18-2(shared/serverのクエスト状態機械拡張。subagent委譲)。
+  quests.ts の MAIN_QUEST_STAGES 末尾へ3段階追記+mainQuestStageIndex/isStageAtOrAfter
+  純関数+isBossDefeated の順序判定化+d4-conduit と warden の段階分岐
+  (interactObject の sign 分岐・interactNpc の warden 分岐。第1章 interactPriest の
+  「snapshot先出し→dialog列」方式を踏襲)+ch2-beyond 到達時の即時セーブ+テスト
+  (骨子のテスト観点5項目を参照)。台詞文言は骨子の裁量範囲=JOURNALに記録
