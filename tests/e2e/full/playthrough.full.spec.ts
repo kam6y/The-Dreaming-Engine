@@ -84,6 +84,9 @@ async function startNewGame(page: Page, query: string): Promise<void> {
   await page.goto(query);
   await expect(page.getByRole("heading", { name: "The Dreaming Engine" })).toBeVisible();
   await expect(page.locator("canvas")).toBeVisible();
+  // スイート先頭テストのフレーク対処(JOURNAL[54][55]と同族): WS確立(接続済み)前に
+  // Enter を送るとタイトルで停止するため、疎通完了を待ってから開始する
+  await expect(page.getByText("サーバー: 接続済み")).toBeVisible({ timeout: 10_000 });
   // Phaser のキーボード対象は window。入力を届けるためキャンバスへフォーカスする
   await page.locator("canvas").click();
   await page.keyboard.press("Enter");
