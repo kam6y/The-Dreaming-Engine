@@ -30,6 +30,7 @@ import {
   innFeeFor,
   interactionTarget,
   isInShopStock,
+  isReportReady,
   isStageAtOrAfter,
   lootForChest,
   lootForGather,
@@ -1733,7 +1734,9 @@ export class GameSession {
         : {}),
       title: q.title,
       description: q.description,
-      status: q.status
+      status: q.status,
+      // いま情報屋へ報告できるか(isReportReady が正)。ジャーナルの報告操作の可否表示に使う(M19-4)
+      reportReady: isReportReady(q, state.inventory)
     }));
   }
 

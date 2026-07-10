@@ -11,6 +11,7 @@ import type {
 import { fitContain, fitCover } from "./cover-image.js";
 import { UI_FONT_FAMILY } from "./font.js";
 import { MenuList } from "./menu-list.js";
+import { SUB_QUEST_KIND_LABELS } from "./quest-journal-overlay.js";
 import { TextInputBox } from "./text-input-box.js";
 import { TypewriterText } from "./typewriter-text.js";
 
@@ -293,7 +294,7 @@ export class ConversationOverlay {
   }
 
   private describeProposal(proposal: PendingProposalView): string {
-    const kind = proposal.type === "hunt" ? "討伐" : "調達";
+    const kind = SUB_QUEST_KIND_LABELS[proposal.type];
     const reward =
       proposal.rewardItem !== undefined
         ? `${proposal.rewardGold}G と ${proposal.rewardItem.name}`

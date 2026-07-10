@@ -170,6 +170,17 @@ export class ExplorationScene extends Phaser.Scene {
   /** クエストジャーナル(Qで開閉) */
   private questJournal: QuestJournalOverlay | null = null;
 
+  /** サブクエスト放棄の確認ダイアログ(表示中は移動・調べるをブロック。M19-4) */
+  private questConfirm: ConfirmDialog | null = null;
+
+  /**
+   * 護衛(escort)の同行者マーカー「連れの灯」(M19-4)。
+   * active な escort サブクエストの間だけプレイヤーの後を漂う暖色の光点
+   * (仕様 ai-integration.md「5b」: 同行者は軽量表示でよい。新アセットは作らない)。
+   * 到達で completed になれば snapshot 反映(updateCompanion)で消える。
+   */
+  private companionLight: Phaser.GameObjects.Arc | null = null;
+
   /** オブジェクトの描画物(解決済み反映のため id で引けるようにする) */
   private objectViews = new Map<
     string,
@@ -229,6 +240,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.dreamOverlay = null;
     this.pendingDream = null;
     this.questJournal = null;
+    this.questConfirm = null;
+    this.companionLight = null;
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
@@ -249,6 +262,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateResolvedObjects();
     this.updateConduitPulse();
     this.createPlayer();
+    this.updateCompanion();
     this.setupHud();
     this.setupCamera();
     this.setupInput();
@@ -283,6 +297,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.closeConversationOverlay();
       this.closeDreamOverlay();
       this.closeQuestJournal();
+      this.questConfirm?.destroy();
+      this.questConfirm = null;
     });
 
     this.updateHud();
@@ -326,7 +342,7 @@ export class ExplorationScene extends Phaser.Scene {
         }
       } else if (this.dreamOverlay !== null || this.questJournal !== null) {
         // 夢・ジャーナル中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
-      } else if (!this.dialog.isOpen && this.innConfirm === null) {
+      } else if (!this.dialog.isOpen && this.innConfirm === null && this.questConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
           this.dialog.open(next.speaker, next.body);
@@ -361,6 +377,14 @@ export class ExplorationScene extends Phaser.Scene {
       this.openDreamOverlay(text);
     }
 
+    // 護衛の「連れの灯」はプレイヤーへ緩やかに追従する(1歩遅れて漂う。M19-4)
+    if (this.companionLight !== null) {
+      const targetX = this.playerSprite.x;
+      const targetY = this.playerSprite.y + 10;
+      this.companionLight.x += (targetX - this.companionLight.x) * 0.06;
+      this.companionLight.y += (targetY - this.companionLight.y) * 0.06;
+    }
+
     if (this.moving || this.awaiting) {
       return;
     }
@@ -368,6 +392,7 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.isOpen ||
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
       this.conversationOverlay !== null ||
@@ -429,6 +454,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateEnemySymbols();
     this.updateResolvedObjects();
     this.updateConduitPulse();
+    this.updateCompanion();
     this.updateInteraction(view);
     this.shopOverlay?.refresh(view);
     this.inventoryOverlay?.refresh(view);
@@ -590,6 +616,7 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.isOpen ||
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
       this.conversationOverlay !== null ||
@@ -598,12 +625,86 @@ export class ExplorationScene extends Phaser.Scene {
     ) {
       return;
     }
-    this.questJournal = new QuestJournalOverlay(this, this.uiLayer, { snapshot: this.snapshot });
+    this.questJournal = new QuestJournalOverlay(this, this.uiLayer, {
+      snapshot: this.snapshot,
+      onReport: (questId) => {
+        this.reportQuestFromJournal(questId);
+      },
+      onAbandon: (questId) => {
+        this.confirmAbandonQuest(questId);
+      }
+    });
+    this.syncDomState(); // data-menu=journal を反映(E2E が開閉を観測する。M19-4)
   }
 
   private closeQuestJournal(): void {
-    this.questJournal?.destroy();
+    if (this.questJournal === null) {
+      return;
+    }
+    this.questJournal.destroy();
     this.questJournal = null;
+    this.syncDomState(); // data-menu=none を反映
+  }
+
+  /**
+   * ジャーナルからの報告(Enter。M19-4)。ジャーナルを閉じてから report-quest を送る
+   * (応答のカイの台詞 dialog は、ジャーナル表示中は保留される仕様のため先に閉じる)。
+   * 報告先=情報屋カイの意味論(ai-integration.md「達成の意味論」)は、応答がカイの
+   * 台詞で返ること+ジャーナルの「カイへ報告」文言で表現する(server は場所非強制)。
+   */
+  private reportQuestFromJournal(questId: string): void {
+    this.closeQuestJournal();
+    this.awaiting = this.client.send({ type: "report-quest", questId });
+  }
+
+  /**
+   * ジャーナルからの放棄(X。M19-4)。確認ダイアログを出し、はいで abandon-quest を送る
+   * (deliver の未納品の預かり品は server が回収する)。ジャーナルは先に閉じる
+   * (いいえの場合は Q で開き直す。overlay の二重管理を避ける)。
+   */
+  private confirmAbandonQuest(questId: string): void {
+    this.closeQuestJournal();
+    this.questConfirm = new ConfirmDialog(this, this.uiLayer, {
+      message: "この依頼を諦めるか?(配達の預かり品は手放す)",
+      onResult: (yes) => {
+        this.questConfirm = null;
+        if (yes) {
+          this.awaiting = this.client.send({ type: "abandon-quest", questId });
+        }
+      }
+    });
+  }
+
+  /**
+   * 護衛(escort)の同行者マーカー「連れの灯」の生成・破棄(M19-4)。
+   * snapshot の subQuests に active な escort があれば灯を出し、無ければ消す。
+   * 位置は update() でプレイヤーへ緩やかに追従する(1歩遅れて漂う=連れて歩く感)。
+   */
+  private updateCompanion(): void {
+    const escorting = this.snapshot.subQuests.some(
+      (quest) => quest.type === "escort" && quest.status === "active"
+    );
+    if (!escorting) {
+      this.companionLight?.destroy();
+      this.companionLight = null;
+      return;
+    }
+    if (this.companionLight !== null) {
+      return;
+    }
+    const { x, y } = this.tileCenter(this.renderedPosition);
+    this.companionLight = this.add.circle(x, y + 10, 6, 0xf0d9a0, 0.85).setDepth(9);
+    this.worldLayer.add(this.companionLight);
+    // 呼吸するような明滅(導管の脈動と同じ circle+tween の流用。新アセットは作らない)
+    this.tweens.add({
+      targets: this.companionLight,
+      alpha: 0.45,
+      scale: 1.25,
+      duration: 760,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut"
+    });
   }
 
   /**
@@ -655,7 +756,9 @@ export class ExplorationScene extends Phaser.Scene {
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
       this.innConfirm !== null ||
-      this.pendingInn !== null
+      this.pendingInn !== null ||
+      // 放棄確認の Esc は ConfirmDialog 自身が「いいえ」として処理する(M19-4)
+      this.questConfirm !== null
     ) {
       return;
     }
@@ -1239,6 +1342,7 @@ export class ExplorationScene extends Phaser.Scene {
     if (
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
       this.conversationOverlay !== null ||
@@ -1307,8 +1411,13 @@ export class ExplorationScene extends Phaser.Scene {
     // E2E 用: 地の文/NPC ダイアログの開閉(dialog-only 応答は snapshot を伴わないため
     // これで開閉を観測して移動可否の回帰を決定論的にテストする)
     game.dataset["dialog"] = this.dialog.isOpen ? "open" : "closed";
-    // E2E 用: もちものオーバーレイの開閉(装備スモークがメニュー操作の同期点に使う。M8-4)
-    game.dataset["menu"] = this.inventoryOverlay !== null ? "inventory" : "none";
+    // E2E 用: もちもの/ジャーナルの開閉(装備・クエストスモークがメニュー操作の同期点に使う。M8-4/M19-4)
+    game.dataset["menu"] =
+      this.inventoryOverlay !== null
+        ? "inventory"
+        : this.questJournal !== null
+          ? "journal"
+          : "none";
     delete game.dataset["battleEnemy"];
   }
 }

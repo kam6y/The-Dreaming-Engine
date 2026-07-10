@@ -6,6 +6,10 @@ import { UI_FONT_FAMILY } from "./font.js";
 
 export interface QuestJournalOverlayOptions {
   snapshot: SnapshotView;
+  /** 選択中サブクエストの報告(reportReady のときのみ呼ばれる。server の report-quest へ) */
+  onReport: (questId: string) => void;
+  /** 選択中サブクエストの放棄(確認はシーン側の ConfirmDialog が行う。server の abandon-quest へ) */
+  onAbandon: (questId: string) => void;
 }
 
 const PANEL_WIDTH = 640;
@@ -15,6 +19,15 @@ const PANEL_HEIGHT = 420;
 const STATUS_LABELS: Record<string, string> = {
   active: "進行中",
   completed: "達成・報告待ち"
+};
+
+/** サブクエスト型の見出しラベル(M19-4。全5型を網羅=テストで欠落を検知) */
+export const SUB_QUEST_KIND_LABELS: Record<SubQuestView["type"], string> = {
+  hunt: "討伐",
+  fetch: "調達",
+  deliver: "配達",
+  escort: "護衛",
+  survey: "調査"
 };
 
 /**
@@ -36,17 +49,46 @@ export const MAIN_QUEST_JOURNAL: Record<MainQuestStage, string> = {
     "確証を得た――機関の外に、まだ夢を紡ぐ何かがある。旅の続きは、まだ誰も歌っていない。"
 };
 
+/** サブクエストの遂行内容1行(型別。ジャーナルの現況表示。M19-4) */
+export function describeSubQuestObjective(quest: SubQuestView): string {
+  switch (quest.type) {
+    case "hunt":
+      return `${quest.targetName} を ${quest.progress}/${quest.count} 討伐`;
+    case "fetch":
+      return `${quest.targetName} を ${quest.count}個 集めて情報屋へ報告`;
+    case "deliver":
+      return `${quest.targetName} へ 預かり品を届ける(×${quest.count})`;
+    case "escort":
+      return `${quest.targetName} まで連れを送り届ける`;
+    case "survey":
+      return `${quest.targetName} を調べる`;
+  }
+}
+
 /**
- * クエストジャーナル(受注中サブクエストの一覧。読み取り専用)。
+ * クエストジャーナル(受注中サブクエストの一覧と報告・放棄の操作。M19-4)。
  * 探索中に Q で開閉し、Esc で閉じる(開閉は探索シーンが管理する)。
+ * ↑↓ でサブクエストを選び、Enter で報告(reportReady のもののみ)、X で放棄
+ * (放棄の確認と server への送信はシーン側 onReport/onAbandon の責務。
+ * いずれの操作もシーンがジャーナルを閉じてから server の応答 dialog を表示する)。
  * 表示内容はサーバー正本のスナップショット subQuests が正。
  */
 export class QuestJournalOverlay {
   private readonly scene: Phaser.Scene;
 
+  private readonly options: QuestJournalOverlayOptions;
+
   private readonly container: Phaser.GameObjects.Container;
 
   private readonly bodyText: Phaser.GameObjects.Text;
+
+  private readonly hintText: Phaser.GameObjects.Text;
+
+  private readonly subQuests: readonly SubQuestView[];
+
+  private cursor = 0;
+
+  private keysActive = false;
 
   private destroyed = false;
 
@@ -56,6 +98,8 @@ export class QuestJournalOverlay {
     options: QuestJournalOverlayOptions
   ) {
     this.scene = scene;
+    this.options = options;
+    this.subQuests = options.snapshot.subQuests;
     const panelX = Math.round((scene.scale.width - PANEL_WIDTH) / 2);
     const panelY = Math.round((scene.scale.height - PANEL_HEIGHT) / 2);
 
@@ -78,14 +122,34 @@ export class QuestJournalOverlay {
       lineSpacing: 5
     });
 
-    const footer = scene.add.text(panelX + 20, panelY + PANEL_HEIGHT - 30, "Esc / Q でとじる", {
+    // 操作の結果ヒント(未達成の報告など、送らずに分かる注意をここへ出す)
+    this.hintText = scene.add.text(panelX + 20, panelY + PANEL_HEIGHT - 52, "", {
+      color: "#c9b98f",
+      fontFamily: UI_FONT_FAMILY,
+      fontSize: "13px"
+    });
+
+    const footer = scene.add.text(panelX + 20, panelY + PANEL_HEIGHT - 30, this.footerHint(), {
       color: "#6f7684",
       fontFamily: UI_FONT_FAMILY,
       fontSize: "13px"
     });
 
-    this.container = scene.add.container(0, 0, [background, title, this.bodyText, footer]);
+    this.container = scene.add.container(0, 0, [
+      background,
+      title,
+      this.bodyText,
+      this.hintText,
+      footer
+    ]);
     parentLayer.add(this.container);
+
+    // Q 開閉と同一 keydown の二重発火を避けるため、次 tick からキー受付を始める
+    scene.time.delayedCall(0, () => {
+      if (!this.destroyed) {
+        this.activateKeys();
+      }
+    });
   }
 
   public destroy(): void {
@@ -93,7 +157,90 @@ export class QuestJournalOverlay {
       return;
     }
     this.destroyed = true;
+    this.deactivateKeys();
     this.container.destroy(true);
+  }
+
+  /** ↑↓(カーソル)・Enter(報告)・X(放棄)のキー受付。Q/Esc(閉じる)はシーン側が処理する */
+  private activateKeys(): void {
+    const keyboard = this.scene.input.keyboard;
+    if (keyboard === null || this.keysActive) {
+      return;
+    }
+    this.keysActive = true;
+    keyboard.on("keydown-UP", this.onCursorUp, this);
+    keyboard.on("keydown-DOWN", this.onCursorDown, this);
+    keyboard.on("keydown-ENTER", this.onReportKey, this);
+    keyboard.on("keydown-X", this.onAbandonKey, this);
+  }
+
+  private deactivateKeys(): void {
+    const keyboard = this.scene.input.keyboard;
+    if (keyboard === null || !this.keysActive) {
+      return;
+    }
+    this.keysActive = false;
+    keyboard.off("keydown-UP", this.onCursorUp, this);
+    keyboard.off("keydown-DOWN", this.onCursorDown, this);
+    keyboard.off("keydown-ENTER", this.onReportKey, this);
+    keyboard.off("keydown-X", this.onAbandonKey, this);
+  }
+
+  private onCursorUp(): void {
+    this.moveCursor(-1);
+  }
+
+  private onCursorDown(): void {
+    this.moveCursor(1);
+  }
+
+  private moveCursor(delta: number): void {
+    if (this.subQuests.length === 0) {
+      return;
+    }
+    const next = this.cursor + delta;
+    if (next < 0 || next >= this.subQuests.length) {
+      return;
+    }
+    this.cursor = next;
+    this.hintText.setText("");
+    this.rerender();
+  }
+
+  private onReportKey(): void {
+    const quest = this.selectedQuest();
+    if (quest === undefined) {
+      return;
+    }
+    if (!quest.reportReady) {
+      // 未達成の報告は server へ送らずヒントで返す(判定の正は server の isReportReady = view.reportReady)
+      this.hintText.setText("まだ報告できる首尾ではない。依頼を果たしてから、カイのもとへ。");
+      return;
+    }
+    this.options.onReport(quest.id);
+  }
+
+  private onAbandonKey(): void {
+    const quest = this.selectedQuest();
+    if (quest === undefined) {
+      return;
+    }
+    this.options.onAbandon(quest.id);
+  }
+
+  private selectedQuest(): SubQuestView | undefined {
+    return this.subQuests[this.cursor];
+  }
+
+  private rerender(): void {
+    this.bodyText.setText(this.describe(this.options.snapshot));
+  }
+
+  private footerHint(): string {
+    if (this.subQuests.length === 0) {
+      return "Esc / Q でとじる";
+    }
+    return "↑↓ えらぶ / Enter カイへ報告 / X あきらめる / Esc・Q とじる";
   }
 
   private describe(snapshot: SnapshotView): string {
@@ -106,20 +253,20 @@ export class QuestJournalOverlay {
     if (subQuests.length === 0) {
       return "受注中の依頼はない。\n\n情報屋(カイ)に「仕事はあるか」と尋ねてみよう。";
     }
-    return subQuests.map((quest) => this.describeQuest(quest)).join("\n\n");
+    return subQuests.map((quest, index) => this.describeQuest(quest, index)).join("\n\n");
   }
 
-  private describeQuest(quest: SubQuestView): string {
-    const kind = quest.type === "hunt" ? "討伐" : "調達";
+  private describeQuest(quest: SubQuestView, index: number): string {
+    const kind = SUB_QUEST_KIND_LABELS[quest.type];
     const status = STATUS_LABELS[quest.status] ?? quest.status;
-    const objective =
-      quest.type === "hunt"
-        ? `${quest.targetName} を ${quest.progress}/${quest.count} 討伐`
-        : `${quest.targetName} を ${quest.count}個 集めて情報屋へ報告`;
+    // fetch は所持が揃うと active のまま報告可になる(達成表示と別に「報告可」を明示する)
+    const ready = quest.reportReady && quest.status === "active" ? "・報告可" : "";
+    const cursor = index === this.cursor ? "▶" : "　";
+    const objective = describeSubQuestObjective(quest);
     const reward =
       quest.rewardItem !== undefined
         ? `${quest.rewardGold}G と ${quest.rewardItem.name}`
         : `${quest.rewardGold}G`;
-    return `【${kind}・${status}】${quest.title}\n  ${objective}\n  報酬 ${reward}\n  ${quest.description}`;
+    return `${cursor}【${kind}・${status}${ready}】${quest.title}\n  ${objective}\n  報酬 ${reward}\n  ${quest.description}`;
   }
 }

@@ -2,7 +2,11 @@ import {
   affinityTier,
   affinityTierDefinition,
   DEFAULT_NPC_TOPICS,
+  DELIVER_PARCEL_IDS,
+  DELIVER_RECIPIENT_IDS,
   ENEMY_DISPLAY_NAMES,
+  ESCORT_DESTINATION_IDS,
+  ESCORT_DESTINATION_NAMES,
   FETCH_TARGET_IDS,
   HUNT_TARGET_IDS,
   ITEMS,
@@ -10,6 +14,8 @@ import {
   STREET_EVENTS,
   subQuestTargetLabel,
   SUMMARY_MAX_LENGTH,
+  SURVEY_TARGET_IDS,
+  SURVEY_TARGET_NAMES,
   type AffinityTier,
   type ConversationExchange,
   type NpcId,
@@ -33,7 +39,7 @@ import type { DreamMasterContext } from "./types.js";
  *
  * 注記:現行の `DreamMasterContext`(M4-C1 定義)は最小構成であり、好感度・受注クエスト等の
  * 完全なスナップショットは持たない。本ビルダーはコンテキストに含まれる情報と `shared` の
- * 定数(NPC 名・デフォルト話題・討伐/納品候補)から可能な範囲でタグを構成する。
+ * 定数(NPC 名・デフォルト話題・討伐/納品/配達/護送/調査候補)から可能な範囲でタグを構成する。
  * コンテキスト IF が拡張された際に各タグを充実させる(前方互換)。
  */
 
@@ -116,11 +122,36 @@ function formatConversation(exchanges: readonly ConversationExchange[], npcName:
   return lines.join("\n");
 }
 
-/** 討伐/納品の達成可能候補一覧(<quest_targets>。ゲームエンジンが列挙から生成) */
+/**
+ * 討伐/納品/配達/護送/調査の達成可能候補一覧(<quest_targets>。ゲームエンジンが列挙から生成)。
+ * live AI が propose_quest で提案しうる全型の実在ホワイトリスト ID と表示名を列挙する。
+ * 型ごとに指定すべきフィールド名(discriminated union のキー)と count の許容範囲も併記し、
+ * escort/survey が count=1固定である追加規則を明示する(ai-integration.md「5b」)。
+ * すべてサーバー管理の固定定数(shared の列挙)であり出所が可変のテキストではないため、
+ * neutralizeTags は通さない(既存 hunt/fetch と同じ流儀)。
+ */
 function formatQuestTargets(): string {
   const hunt = HUNT_TARGET_IDS.map((id) => `${ENEMY_DISPLAY_NAMES[id]}(${id})`).join("、");
   const fetch = FETCH_TARGET_IDS.map((id) => `${ITEMS[id].name}(${id})`).join("、");
-  return `討伐対象(hunt): ${hunt}\n納品対象(fetch): ${fetch}`;
+  // M19: deliver/escort/survey の実在ホワイトリスト候補を追記(既存 hunt/fetch 行は不変)
+  const deliverParcels = DELIVER_PARCEL_IDS.map((id) => `${ITEMS[id].name}(${id})`).join("、");
+  const deliverRecipients = DELIVER_RECIPIENT_IDS.map(
+    (id) => `${NPC_DISPLAY_NAMES[id]}(${id})`
+  ).join("、");
+  const escort = ESCORT_DESTINATION_IDS.map(
+    (id) => `${ESCORT_DESTINATION_NAMES[id]}(${id})`
+  ).join("、");
+  const survey = SURVEY_TARGET_IDS.map((id) => `${SURVEY_TARGET_NAMES[id]}(${id})`).join("、");
+  return (
+    `討伐対象(hunt): ${hunt}\n` +
+    `納品対象(fetch): ${fetch}\n` +
+    `配達対象(deliver): 預かり品 parcelId=${deliverParcels} / 受取NPC recipientId=${deliverRecipients}\n` +
+    `護送目的地(escort): destinationId=${escort}\n` +
+    `調査対象(survey): targetId=${survey}\n` +
+    `入力スキーマ: 型別に targetId 系フィールドが異なる——hunt/fetch は targetId、` +
+    `deliver は parcelId+recipientId、escort は destinationId、survey は targetId を指定する。` +
+    `count は hunt/fetch/deliver が1-5、escort/survey は1固定(count≠1 は却下)。`
+  );
 }
 
 /** 受注中サブクエストの一覧(<quest_journal>。文脈提示・重複依頼の回避に使う) */

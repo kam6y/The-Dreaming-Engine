@@ -176,7 +176,9 @@ export const subQuestViewSchema = z.object({
   rewardItem: rewardItemViewSchema.optional(),
   title: z.string(),
   description: z.string(),
-  status: subQuestStatusSchema
+  status: subQuestStatusSchema,
+  /** いま情報屋へ報告できるか(server の isReportReady が正。ジャーナルの報告操作の可否に使う。M19-4) */
+  reportReady: z.boolean()
 });
 export type SubQuestView = z.infer<typeof subQuestViewSchema>;
 

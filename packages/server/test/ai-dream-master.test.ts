@@ -3,8 +3,14 @@ import { fileURLToPath } from "node:url";
 
 import {
   createDefaultAiDailyCounters,
+  DELIVER_PARCEL_IDS,
+  DELIVER_RECIPIENT_IDS,
   emptyInventory,
+  ESCORT_DESTINATION_IDS,
+  FETCH_TARGET_IDS,
+  HUNT_TARGET_IDS,
   isGiftableItem,
+  SURVEY_TARGET_IDS,
   type NpcId
 } from "@dreaming-engine/shared";
 import { describe, expect, it } from "vitest";
@@ -12,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import { loadAiConfig } from "../src/ai/config.js";
 import { OAUTH_TOKEN_ENV } from "../src/ai/auth.js";
 import {
+  buildPrompt,
   createDreamMaster,
   createLiveDreamMaster,
   FLOW_DIVISION,
@@ -108,6 +115,49 @@ const summaryCtx: DreamMasterContext = {
   existingSummary: "",
   exchanges: []
 };
+
+// ---------------------------------------------------------------------------
+// buildPrompt: <quest_targets> に全型の実在ホワイトリスト候補が並ぶ(M19-4)
+// live AI が deliver/escort/survey を提案できるよう、候補IDと入力スキーマを列挙する。
+// ---------------------------------------------------------------------------
+
+describe("buildPrompt questGeneration の <quest_targets>", () => {
+  const { userPrompt } = buildPrompt(questGenCtx);
+
+  it("既存 hunt/fetch 候補は不変(追加のみ・回帰防止)", () => {
+    expect(userPrompt).toContain("<quest_targets>");
+    expect(userPrompt).toContain("討伐対象(hunt):");
+    expect(userPrompt).toContain("納品対象(fetch):");
+    for (const id of HUNT_TARGET_IDS) expect(userPrompt).toContain(`(${id})`);
+    for (const id of FETCH_TARGET_IDS) expect(userPrompt).toContain(`(${id})`);
+  });
+
+  it("deliver の預かり品・受取NPC候補IDが列挙され、フィールド名が示される", () => {
+    expect(userPrompt).toContain("配達対象(deliver):");
+    expect(userPrompt).toContain("parcelId=");
+    expect(userPrompt).toContain("recipientId=");
+    for (const id of DELIVER_PARCEL_IDS) expect(userPrompt).toContain(`(${id})`);
+    for (const id of DELIVER_RECIPIENT_IDS) expect(userPrompt).toContain(`(${id})`);
+    // 受注元カイ(informant)は配達先ホワイトリストに無いので候補に現れない
+    expect(userPrompt).not.toContain("(informant)");
+  });
+
+  it("escort の目的地候補IDが destinationId として列挙される", () => {
+    expect(userPrompt).toContain("護送目的地(escort):");
+    expect(userPrompt).toContain("destinationId=");
+    for (const id of ESCORT_DESTINATION_IDS) expect(userPrompt).toContain(`(${id})`);
+  });
+
+  it("survey の調査対象候補IDが targetId として列挙される", () => {
+    expect(userPrompt).toContain("調査対象(survey):");
+    for (const id of SURVEY_TARGET_IDS) expect(userPrompt).toContain(`(${id})`);
+  });
+
+  it("escort/survey は count=1固定である旨が明示される", () => {
+    expect(userPrompt).toContain("escort/survey は1固定");
+    expect(userPrompt).toContain("count≠1 は却下");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // resolveFlowSpec: config と FLOW_TOOL_ALLOWLIST から実行仕様を引く(ハードコードしない)
