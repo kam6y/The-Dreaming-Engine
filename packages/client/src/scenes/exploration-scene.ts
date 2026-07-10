@@ -281,11 +281,15 @@ export class ExplorationScene extends Phaser.Scene {
 
     this.updateHud();
     this.syncDomState();
-    // マップ区分に応じたBGM(街/フィールド/ダンジョン。M12-3)
-    requestBgm(
-      this,
-      this.map.id === "town" ? "bgm-town" : this.map.id === "field" ? "bgm-field" : "bgm-dungeon"
-    );
+    // マップ区分に応じたBGM(街/フィールド/ダンジョン。M12-3)。
+    // 第2エリア(M16-4)は既存曲を流用: 琥珀郷=拠点(town)、沈み野=荒野(field)、坑=dungeon
+    const bgmId =
+      this.map.id === "town" || this.map.id === "settlement"
+        ? "bgm-town"
+        : this.map.id === "field" || this.map.id === "field-2"
+          ? "bgm-field"
+          : "bgm-dungeon";
+    requestBgm(this, bgmId);
     this.cameras.main.fadeIn(200, 11, 13, 18);
   }
 

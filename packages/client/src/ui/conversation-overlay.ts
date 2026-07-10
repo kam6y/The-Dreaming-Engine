@@ -21,12 +21,18 @@ function relationLabel(interaction: ConversationInteraction): string {
   return `― ${affinityTierDefinition(interaction.affinityTier).label} ―`;
 }
 
-/** NPC → 会話屋内背景アセット id(未整備時はプレースホルダー暗幕のまま) */
+/**
+ * NPC → 会話屋内背景アセット id(未整備時はプレースホルダー暗幕のまま)。
+ * 第2エリア(M16-4)は既存内装を流用: 寄り屋=宿、琥珀工房=商店。
+ * 番人トワは坑口の屋外に立つため内装を持たない(暗幕のまま=夜霧の屋外として読める)
+ */
 const INTERIOR_BY_NPC: Record<string, string> = {
   informant: "tavern-interior",
   priest: "chapel-interior",
   innkeeper: "inn-interior",
-  merchant: "shop-interior"
+  merchant: "shop-interior",
+  caretaker: "inn-interior",
+  artisan: "shop-interior"
 };
 
 export interface ConversationOverlayOptions {

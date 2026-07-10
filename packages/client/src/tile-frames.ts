@@ -19,11 +19,26 @@ export const TILESET_FRAME_CONFIG = {
   spacing: 1
 } as const;
 
-/** マップの見た目区分。ダンジョン3層は同一トーンで揃える */
+/**
+ * マップの見た目区分(タイルフレームの出所)。ダンジョン3層(裂け目)は同一トーンで揃える。
+ * 第2エリア(M16-4)はフレームを既存区分から流用する:
+ * 琥珀郷=town(石畳の拠点)、沈み野=field(荒野)、灯還りの坑=dungeon(石の坑道)。
+ * 土地ごとの空気の違いはフレームではなく tint で出す(TILE_TINT_OVERRIDES)。
+ */
 type MapCategory = "town" | "field" | "dungeon";
 
 function categoryOf(mapId: MapId): MapCategory {
-  return mapId === "town" || mapId === "field" ? mapId : "dungeon";
+  switch (mapId) {
+    case "town":
+    case "settlement":
+      return "town";
+    case "field":
+    case "field-2":
+      return "field";
+    default:
+      // 裂け目(dungeon-1〜3)と灯還りの坑(dungeon-4)
+      return "dungeon";
+  }
 }
 
 /** 列・行からフレーム番号を計算する(シート目視で選定した座標を可読に保つ) */
@@ -100,7 +115,19 @@ const TILE_TINTS: Record<MapCategory, number> = {
   dungeon: 0x7d84a0
 };
 
-/** マップに応じたタイルの乗算tintを返す */
+/**
+ * 第2エリアのマップ別tint上書き(M16-4)。フレームは既存区分の流用のため、
+ * 土地の空気はここで差別化する(world-lore.md 2.4〜2.6の情景)。
+ * 琥珀郷=琥珀の残光を宿す暖色の黄昏、沈み野=霧の沈む冷えた低地(忘れ野より暗い)、
+ * 灯還りの坑=裂け目より僅かに暖かい坑道(灯の亡骸の名残)。値は実プレイ目視で選定。
+ */
+const TILE_TINT_OVERRIDES: Partial<Record<MapId, number>> = {
+  settlement: 0xb5a488,
+  "field-2": 0x7b8474,
+  "dungeon-4": 0x887b82
+};
+
+/** マップに応じたタイルの乗算tintを返す(第2エリアはマップ別上書きが優先) */
 export function tileTint(mapId: MapId): number {
-  return TILE_TINTS[categoryOf(mapId)];
+  return TILE_TINT_OVERRIDES[mapId] ?? TILE_TINTS[categoryOf(mapId)];
 }

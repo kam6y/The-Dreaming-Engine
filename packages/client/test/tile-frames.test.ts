@@ -89,3 +89,24 @@ describe("tileTint", () => {
     expect(channelSum(tileTint("dungeon-1"))).toBeLessThan(channelSum(tileTint("town")));
   });
 });
+
+describe("第2エリアの区分反映(M16-4)", () => {
+  it("フレームは流用元区分と一致する(琥珀郷=town系・沈み野=field系・坑=dungeon系)", () => {
+    for (const tile of tileTypeSchema.options) {
+      expect(tileFrame("settlement", tile)).toBe(tileFrame("town", tile));
+      expect(tileFrame("field-2", tile)).toBe(tileFrame("field", tile));
+      expect(tileFrame("dungeon-4", tile)).toBe(tileFrame("dungeon-1", tile));
+    }
+    for (const southIsWall of [false, true]) {
+      expect(wallFrame("settlement", southIsWall)).toBe(wallFrame("town", southIsWall));
+      expect(wallFrame("field-2", southIsWall)).toBe(wallFrame("field", southIsWall));
+      expect(wallFrame("dungeon-4", southIsWall)).toBe(wallFrame("dungeon-1", southIsWall));
+    }
+  });
+
+  it("tintは流用元区分と異なる(土地の空気の差別化)", () => {
+    expect(tileTint("settlement")).not.toBe(tileTint("town"));
+    expect(tileTint("field-2")).not.toBe(tileTint("field"));
+    expect(tileTint("dungeon-4")).not.toBe(tileTint("dungeon-1"));
+  });
+});
