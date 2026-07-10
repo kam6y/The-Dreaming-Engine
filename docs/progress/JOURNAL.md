@@ -1804,3 +1804,32 @@
   導管調べ→トワ→再調べ→ch2-beyond を data-main-quest-stage で観測する
   スモークを書く。その実行時のスクリーンショットで脈動も目視する。
   完了時にBACKLOG「メインクエスト第2章」チェック+M18ゲート(test:e2e:full)
+
+## [62] 2026-07-11 M18-4: 第2章E2Eスモーク+実プレイ確認(M18完了)
+
+- やったこと(E2E実装=subagent(Opus)、実プレイ確認・ゲート・コミット=
+  オーケストレーター):
+  - tests/e2e/chapter2.spec(14本目・単体約12s): **フィクスチャセーブ+つづきから**方式。
+    第1章の通しを再生せず、各幕の直前へワープするセーブ(createNewGameState を土台に
+    mainQuestStage/location を上書き→gameStateSchema.parse で自己検証→save1.json)を
+    書いてロードし、epilogue→ch2-stirring→ch2-vigil-song→ch2-beyond を
+    data-main-quest-stage で観測。結びの即時セーブはNode側で実ファイルをparseして検証。
+    各幕は導管/トワへ**正対配置で移動ゼロ**=noSymbolsが効かないロード後の坑内でも
+    エンカウント不能(移動時のみ戦闘化する仕様を根拠に設計)。afterEachでセーブ掃除
+  - 実プレイ確認(SAVE_DIR=一時ディレクトリ+dev:mockで人間セーブを保護):
+    ch2-stirring のフィクスチャで導管の間に立ち、**導管の脈動**(大きな暖色光)と
+    ジャーナルの ch2-stirring 現況文言をスクリーンショットで目視確認
+- M18ゲート: `pnpm check` 緑(unit 793)・`pnpm test:e2e` **14/14緑**・
+  `pnpm test:e2e:full` 2/2緑(2回連続)。**M18完了**=BACKLOG
+  「メインクエスト第2章」にチェック
+- 既知の問題(フレーク・未解消): `test:e2e` 直後に連続実行した `test:e2e:full` の
+  初回が1本失敗することがある(単独・再実行では2/2緑。今回で2度目=前回はM16ゲート時。
+  接続待ちの対処(JOURNAL[58])を入れた後も、スイート連続実行の直後のみ発生)。
+  次に再発したら: スイート間のサーバー終了待ち(ポートのTIME_WAIT/プロセス残留)を疑い、
+  full側のwebServer起動リトライまたはスイート間に数秒の間隔を置く運用を検討
+- 次にやること: BACKLOG「優先度: 中」の次点「サブクエストのテンプレート拡充
+  (propose_questに配達型(deliver)・護衛型・調査型を追加。防御仕様の検証も拡張)」を
+  M19として展開してから着手。ai-integration.md「カスタムツール定義」の propose_quest
+  入力スキーマと ai-guardrails.md の検証仕様(ATK-quest系)を必ず読み、
+  **防御要件は追加方向のみ**(既存の上限・ホワイトリスト・クールダウンは不変)。
+  クエスト状態機械(quests.ts)のテンプレート追加+検証層+モック応答+UI表示が骨子
