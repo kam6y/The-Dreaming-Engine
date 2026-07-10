@@ -418,6 +418,51 @@ describe("移動", () => {
 });
 
 // ===========================================================================
+// 第2エリア(M16)の遷移と、非層マップの敵シンボル経路
+// ===========================================================================
+
+describe("第2エリアの遷移と非層マップのシンボル(M16)", () => {
+  it("琥珀郷の坑口に乗ると灯還りの坑へ遷移する", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    mustState(session).location = { mapId: "settlement", position: { x: 14, y: 6 }, facing: "right" };
+    const view = firstSnapshot(await session.handle({ type: "move", direction: "right" })); // (15,6)=坑口
+    expect(view.location).toEqual({ mapId: "dungeon-4", position: { x: 11, y: 1 }, facing: "down" });
+  });
+
+  it("琥珀郷の南門に乗ると沈み野へ遷移する", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    mustState(session).location = { mapId: "settlement", position: { x: 8, y: 10 }, facing: "down" };
+    const view = firstSnapshot(await session.handle({ type: "move", direction: "down" })); // (8,11)=南門
+    expect(view.location).toEqual({ mapId: "field-2", position: { x: 11, y: 1 }, facing: "down" });
+  });
+
+  it("沈み野・灯還りの坑(非層マップ)入場でシンボルがプール内で湧く(layer参照で throw しない)", async () => {
+    // dungeon-1〜3 は層別カウント経由だが、field-2 / dungeon-4 は field と同じく
+    // map.enemySymbols 直参照で湧く。入場が例外を出さずプール内で湧くことを確認する。
+    for (const spec of [
+      { mapId: "field-2" as const, max: 3 },
+      { mapId: "dungeon-4" as const, max: 6 }
+    ]) {
+      const { session, store } = createSession({ seed: 7, noSymbols: false });
+      const state = createNewGameState();
+      state.location = { mapId: spec.mapId, position: { x: 11, y: 8 }, facing: "down" }; // (11,8)=道
+      store.loadResult = { ok: true, state };
+      const view = firstSnapshot(await session.handle({ type: "continue" }));
+      expect(view.location.mapId).toBe(spec.mapId);
+      expect(view.symbols.length).toBeGreaterThanOrEqual(1); // 入場で湧く(経路が機能する)
+      expect(view.symbols.length).toBeLessThanOrEqual(spec.max);
+      const pool = MAPS[spec.mapId].enemySymbols?.species ?? [];
+      for (const symbol of view.symbols) {
+        expect(pool).toContain(symbol.enemyId);
+        expect(samePosition(symbol.position, view.location.position)).toBe(false);
+      }
+    }
+  });
+});
+
+// ===========================================================================
 // 敵シンボル(サンプリング)と戦闘開始
 // ===========================================================================
 

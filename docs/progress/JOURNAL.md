@@ -1546,3 +1546,32 @@
   シンボル配置+ユニットテスト。subagent委譲)。骨子の構成表とmaps/の既存定義
   (mapDefinitionSchema・superRefine検証・TILE_CHARS)に従う。接続の対称性
   (行き先の門の座標同士が対応)のテストを忘れずに
+
+## [54] 2026-07-10 M16-2: 第2エリアのマップ定義3枚(中断からの回収)
+
+- 状況: セッション開始時、M16-2相当の実装一式が未コミットで残っていた
+  (前セッションの強制中断跡)。CLAUDE.mdの手順に従い内容を検収→`pnpm check`緑を
+  確認して「中断からの回収」としてコミット
+- 内容(検収済み):
+  - mapIdSchema へ settlement(琥珀郷)/field-2(沈み野)/dungeon-4(灯還りの坑)を追加
+    (enum追記=既存セーブ互換、GAME_STATE_VERSION=1のまま。dungeon-4 の連番命名は
+    クライアントが mapId.startsWith("dungeon") で戦闘背景を選ぶための判断=妥当。
+    dungeon_shift の対象層は DUNGEON_LAYER_MAP_IDS(1〜3)で据え置き)
+  - マップ3枚: 琥珀郷16x12(安全地帯・看板3・南門→沈み野・坑口→坑。NPCはM16-3)/
+    沈み野24x16(迷い火・囁き仮面・軋み人形、採取1-2)/灯還りの坑24x20
+    (蝋燭喰らい・軋み人形・錆喰い。最奥に導管の看板。ボスなし)
+  - 忘れ野の西門(0,8)+横枝道(仕様どおり追加のみ。北門・南門・x=11縦断路は不変)
+  - テスト: shared 13件(接続対称性・安全地帯・プール一致・回帰)+server 3件
+    (遷移2本+非層マップのシンボル湧きがlayer参照でthrowしない防御)= unit 752
+- 検証: `pnpm -r build`→`pnpm check` 緑(unit 752)・`pnpm test:e2e` 12/12緑
+- 既知の問題(フレーク再発・2回目): e2e一括実行の初回テスト(battle.spec)が
+  タイトル画面で停止(接続済み表示・Enterが効かない)→単体・再実行では緑。
+  JOURNAL[47]の conversation.spec 失敗と同族(スイート実行時のみ・初回付近で発生)。
+  次に再発したら: スイート先頭テストの開始手順(canvas click→Enter)とWS確立の
+  レースを疑い、先頭スペックに data-scene=title 確認後の待ちを足す対処を検討
+- 次にやること: M16-3(新NPC3人=イルマ(宿)・ガロ(店)・トワ(語り部)の実装。
+  NPC定義・ペルソナ・店/宿の割当+サーバー対応+テスト。subagent委譲)。
+  world-lore.md 3.6〜3.8 と game-design.md「第2エリアのNPC」が正。
+  npcIdSchema拡張・NPC_DISPLAY_NAMES・NPC_PERSONA・琥珀郷への配置・
+  寄り屋の宿代5G・琥珀工房の品揃え(ITEMS実在品のみ)・M11割引の適用。
+  ai-guardrails.mdの防御要件は不変で

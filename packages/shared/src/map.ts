@@ -41,7 +41,24 @@ export function isSolidTileType(tile: TileType): boolean {
 // マップ構成要素のスキーマ
 // ---------------------------------------------------------------------------
 
-export const mapIdSchema = z.enum(["town", "field", "dungeon-1", "dungeon-2", "dungeon-3"]);
+// 第2エリア(M16)のマップIDを追加する。enum への追記であり既存値は不変=
+// 既存セーブ(town/field/dungeon-1〜3 のみを参照)を壊さない(GAME_STATE_VERSION は 1 のまま)。
+// - settlement: 集落「琥珀郷」(安全地帯。town とは別種の拠点なので town-2 とせず固有名にする)
+// - field-2   : 第2フィールド「沈み野」(field と同種)
+// - dungeon-4 : 第2ダンジョン「灯還りの坑」(dungeon-1〜3 は同一ダンジョン=裂け目の層。
+//   本マップは別ダンジョンだが、クライアントが mapId.startsWith("dungeon") で戦闘背景を
+//   選ぶため、坑の戦闘背景がクライアント無変更で正しく dungeon になるよう連番 id にする。
+//   dungeon_shift の対象層は DUNGEON_LAYER_MAP_IDS の 1〜3 のみで据え置き=本 id は対象外)
+export const mapIdSchema = z.enum([
+  "town",
+  "field",
+  "dungeon-1",
+  "dungeon-2",
+  "dungeon-3",
+  "settlement",
+  "field-2",
+  "dungeon-4"
+]);
 export type MapId = z.infer<typeof mapIdSchema>;
 
 /** 遷移ポイント: このマスに立つと行き先マップの指定座標・向きへ移る */

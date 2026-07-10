@@ -13,6 +13,10 @@ grid.border("#");
 grid.vLine(11, 1, 14, "=");
 grid.set(11, 0, "="); // 北の門(街へ)
 grid.set(11, 15, "="); // 南の門(裂け目一層へ)
+// 西の門(第2エリア=沈み野へ。M16)。既存の縦断道 x=11 から y=8 の横枝を1本伸ばす。
+// 北門・南門・敵シンボル・既存E2Eの縦断路(x=11)は不変(追加のみ)。
+grid.hLine(8, 1, 10, "="); // 縦断道 (11,8) ↔ 西門への横枝
+grid.set(0, 8, "="); // 西の門(沈み野へ)
 // 崩れた石垣(道col11を避けて配置)
 grid.rect(3, 3, 4, 4, "#");
 grid.rect(18, 5, 19, 6, "#");
@@ -37,6 +41,11 @@ export const fieldMap: MapDefinition = mapDefinitionSchema.parse({
     {
       position: { x: 11, y: 15 },
       to: { mapId: "dungeon-1", position: { x: 11, y: 1 }, facing: "down" }
+    },
+    // 西の門 → 沈み野(第2エリア。M16)。到着は沈み野・東門の一つ内側
+    {
+      position: { x: 0, y: 8 },
+      to: { mapId: "field-2", position: { x: 22, y: 8 }, facing: "left" }
     }
   ],
   npcs: [],
