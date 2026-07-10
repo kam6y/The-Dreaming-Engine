@@ -11,8 +11,14 @@ import {
   gameStateSchema,
   GAME_STATE_VERSION,
   hasNarratedEnemy,
+  INITIAL_AFFINITY,
+  INN_COST,
+  innFeeFor,
   MAIN_QUEST_INITIAL_STAGE,
-  recordNarratedEnemy
+  npcDailyAffinityDeltaSchema,
+  npcIdSchema,
+  recordNarratedEnemy,
+  SETTLEMENT_INN_COST
 } from "../src/index.js";
 import type { GameState } from "../src/index.js";
 
@@ -39,7 +45,15 @@ describe("advanceDay(日送り)", () => {
         giveItemCount: 3,
         proposeQuestCount: 2,
         rewardItemProposalCount: 1,
-        affinityDeltaByNpc: { innkeeper: 10, merchant: -5, informant: 0, priest: 3 }
+        affinityDeltaByNpc: {
+          innkeeper: 10,
+          merchant: -5,
+          informant: 0,
+          priest: 3,
+          caretaker: 0,
+          artisan: 0,
+          warden: 0
+        }
       },
       npcs: {
         ...base.npcs,
@@ -118,6 +132,93 @@ describe("後方互換(M3 形式セーブの読み込み)", () => {
       expect(result.data.narratedEnemies).toEqual([]);
       expect(result.data.aiDaily).toEqual(createDefaultAiDailyCounters());
       expect(result.data.equipment).toEqual(createEmptyEquipment());
+    }
+  });
+});
+
+// ===========================================================================
+// 第2エリア(M16。琥珀郷)の宿代と旧セーブ互換
+// ===========================================================================
+
+describe("メタ: npcDailyAffinityDeltaSchema のキー集合が npcIdSchema と一致(ドリフト防止)", () => {
+  it("adjust_affinity 日次累積のキーが全 NPC を被覆する", () => {
+    const schemaKeys = Object.keys(npcDailyAffinityDeltaSchema.shape).sort();
+    const enumKeys = [...npcIdSchema.options].sort();
+    expect(schemaKeys).toEqual(enumKeys);
+  });
+});
+
+describe("宿代(M16。灯宿=10G / 寄り屋=5G)", () => {
+  it("宿代定数と innFeeFor(宿NPC別)が仕様どおり", () => {
+    expect(INN_COST).toBe(10);
+    expect(SETTLEMENT_INN_COST).toBe(5);
+    expect(innFeeFor("innkeeper")).toBe(10); // 灯宿(オルガ)
+    expect(innFeeFor("caretaker")).toBe(5); // 寄り屋(イルマ)
+  });
+});
+
+describe("第2エリアNPCの旧セーブ互換(M16。新NPCフィールド欠落 → 好感度30で初期化)", () => {
+  it("npcs が旧4人分のみのセーブは、新3人が好感度30・既定話題で補完される", () => {
+    const full = createNewGameState();
+    // 第2エリア追加前(旧4人のみ)の形の npcs を持つセーブ JSON
+    const legacyNpcs = {
+      innkeeper: { affinity: 55, memory: { summary: "", recentExchanges: [] }, topic: "旧話題" },
+      merchant: createDefaultNpcStates().merchant,
+      informant: createDefaultNpcStates().informant,
+      priest: createDefaultNpcStates().priest
+    };
+    const legacySave = {
+      version: 1,
+      player: full.player,
+      location: full.location,
+      inventory: full.inventory,
+      day: full.day,
+      playtimeSeconds: full.playtimeSeconds,
+      gimmicks: full.gimmicks,
+      npcs: legacyNpcs
+    };
+
+    const result = gameStateSchema.safeParse(legacySave);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // 既存NPCは保持
+      expect(result.data.npcs.innkeeper.affinity).toBe(55);
+      // 新NPC3人は初期好感度30・既定話題で補完される
+      for (const id of ["caretaker", "artisan", "warden"] as const) {
+        expect(result.data.npcs[id].affinity).toBe(INITIAL_AFFINITY);
+        expect(result.data.npcs[id].affinity).toBe(30);
+        expect(result.data.npcs[id].topic).toBe(DEFAULT_NPC_TOPICS[id]);
+        expect(result.data.npcs[id].memory).toEqual({ summary: "", recentExchanges: [] });
+      }
+    }
+  });
+
+  it("aiDaily.affinityDeltaByNpc が旧4人分のみのセーブは、新3人が delta 0 で補完される", () => {
+    const full = createNewGameState();
+    const legacySave = {
+      version: 1,
+      player: full.player,
+      location: full.location,
+      inventory: full.inventory,
+      day: full.day,
+      playtimeSeconds: full.playtimeSeconds,
+      gimmicks: full.gimmicks,
+      aiDaily: {
+        giveItemCount: 1,
+        proposeQuestCount: 0,
+        rewardItemProposalCount: 0,
+        affinityDeltaByNpc: { innkeeper: 4, merchant: 0, informant: 0, priest: 0 }
+      }
+    };
+
+    const result = gameStateSchema.safeParse(legacySave);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const delta = result.data.aiDaily.affinityDeltaByNpc;
+      expect(delta.innkeeper).toBe(4);
+      expect(delta.caretaker).toBe(0);
+      expect(delta.artisan).toBe(0);
+      expect(delta.warden).toBe(0);
     }
   });
 });

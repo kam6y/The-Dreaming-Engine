@@ -71,7 +71,10 @@ function makeCtx(partnerNpcId: NpcId = "innkeeper"): ToolValidationContext {
     innkeeper: 30,
     merchant: 30,
     informant: 30,
-    priest: 30
+    priest: 30,
+    caretaker: 30,
+    artisan: 30,
+    warden: 30
   };
   return {
     session: {

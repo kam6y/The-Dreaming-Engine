@@ -10,7 +10,7 @@ import { playerProgressSchema, statsForLevel } from "./combat/index.js";
 import { createEmptyEquipment, equipmentSchema } from "./equipment.js";
 import { directionSchema, positionSchema } from "./geometry.js";
 import { enemyIdSchema } from "./ids.js";
-import type { EnemyId } from "./ids.js";
+import type { EnemyId, NpcId } from "./ids.js";
 import { addItem, emptyInventory, inventorySchema } from "./inventory.js";
 import { mapIdSchema } from "./map.js";
 import { NEW_GAME_START } from "./maps/index.js";
@@ -35,8 +35,28 @@ import {
 /** セーブスキーマのバージョン。version 不一致は破損と同扱い(game-design.md) */
 export const GAME_STATE_VERSION = 1;
 
-/** 宿泊費(定額の少額。game-design.md「宿泊の処理順序」手順0) */
+/** 宿泊費(灯宿「灯宿」の定額の少額。game-design.md「宿泊の処理順序」手順0) */
 export const INN_COST = 10;
+
+/**
+ * 琥珀郷「寄り屋」の宿代(5G。灯宿10Gより安い=寂れた集落の設定。M16。
+ * game-design.md「第2エリア(拡張: M16)」経済 / 「第2エリアのNPC」)。
+ */
+export const SETTLEMENT_INN_COST = 5;
+
+/**
+ * 宿NPCごとの宿代(NpcId → ゴールド)。宿の機能を持つ NPC のみを持つ部分マップ。
+ * 宿泊の処理順序・無銭時の扱いは灯宿と同一(costGold として ActiveInteraction に載せる)。
+ */
+export const INN_FEES: Partial<Record<NpcId, number>> = {
+  innkeeper: INN_COST,
+  caretaker: SETTLEMENT_INN_COST
+};
+
+/** 宿NPCの宿代を引く(宿でない NPC は INN_COST を既定として返すが、呼び出し側は宿NPCのみに使う) */
+export function innFeeFor(npcId: NpcId): number {
+  return INN_FEES[npcId] ?? INN_COST;
+}
 
 /** 新規ゲームの初期ゴールド(裁量。M2 のクライアント値を継承) */
 export const INITIAL_GOLD = 30;
@@ -100,13 +120,17 @@ export const npcDailyAffinityDeltaSchema = z.object({
   innkeeper: z.number().int().default(0),
   merchant: z.number().int().default(0),
   informant: z.number().int().default(0),
-  priest: z.number().int().default(0)
+  priest: z.number().int().default(0),
+  // 第2エリア「琥珀郷」の3人(M16)。旧セーブ(このキー欠落)は default 0 で補完
+  caretaker: z.number().int().default(0),
+  artisan: z.number().int().default(0),
+  warden: z.number().int().default(0)
 });
 export type NpcDailyAffinityDelta = z.infer<typeof npcDailyAffinityDeltaSchema>;
 
 /** NPC 別日次累積のゼロ値 */
 export function createDefaultNpcDailyAffinityDelta(): NpcDailyAffinityDelta {
-  return { innkeeper: 0, merchant: 0, informant: 0, priest: 0 };
+  return { innkeeper: 0, merchant: 0, informant: 0, priest: 0, caretaker: 0, artisan: 0, warden: 0 };
 }
 
 /** AI 関連の「ゲーム内1日◯回」系カウンタ(game-design.md「ゲーム内時間」) */
@@ -220,7 +244,10 @@ export function advanceDay(state: GameState): GameState {
       innkeeper: { ...state.npcs.innkeeper, topic: DEFAULT_NPC_TOPICS.innkeeper },
       merchant: { ...state.npcs.merchant, topic: DEFAULT_NPC_TOPICS.merchant },
       informant: { ...state.npcs.informant, topic: DEFAULT_NPC_TOPICS.informant },
-      priest: { ...state.npcs.priest, topic: DEFAULT_NPC_TOPICS.priest }
+      priest: { ...state.npcs.priest, topic: DEFAULT_NPC_TOPICS.priest },
+      caretaker: { ...state.npcs.caretaker, topic: DEFAULT_NPC_TOPICS.caretaker },
+      artisan: { ...state.npcs.artisan, topic: DEFAULT_NPC_TOPICS.artisan },
+      warden: { ...state.npcs.warden, topic: DEFAULT_NPC_TOPICS.warden }
     },
     world: { ...state.world, activeStreetEvents: [] }
   };

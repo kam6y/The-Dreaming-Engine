@@ -184,10 +184,11 @@ describe("第2エリア(M16。game-design.md『第2エリア(拡張: M16)』が�
     expect(MAPS.settlement.enemySymbols).toBeUndefined();
   });
 
-  it("琥珀郷は 16x12・NPC未配置(M16-3で追加)", () => {
+  it("琥珀郷は 16x12・NPC3人(世話役/職人/番人。M16-3)", () => {
     expect(MAPS.settlement.width).toBe(16);
     expect(MAPS.settlement.height).toBe(12);
-    expect(MAPS.settlement.npcs).toHaveLength(0);
+    const ids = MAPS.settlement.npcs.map((n) => n.id).sort();
+    expect(ids).toEqual(["artisan", "caretaker", "warden"]);
   });
 
   it("沈み野の出現プールは 迷い火・囁き仮面・軋み人形(レンジ2-3)", () => {

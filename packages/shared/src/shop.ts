@@ -1,5 +1,6 @@
 import { ARMOR_ITEM_IDS, ITEMS, WEAPON_ITEM_IDS, buyPriceOf, sellPriceOf } from "./combat/items.js";
 import type { ItemId } from "./combat/items.js";
+import type { NpcId } from "./ids.js";
 import { affinityTier } from "./npc.js";
 import type { AffinityTier } from "./npc.js";
 
@@ -24,8 +25,37 @@ export const SHOP_STOCK: readonly ItemId[] = [
   ...ARMOR_ITEM_IDS
 ];
 
-export function isInShopStock(id: ItemId): boolean {
-  return SHOP_STOCK.includes(id);
+/**
+ * 琥珀工房(職人ガロ)の品揃え(M16。game-design.md「第2エリア(拡張: M16)」経済)。
+ * ITEMS に実在する品のみ:回復薬(中)・解毒薬 + 上級装備(琥珀刃・灯守りの帷子)=
+ * 灯町より一段深い側の構成。松明は縦切り仕様に記載があるが実装に存在しないため含めない。
+ * いずれの品も SHOP_STOCK の部分集合(価格・存在は既存 ITEMS に依拠)。
+ */
+export const AMBER_WORKSHOP_STOCK: readonly ItemId[] = [
+  "potion-mid",
+  "antidote",
+  "amber-blade",
+  "warded-mail"
+];
+
+/**
+ * 店を持つ NPC ごとの品揃え(NpcId → 在庫リスト)。レンド(渡り物屋)は SHOP_STOCK で不変、
+ * ガロ(琥珀工房)は AMBER_WORKSHOP_STOCK。宿・語り部などの非店NPCはキーを持たない
+ * (shopStockFor が空配列を返し、その店では何も買えない)。
+ */
+export const NPC_SHOP_STOCK: Partial<Record<NpcId, readonly ItemId[]>> = {
+  merchant: SHOP_STOCK,
+  artisan: AMBER_WORKSHOP_STOCK
+};
+
+/** 指定NPCの店の品揃え(店を持たないNPCは空配列) */
+export function shopStockFor(npcId: NpcId): readonly ItemId[] {
+  return NPC_SHOP_STOCK[npcId] ?? [];
+}
+
+/** その品が指定NPCの店の品揃えにあるか(店ごとに扱いを分ける=表示外の品の購入を防ぐ) */
+export function isInShopStock(npcId: NpcId, id: ItemId): boolean {
+  return shopStockFor(npcId).includes(id);
 }
 
 // ===========================================================================
@@ -86,11 +116,12 @@ export interface ShopStockEntry {
 }
 
 /**
- * 店頭に並ぶ品の一覧(UI 表示用)。buyPrice は商人の好感度を反映した割引後の値
- * (クライアントはこの値をそのまま表示する。初期好感度30では従来価格と同値)。
+ * 店頭に並ぶ品の一覧(UI 表示用)。品揃えは店主 NPC ごと(shopStockFor)、buyPrice は
+ * その店主の好感度を反映した割引後の値(クライアントはこの値をそのまま表示する。
+ * 初期好感度30では従来価格と同値)。割引規則(discountedBuyPrice)は全店で同一を再利用する。
  */
-export function shopStockEntries(affinity: number): ShopStockEntry[] {
-  return SHOP_STOCK.map((itemId) => ({
+export function shopStockEntries(npcId: NpcId, affinity: number): ShopStockEntry[] {
+  return shopStockFor(npcId).map((itemId) => ({
     itemId,
     name: ITEMS[itemId].name,
     buyPrice: discountedBuyPrice(itemId, affinity)

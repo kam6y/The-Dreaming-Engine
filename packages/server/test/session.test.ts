@@ -685,6 +685,122 @@ describe("調べる・話す", () => {
 });
 
 // ===========================================================================
+// 第2エリア(琥珀郷)のNPC(M16。世話役イルマ=宿 / 職人ガロ=店 / 番人トワ=語り部)
+// ===========================================================================
+
+describe("第2エリア(琥珀郷)のNPC(M16)", () => {
+  /** 任意マップの指定位置・向きに立つセッション(所持金・HP を上書き可) */
+  async function mapSession(
+    mapId: GameState["location"]["mapId"],
+    position: Position,
+    facing: Direction,
+    opts?: { gold?: number; hp?: number; artisanAffinity?: number }
+  ): Promise<SessionContext> {
+    const ctx = createSession();
+    await ctx.session.handle({ type: "new-game" });
+    const state = mustState(ctx.session);
+    state.location = { mapId, position: { ...position }, facing };
+    if (opts?.gold !== undefined) state.player.gold = opts.gold;
+    if (opts?.hp !== undefined) state.player.hp = opts.hp;
+    if (opts?.artisanAffinity !== undefined) state.npcs.artisan.affinity = opts.artisanAffinity;
+    return ctx;
+  }
+
+  it("世話役イルマ(寄り屋)に話すと宿が開く(宿代5G)", async () => {
+    // 寄り屋前 (4,5) から北の caretaker (4,4) へ話しかける
+    const { session } = await mapSession("settlement", { x: 4, y: 5 }, "up");
+    const msgs = await session.handle({ type: "interact" });
+    const view = firstSnapshot(msgs);
+    if (view.interaction?.kind !== "inn") throw new Error("inn interaction が無い");
+    expect(view.interaction.npcId).toBe("caretaker");
+    expect(view.interaction.npcName).toBe(NPC_DISPLAY_NAMES.caretaker);
+    expect(view.interaction.costGold).toBe(5); // 灯宿10Gより安い(SETTLEMENT_INN_COST)
+    expect(dialogsOf(msgs)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.caretaker);
+  });
+
+  it("寄り屋の宿泊は5G徴収してHP/MP全回復・日送り・セーブする(処理順序は灯宿と同一)", async () => {
+    const { session, store } = await mapSession("settlement", { x: 4, y: 5 }, "up", { gold: 30, hp: 1 });
+    await session.handle({ type: "interact" }); // 宿を開く
+    await session.handle({ type: "rest" });
+    const state = mustState(session);
+    expect(state.player.gold).toBe(25); // 30 - 5
+    expect(state.player.hp).toBe(statsForLevel(1).maxHP);
+    expect(state.day).toBe(2); // 日送り
+    expect(store.saved).toHaveLength(1); // セーブ成立
+  });
+
+  it("寄り屋も無銭時は無料で泊める(据え置き・世界変化なしの既存挙動を維持)", async () => {
+    const { session } = await mapSession("settlement", { x: 4, y: 5 }, "up", { gold: 3 });
+    await session.handle({ type: "interact" });
+    await session.handle({ type: "rest" });
+    const state = mustState(session);
+    expect(state.player.gold).toBe(3); // 5G未満=無料、据え置き
+    expect(state.day).toBe(2);
+  });
+
+  it("灯宿(オルガ)の宿代は10Gのまま(回帰)", async () => {
+    const { session } = await mapSession("town", { x: 4, y: 5 }, "up", { gold: 30 }); // 主人 (4,4)
+    await session.handle({ type: "interact" });
+    await session.handle({ type: "rest" });
+    expect(mustState(session).player.gold).toBe(20); // 30 - 10 = 灯宿は不変
+  });
+
+  it("職人ガロ(琥珀工房)に話すと店が開く(品揃えは ITEMS 実在品のみ・レンドの品は並ばない)", async () => {
+    // 工房前 (11,5) から北の artisan (11,4) へ話しかける
+    const { session } = await mapSession("settlement", { x: 11, y: 5 }, "up");
+    const msgs = await session.handle({ type: "interact" });
+    const view = firstSnapshot(msgs);
+    if (view.interaction?.kind !== "shop") throw new Error("shop interaction が無い");
+    expect(view.interaction.npcId).toBe("artisan");
+    expect(view.interaction.npcName).toBe(NPC_DISPLAY_NAMES.artisan);
+    expect(view.interaction.stock.map((s) => s.itemId)).toEqual([
+      "potion-mid",
+      "antidote",
+      "amber-blade",
+      "warded-mail"
+    ]);
+    // レンドの店にはあるが琥珀工房には並ばない品
+    expect(view.interaction.stock.map((s) => s.itemId)).not.toContain("potion-small");
+    expect(view.interaction.stock.map((s) => s.itemId)).not.toContain("worn-blade");
+  });
+
+  it("琥珀工房の店頭価格はガロの好感度で割引される(信頼80=琥珀刃162G)", async () => {
+    const { session } = await mapSession("settlement", { x: 11, y: 5 }, "up", { artisanAffinity: 80 });
+    const msgs = await session.handle({ type: "interact" });
+    const view = firstSnapshot(msgs);
+    if (view.interaction?.kind !== "shop") throw new Error("shop interaction が無い");
+    const amber = view.interaction.stock.find((s) => s.itemId === "amber-blade");
+    expect(amber?.buyPrice).toBe(162); // 180 - floor(180*10/100)
+    expect(view.interaction.merchantAffinity).toBe(80); // 店主(ガロ)の好感度を渡す
+  });
+
+  it("琥珀工房では品揃え外(potion-small)は買えず、並ぶ品(琥珀刃)は買える", async () => {
+    const { session } = await mapSession("settlement", { x: 11, y: 5 }, "up", { gold: 500 });
+    await session.handle({ type: "interact" }); // 店を開く
+    // 品揃え外(レンドの店の品)は not-sold で拒否
+    expectError(
+      await session.handle({ type: "shop-buy", itemId: "potion-small", quantity: 1 }),
+      "not-sold"
+    );
+    // 並ぶ品は購入できる(琥珀刃180G)
+    const before = mustState(session).player.gold;
+    await session.handle({ type: "shop-buy", itemId: "amber-blade", quantity: 1 });
+    const state = mustState(session);
+    expect(state.player.gold).toBe(before - 180);
+    expect(countOf(state.inventory, "amber-blade")).toBe(1);
+  });
+
+  it("番人トワは gatekeeper 未注入なら定型ダイアログのみ(店・宿・会話を開かない)", async () => {
+    // 坑口傍 (13,7) から東の warden (14,7) へ話しかける
+    const { session } = await mapSession("settlement", { x: 13, y: 7 }, "right");
+    const msgs = await session.handle({ type: "interact" });
+    expect(msgs).toHaveLength(1);
+    expect(dialogsOf(msgs)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.warden);
+    expect(mustView(session).interaction).toBeUndefined();
+  });
+});
+
+// ===========================================================================
 // メインクエスト進行(司祭スクリプト・ボス戦トリガー・撃破遷移・エンディング確認)
 // ===========================================================================
 

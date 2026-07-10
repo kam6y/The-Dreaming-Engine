@@ -98,7 +98,13 @@ export const DEFAULT_NPC_TOPICS: Record<NpcId, string> = {
   innkeeper: "このごろ泊まり客の夢見が悪いらしい。腹ごしらえと温い寝床が一番の薬だ、という話",
   merchant: "行商人から流れ着いた、産地の知れない品が棚の奥で鈍く光っている、という話",
   informant: "霧笛亭に持ち込まれる依頼が少し増えた。忘れ野のあたりが騒がしいらしい、という話",
-  priest: "灯守堂の祈りの灯がひとつ揺らいだ。それでも機関はまだ祈りを聞いている、という話"
+  priest: "灯守堂の祈りの灯がひとつ揺らいだ。それでも機関はまだ祈りを聞いている、という話",
+  // 第2エリア「琥珀郷」の3人(M16。world-lore.md 3.6〜3.8「夢との関わり」を典拠)
+  caretaker: "寄り屋の囲炉裏が夜更けによく爆ぜる。火のそばで一夜を過ごせば夢見も穏やかになる、という話",
+  artisan: "沈み野の採取場で、灯の亡骸の細片がこのところ多く採れる。何かの前触れか、という話",
+  // 表の節・公開の言い伝えに留める(坑=灯の還るところ は 2.6 の公開ロア。「歌われなくなった続き」は
+  // トワの50-69帯の秘密なので初期話題に載せない=world-lore 3.0 の帯規約)
+  warden: "坑口の番人トワが、灯がこの坑へ還るという古い言い伝えを、唄にして口ずさんでいる、という話"
 };
 
 /** 1往復 = プレイヤーの自由入力1回とそれへの NPC(AI)応答1回の組 */
@@ -146,7 +152,11 @@ export const npcStatesSchema = z.object({
   innkeeper: npcStateSchema.default(() => createDefaultNpcState("innkeeper")),
   merchant: npcStateSchema.default(() => createDefaultNpcState("merchant")),
   informant: npcStateSchema.default(() => createDefaultNpcState("informant")),
-  priest: npcStateSchema.default(() => createDefaultNpcState("priest"))
+  priest: npcStateSchema.default(() => createDefaultNpcState("priest")),
+  // 第2エリア「琥珀郷」の3人(M16)。旧セーブ(このキー欠落)でも default で初期状態(好感度30)に倒す
+  caretaker: npcStateSchema.default(() => createDefaultNpcState("caretaker")),
+  artisan: npcStateSchema.default(() => createDefaultNpcState("artisan")),
+  warden: npcStateSchema.default(() => createDefaultNpcState("warden"))
 });
 export type NpcStates = z.infer<typeof npcStatesSchema>;
 
@@ -156,7 +166,10 @@ export function createDefaultNpcStates(): NpcStates {
     innkeeper: createDefaultNpcState("innkeeper"),
     merchant: createDefaultNpcState("merchant"),
     informant: createDefaultNpcState("informant"),
-    priest: createDefaultNpcState("priest")
+    priest: createDefaultNpcState("priest"),
+    caretaker: createDefaultNpcState("caretaker"),
+    artisan: createDefaultNpcState("artisan"),
+    warden: createDefaultNpcState("warden")
   };
 }
 

@@ -2,7 +2,6 @@ import {
   DREAM_FALLBACK_TEXT,
   ENEMY_DISPLAY_NAMES,
   GAME_TITLE,
-  INN_COST,
   INVENTORY_CAPACITY,
   ITEMS,
   MAPS,
@@ -27,6 +26,7 @@ import {
   equipItem,
   freeSpace,
   hasNarratedEnemy,
+  innFeeFor,
   interactionTarget,
   isInShopStock,
   lootForChest,
@@ -124,6 +124,38 @@ type Mode = "exploration" | "battle";
 /** gatekeeper 未注入時(AI 無効)の情報屋の定型ダイアログ(M3 互換フォールバック) */
 const PLACEHOLDER_INFORMANT_LINE =
   "「……いい話、あるにはあるんだけどね。それはもう少し、夢が深まってからかな」";
+
+/** gatekeeper 未注入時(AI 無効)の番人トワの定型ダイアログ(M3 互換フォールバック。world-lore 3.8) */
+const PLACEHOLDER_WARDEN_LINE =
+  "「唄はね……もう少し、夢が深まってから聞かせよう、とさ」";
+
+/** 店の開店挨拶(店 NPC 別。world-lore 3.3=レンド / 3.7=ガロ の口調)。既存文言はテスト回帰のため不変 */
+const SHOP_GREETINGS: Partial<Record<NpcId, string>> = {
+  merchant: "「いらっしゃい。旅の道具は命の続きです。ゆっくり見ておいきなさい」",
+  artisan: "「売り物は選んで置いてる。安心して買っていけ」"
+};
+
+/** 宿の案内挨拶(宿 NPC 別。world-lore 3.2=オルガ / 3.6=イルマ の口調)。既存文言はテスト回帰のため不変 */
+const INN_GREETINGS: Partial<Record<NpcId, string>> = {
+  innkeeper: "「おや、疲れた顔だね。今夜は泊まっておいき。腹が減ってちゃ悪夢も見れやしないよ」",
+  caretaker: "「遠くから来なさったね。今夜の火の番は、わたしがしますよ。ゆっくりお休みなさい」"
+};
+
+/**
+ * 宿泊完了時の描写(宿 NPC 別。paid=宿代を払った / free=無銭で泊めた)。
+ * 夢シーン・世界変化・セーブの機構は灯宿と同一(rest が共通処理)で、ここは締めの台詞だけを差し替える。
+ * 既存(灯宿)の文言はテスト回帰のため不変。
+ */
+const INN_REST_LINES: Partial<Record<NpcId, { paid: string; free: string }>> = {
+  innkeeper: {
+    paid: "「ゆっくりおやすみ。悪い夢を見たって、朝には湯を沸かしておくからね」旅人は目を閉じ、機関に一日を手渡した。",
+    free: "「今日はお代はいらないよ。……いい夢を、とは言えないけどね」旅人は泥のように眠り、気づけば朝だった。"
+  },
+  caretaker: {
+    paid: "「今夜の火の番は、わたしがしますよ。ゆっくりお眠りなさい」旅人は囲炉裏のそばで目を閉じ、機関に一日を手渡した。",
+    free: "「お代はいりませんよ。……よい夢を、とは言えませんけれどねえ」旅人は泥のように眠り、気づけば朝だった。"
+  }
+};
 
 /**
  * 司祭フィオルによるメインクエストの明かし(AI 非依存のスクリプト。game-design.md 74 行:
@@ -635,45 +667,63 @@ export class GameSession {
 
   private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
     switch (npcId) {
-      case "merchant": {
-        // 在庫の buyPrice は商人の好感度を反映した割引後の値(M11-1)。店を開いている間は
-        // 好感度が変わらない(adjust_affinity は会話 interaction 中のみ)ため、開店時の値で一貫する
-        this.activeInteraction = {
-          kind: "shop",
-          npcId: "merchant",
-          npcName: NPC_DISPLAY_NAMES.merchant,
-          stock: shopStockEntries(this.requireState().npcs.merchant.affinity),
-          // 売値表示をクライアントがサーバーと同一計算するための好感度(M11-3)
-          merchantAffinity: this.requireState().npcs.merchant.affinity
-        };
-        return [
-          this.snapshotMsg(),
-          this.dialogMsg(NPC_DISPLAY_NAMES.merchant, "「いらっしゃい。旅の道具は命の続きです。ゆっくり見ておいきなさい」")
-        ];
-      }
-      case "innkeeper": {
-        this.activeInteraction = {
-          kind: "inn",
-          npcId: "innkeeper",
-          npcName: NPC_DISPLAY_NAMES.innkeeper,
-          costGold: INN_COST
-        };
-        return [
-          this.snapshotMsg(),
-          this.dialogMsg(NPC_DISPLAY_NAMES.innkeeper, "「おや、疲れた顔だね。今夜は泊まっておいき。腹が減ってちゃ悪夢も見れやしないよ」")
-        ];
-      }
-      case "informant": {
+      case "merchant":
+      case "artisan":
+        // 店(渡り物屋=レンド / 琥珀工房=ガロ)。品揃え・割引は店主の好感度で決まる
+        return this.openShop(npcId);
+      case "innkeeper":
+      case "caretaker":
+        // 宿(灯宿=オルガ / 寄り屋=イルマ)。宿代は宿NPC別(innFeeFor)、処理順序は共通(rest)
+        return this.openInn(npcId);
+      case "informant":
         // 情報屋カイ。gatekeeper 注入時は AI 会話、未注入(M3 互換)なら定型ダイアログ。
         if (this.gatekeeper === null) {
           return [this.dialogMsg(NPC_DISPLAY_NAMES.informant, PLACEHOLDER_INFORMANT_LINE)];
         }
         return this.openConversation("informant");
-      }
+      case "warden":
+        // 番人トワ。店・宿は持たず会話のみ(サブクエスト窓口は従来どおりカイのみ=quest-request を増やさない)。
+        if (this.gatekeeper === null) {
+          return [this.dialogMsg(NPC_DISPLAY_NAMES.warden, PLACEHOLDER_WARDEN_LINE)];
+        }
+        return this.openConversation("warden");
       case "priest":
         // 司祭フィオル(メインクエスト進行役)。arrival はスクリプトの明かしで rift-revealed へ。
         return this.interactPriest();
     }
+  }
+
+  /**
+   * 店を開く(店 NPC 共通=レンド/ガロ)。品揃え(shopStockEntries)と割引は店主の好感度で計算する。
+   * 開いている間は好感度が変わらない(adjust_affinity は会話 interaction 中のみ)ため、開店時の値で一貫する。
+   */
+  private openShop(npcId: NpcId): ServerMessage[] {
+    const affinity = this.requireState().npcs[npcId].affinity;
+    this.activeInteraction = {
+      kind: "shop",
+      npcId,
+      npcName: NPC_DISPLAY_NAMES[npcId],
+      stock: shopStockEntries(npcId, affinity),
+      // 売値表示をクライアントがサーバーと同一計算するための店主好感度(M11-3。フィールド名は既存互換)
+      merchantAffinity: affinity
+    };
+    const greeting = SHOP_GREETINGS[npcId] ?? "「……ゆっくり見ておいき」";
+    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[npcId], greeting)];
+  }
+
+  /**
+   * 宿を開く(宿 NPC 共通=オルガ/イルマ)。宿代は宿NPC別(innFeeFor: 灯宿10G・寄り屋5G)。
+   * 宿泊の処理順序・無銭時の扱い・夢シーン・セーブは rest が共通に担う。
+   */
+  private openInn(npcId: NpcId): ServerMessage[] {
+    this.activeInteraction = {
+      kind: "inn",
+      npcId,
+      npcName: NPC_DISPLAY_NAMES[npcId],
+      costGold: innFeeFor(npcId)
+    };
+    const greeting = INN_GREETINGS[npcId] ?? "「今夜は、ここでお休みなさい」";
+    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[npcId], greeting)];
   }
 
   /**
@@ -1062,7 +1112,10 @@ export class GameSession {
     if (guard) return guard;
     const state = this.requireState();
     if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
-    if (!isInShopStock(itemId)) return this.errorMsgs("not-sold", "それは、この店では扱っていない。");
+    // 品揃えはこの店(店主 NPC)のものに限る。表示されていない品(別の店の在庫)は買えない
+    if (!isInShopStock(this.activeInteraction.npcId, itemId)) {
+      return this.errorMsgs("not-sold", "それは、この店では扱っていない。");
+    }
     // 店主(商人)の好感度による段階割引を適用(0-49 は従来価格と完全同値。
     // stock の表示価格と同じ関数・同じ好感度で計算するため、表示と請求は常に一致する)
     const cost = discountedBuyPrice(itemId, state.npcs[this.activeInteraction.npcId].affinity) * quantity;
@@ -1100,8 +1153,12 @@ export class GameSession {
     const state = this.requireState();
     if (this.activeInteraction?.kind !== "inn") return this.errorMsgs("not-at-inn", "ここは宿ではない。");
 
+    // 宿NPC(灯宿=オルガ / 寄り屋=イルマ)。宿代・締めの台詞は NPC 別、それ以外の処理順序は共通
+    const innNpcId = this.activeInteraction.npcId;
+    const fee = this.activeInteraction.costGold; // 宿代(innFeeFor: 灯宿10G・寄り屋5G)
+
     // 手順0: 宿泊費の徴収(不足でも拒否しない=無料で泊める)
-    const cost = state.player.gold >= INN_COST ? INN_COST : 0;
+    const cost = state.player.gold >= fee ? fee : 0;
     const wasFree = cost === 0; // 宿泊費不足 → 夢シーンは定型文・世界変化なし(コスト保護)
     state.player.gold -= cost;
 
@@ -1139,10 +1196,13 @@ export class GameSession {
     await this.saveStore.save(this.requireState());
 
     this.activeInteraction = null; // 宿の overlay を閉じる
+    // 締めの台詞は宿NPC別(灯宿=オルガ / 寄り屋=イルマ)。夢シーン・世界変化・セーブは上で共通に済ませてある
+    // (innNpcId は宿NPC=innkeeper|caretaker のいずれかで必ず lines を持つ。?? は型・スキーマ保険の非空文字列)
+    const lines = INN_REST_LINES[innNpcId];
     const body = wasFree
-      ? "「今日はお代はいらないよ。……いい夢を、とは言えないけどね」旅人は泥のように眠り、気づけば朝だった。"
-      : "「ゆっくりおやすみ。悪い夢を見たって、朝には湯を沸かしておくからね」旅人は目を閉じ、機関に一日を手渡した。";
-    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES.innkeeper, body), ...dreamMsgs];
+      ? (lines?.free ?? "旅人は泥のように眠り、気づけば朝だった。")
+      : (lines?.paid ?? "旅人は目を閉じ、機関に一日を手渡した。");
+    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[innNpcId], body), ...dreamMsgs];
   }
 
   // =========================================================================
@@ -1197,7 +1257,10 @@ export class GameSession {
         innkeeper: state.npcs.innkeeper.affinity,
         merchant: state.npcs.merchant.affinity,
         informant: state.npcs.informant.affinity,
-        priest: state.npcs.priest.affinity
+        priest: state.npcs.priest.affinity,
+        caretaker: state.npcs.caretaker.affinity,
+        artisan: state.npcs.artisan.affinity,
+        warden: state.npcs.warden.affinity
       },
       inventory: state.inventory,
       subQuests: state.subQuests,

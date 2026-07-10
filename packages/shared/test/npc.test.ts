@@ -15,6 +15,7 @@ import {
   GIVE_ITEM_AFFINITY_THRESHOLD,
   INITIAL_AFFINITY,
   MAX_UNSUMMARIZED_EXCHANGES,
+  NPC_DISPLAY_NAMES,
   npcIdSchema,
   npcStatesSchema
 } from "../src/index.js";
@@ -44,6 +45,38 @@ describe("createDefaultNpcState / createDefaultNpcStates(既定状態)", () => {
     for (const id of npcIdSchema.options) {
       expect(all[id].affinity).toBe(INITIAL_AFFINITY);
       expect(all[id].topic).toBe(DEFAULT_NPC_TOPICS[id]);
+    }
+  });
+});
+
+describe("第2エリアNPC(M16。琥珀郷=イルマ/ガロ/トワ)", () => {
+  it("npcIdSchema に新3人(caretaker/artisan/warden)が追加され、既存4人は不変", () => {
+    expect(npcIdSchema.options).toEqual([
+      "innkeeper",
+      "merchant",
+      "informant",
+      "priest",
+      "caretaker",
+      "artisan",
+      "warden"
+    ]);
+  });
+
+  it("表示名は イルマ/ガロ/トワ(world-lore.md 3.6〜3.8)", () => {
+    expect(NPC_DISPLAY_NAMES.caretaker).toBe("イルマ");
+    expect(NPC_DISPLAY_NAMES.artisan).toBe("ガロ");
+    expect(NPC_DISPLAY_NAMES.warden).toBe("トワ");
+  });
+
+  it("新3人も NPC別デフォルト話題(非空)を持つ", () => {
+    for (const id of ["caretaker", "artisan", "warden"] as const) {
+      expect(DEFAULT_NPC_TOPICS[id].length).toBeGreaterThan(0);
+    }
+  });
+
+  it("新3人の既定状態は好感度30(既存NPCと同一機構)", () => {
+    for (const id of ["caretaker", "artisan", "warden"] as const) {
+      expect(createDefaultNpcState(id).affinity).toBe(INITIAL_AFFINITY);
     }
   });
 });

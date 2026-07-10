@@ -1,14 +1,28 @@
 import { z } from "zod";
 
 /**
- * NPC識別子(world-lore.mdの4人)。
+ * NPC識別子(world-lore.mdの登場人物)。
  * ゲーム内エンティティのIDであり、立ち絵アセットIDは `npc-${NpcId}`(例: npc-innkeeper)で対応する。
+ * 灯町(縦切り)の4人:
  * - innkeeper: 宿屋の主人 オルガ(灯宿)
  * - merchant : 商人 レンド(渡り物屋)
  * - informant: 情報屋 カイ(霧笛亭)
  * - priest   : 謎の司祭 フィオル(灯守堂)
+ * 第2エリア「琥珀郷」の3人(M16。world-lore.md 3.6〜3.8)。役割ベースの英語IDで既存4人に揃える:
+ * - caretaker: 世話役 イルマ(寄り屋。宿相当)
+ * - artisan  : 職人 ガロ(琥珀工房。店)
+ * - warden   : 番人 トワ(坑口。語り部。店・宿なし)
+ * enumへの追記であり既存値は不変=既存セーブを壊さない(GAME_STATE_VERSION は 1 のまま)。
  */
-export const npcIdSchema = z.enum(["innkeeper", "merchant", "informant", "priest"]);
+export const npcIdSchema = z.enum([
+  "innkeeper",
+  "merchant",
+  "informant",
+  "priest",
+  "caretaker",
+  "artisan",
+  "warden"
+]);
 export type NpcId = z.infer<typeof npcIdSchema>;
 
 /** NPCの表示名(world-lore.md 3節が正) */
@@ -16,7 +30,10 @@ export const NPC_DISPLAY_NAMES: Record<NpcId, string> = {
   innkeeper: "オルガ",
   merchant: "レンド",
   informant: "カイ",
-  priest: "フィオル"
+  priest: "フィオル",
+  caretaker: "イルマ",
+  artisan: "ガロ",
+  warden: "トワ"
 };
 
 /**

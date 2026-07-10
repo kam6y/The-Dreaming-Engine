@@ -35,7 +35,10 @@ const AFFINITY_BASE: Record<NpcId, number> = {
   innkeeper: 30,
   merchant: 30,
   informant: 30,
-  priest: 30
+  priest: 30,
+  caretaker: 30,
+  artisan: 30,
+  warden: 30
 };
 
 /** 空き枠が free になるインベントリ(容量20。potion-small を 20-free 個入れる) */
@@ -195,7 +198,7 @@ describe("攻撃テストA: adjust_affinity の境界・越境(第1層)", () => 
       affinityByNpc: { ...AFFINITY_BASE, informant: 40 },
       aiDaily: {
         ...createDefaultAiDailyCounters(),
-        affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 18, priest: 0 }
+        affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 18, priest: 0, caretaker: 0, artisan: 0, warden: 0 }
       }
     };
     const over = validateToolCall(

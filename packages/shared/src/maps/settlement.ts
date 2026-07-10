@@ -4,7 +4,8 @@ import { GridBuilder } from "./builder.js";
 
 // 集落「琥珀郷(こはくごう)」— 消えた灯(琥珀=灯の亡骸)で生きてきた寂れた郷(world-lore.md 2.4)。
 // 安全地帯(エンカウントなし)。南門で沈み野へ、東縁の封じられた坑口で灯還りの坑へ。
-// NPC(世話役イルマ・職人ガロ・番人トワ)は M16-3 で配置する(ここでは空)。
+// NPC3人(世話役イルマ=寄り屋/職人ガロ=琥珀工房/番人トワ=坑口)を M16-3 で配置する。
+// 各 NPC は建物を背にして立つ(facing の逆隣が壁='#'=M17 の不変条件。maps.test.ts が全マップ検証)。
 const WIDTH = 16;
 const HEIGHT = 12;
 
@@ -38,7 +39,14 @@ export const settlementMap: MapDefinition = mapDefinitionSchema.parse({
       to: { mapId: "dungeon-4", position: { x: 11, y: 1 }, facing: "down" }
     }
   ],
-  npcs: [],
+  npcs: [
+    // 世話役イルマ(寄り屋の前)。寄り屋(y2-3)を背に南向き=背後(4,3)が壁
+    { id: "caretaker", position: { x: 4, y: 4 }, facing: "down" },
+    // 職人ガロ(琥珀工房の前)。工房(y2-3)を背に南向き=背後(11,3)が壁
+    { id: "artisan", position: { x: 11, y: 4 }, facing: "down" },
+    // 番人トワ(坑口の傍)。東縁の壁(坑口の岩肌)を背に西向き=背後(15,7)が壁
+    { id: "warden", position: { x: 14, y: 7 }, facing: "left" }
+  ],
   objects: [
     { id: "settlement-sign-inn", kind: "sign", position: { x: 3, y: 4 }, message: "寄り屋。大きな囲炉裏と、壁際に並ぶ空の寝台。旅人はここで一夜を借りられる。" },
     { id: "settlement-sign-shop", kind: "sign", position: { x: 10, y: 4 }, message: "琥珀工房。研ぎ台の上で灯の亡骸が鈍く光る。旅の道具と薬、細工が少し並ぶ。" },

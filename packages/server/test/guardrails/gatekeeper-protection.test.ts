@@ -34,7 +34,7 @@ const META = { mode: "mock" as const, model: "claude-haiku-4-5" };
 function persistentBase(overrides: Partial<PersistentStateContext> = {}): PersistentStateContext {
   return {
     aiDaily: createDefaultAiDailyCounters(),
-    affinityByNpc: { innkeeper: 30, merchant: 30, informant: 30, priest: 30 },
+    affinityByNpc: { innkeeper: 30, merchant: 30, informant: 30, priest: 30, caretaker: 30, artisan: 30, warden: 30 },
     inventory: emptyInventory(),
     subQuests: [],
     dungeonSymbolCounts: initialDungeonSymbolCounts(),

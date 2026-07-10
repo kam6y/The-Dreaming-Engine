@@ -513,7 +513,7 @@ function fullContext(overrides: {
         : overrides.session,
     persistent: {
       aiDaily: createDefaultAiDailyCounters(),
-      affinityByNpc: { innkeeper: 30, merchant: 30, informant: 30, priest: 30 },
+      affinityByNpc: { innkeeper: 30, merchant: 30, informant: 30, priest: 30, caretaker: 30, artisan: 30, warden: 30 },
       inventory: emptyInventory(),
       subQuests: [],
       dungeonSymbolCounts: DUNGEON_MID,
@@ -552,7 +552,7 @@ describe("validateToolCall(フロー許可集合の二重チェック)", () => {
     // 会話開始時40、現在の永続好感度は90(会話内で上昇したと仮定)→ give_item は却下されるべき
     const ctx = fullContext({
       session: { partnerNpcId: "innkeeper", affinityAtOpen: 40, adjustAffinityCount: 0, giveItemCount: 0, pendingProposal: null },
-      persistent: { affinityByNpc: { innkeeper: 90, merchant: 30, informant: 30, priest: 30 } }
+      persistent: { affinityByNpc: { innkeeper: 90, merchant: 30, informant: 30, priest: 30, caretaker: 30, artisan: 30, warden: 30 } }
     });
     const r = validateToolCall("conversation", "give_item", { itemId: "potion-small", quantity: 1, reason: "贈与" }, ctx);
     expect(reasonOf(r)).toContain("好感度");
@@ -562,8 +562,8 @@ describe("validateToolCall(フロー許可集合の二重チェック)", () => {
     const ctx = fullContext({
       session: { partnerNpcId: "informant", affinityAtOpen: 30, adjustAffinityCount: 0, giveItemCount: 0, pendingProposal: null },
       persistent: {
-        affinityByNpc: { innkeeper: 30, merchant: 30, informant: 40, priest: 30 },
-        aiDaily: { ...createDefaultAiDailyCounters(), affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 18, priest: 0 } }
+        affinityByNpc: { innkeeper: 30, merchant: 30, informant: 40, priest: 30, caretaker: 30, artisan: 30, warden: 30 },
+        aiDaily: { ...createDefaultAiDailyCounters(), affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 18, priest: 0, caretaker: 0, artisan: 0, warden: 0 } }
       }
     });
     // 日次18 + 5 = 23 > 20 → 却下

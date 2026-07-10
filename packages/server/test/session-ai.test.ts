@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   BATTLE_RESULT_FALLBACK_TEXT,
   DREAM_FALLBACK_TEXT,
+  NPC_DISPLAY_NAMES,
   countOf,
   createNewGameState,
   samePosition,
@@ -250,7 +251,7 @@ function makeAiSession(opts?: {
   return { session, store, dreamMaster, advance };
 }
 
-const NPC_APPROACH: Record<NpcId, { pos: Position; facing: Direction }> = {
+const NPC_APPROACH: Partial<Record<NpcId, { pos: Position; facing: Direction }>> = {
   innkeeper: { pos: { x: 4, y: 5 }, facing: "up" },
   merchant: { pos: { x: 16, y: 5 }, facing: "up" },
   informant: { pos: { x: 4, y: 9 }, facing: "down" },
@@ -277,6 +278,7 @@ function mustView(session: GameSession): SnapshotView {
  */
 async function talkTo(session: GameSession, npcId: NpcId): Promise<ServerMessage[]> {
   const approach = NPC_APPROACH[npcId];
+  if (approach === undefined) throw new Error(`talkTo: ${npcId} は街の対象NPCでない`);
   mustState(session).location = { mapId: "town", position: { ...approach.pos }, facing: approach.facing };
   const msgs = await session.handle({ type: "interact" });
   await tick(); // 非同期の挨拶生成が完了するまで待つ(inFlight を跨ぐ)
@@ -596,7 +598,7 @@ describe("セーブ往復とマスク", () => {
       giveItemCount: 2,
       proposeQuestCount: 1,
       rewardItemProposalCount: 1,
-      affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 3, priest: 5 }
+      affinityDeltaByNpc: { innkeeper: 0, merchant: 0, informant: 3, priest: 5, caretaker: 0, artisan: 0, warden: 0 }
     };
 
     await store.save(state);
@@ -894,5 +896,50 @@ describe("話しかけの挨拶生成非同期化(会話画面へ即切替え + 
 
     // クラッシュせず(ここまで到達)、会話は開いたまま(挨拶が反映されている)
     expect(mustView(session).interaction?.kind).toBe("conversation");
+  });
+});
+
+// ===========================================================================
+// 番人トワ(第2エリア。M16): 店・宿を持たず会話のみ。サブクエスト窓口はカイのみ
+// ===========================================================================
+
+describe("番人トワ(第2エリア)の会話(M16。gatekeeper 注入時)", () => {
+  it("トワに話しかけると会話が開き(quest-request なし)、send で Mock の speak が warden として返る", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    // 坑口傍 (13,7) から東の warden (14,7) へ話しかける
+    mustState(session).location = { mapId: "settlement", position: { x: 13, y: 7 }, facing: "right" };
+    await session.handle({ type: "interact" });
+    await tick(); // 非同期の挨拶生成の完了を待つ(inFlight を跨ぐ)
+
+    const view = mustView(session);
+    if (view.interaction?.kind !== "conversation") throw new Error("conversation interaction が無い");
+    expect(view.interaction.npcId).toBe("warden");
+    expect(view.interaction.npcName).toBe(NPC_DISPLAY_NAMES.warden);
+    // サブクエスト窓口は従来どおりカイのみ=トワには quest-request を付けない
+    expect(view.interaction.options).toContain("send");
+    expect(view.interaction.options).toContain("end");
+    expect(view.interaction.options).not.toContain("quest-request");
+
+    // 汎用会話フローに乗る: send で Mock の定型 speak が warden 名義で返る
+    const send = await session.handle({ type: "conversation-send", text: "唄を聞かせて" });
+    const speak = send.find(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    expect(speak?.channel).toBe("speak");
+    expect(speak?.npcId).toBe("warden");
+  });
+
+  it("トワへの quest-request は拒否される(サブクエスト窓口はカイのみ)", async () => {
+    const { session } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    mustState(session).location = { mapId: "settlement", position: { x: 13, y: 7 }, facing: "right" };
+    await session.handle({ type: "interact" });
+    await tick();
+    const res = await session.handle({ type: "quest-request" });
+    expect(res).toHaveLength(1);
+    const msg = res[0];
+    expect(msg?.type).toBe("error");
+    if (msg?.type === "error") expect(msg.code).toBe("no-quests-here");
   });
 });
