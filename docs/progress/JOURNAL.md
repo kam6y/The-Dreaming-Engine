@@ -1629,3 +1629,35 @@
 - 次にやること: M16の残り(M16-3: 新NPC3人の実装=subagent委譲、M16-4: クライアント
   反映+E2E、M16-5: アセットcodex委譲)。JOURNAL[54]の申し送りが引き続き有効。
   M16-5以降の新規マップスプライトは4方向セットで生成する(asset-pipeline.md M17注記)
+
+## [56] 2026-07-10 M16-3: 第2エリアの新NPC3人(subagent委譲=Opus)
+
+- やったこと(実装=subagent、検収・コミット=オーケストレーター):
+  - shared: npcIdSchema へ caretaker(イルマ)/artisan(ガロ)/warden(トワ)を追記
+    (enum追記のみ)。NPC_DISPLAY_NAMES・DEFAULT_NPC_TOPICS・npcStatesSchema
+    (.default()=旧セーブは好感度30で初期化・GAME_STATE_VERSION不変)・
+    日次好感度カウンタに3人追加
+  - shared: 宿代のNPC別化 INN_FEES/innFeeFor(寄り屋=SETTLEMENT_INN_COST 5G、
+    灯宿10G不変)。店のNPC別在庫 NPC_SHOP_STOCK/shopStockFor
+    (琥珀工房=potion-mid/antidote/amber-blade/warded-mail の4品。
+    ITEMS実在品のみ・松明は非実装のため除外)。isInShopStock/shopStockEntries を
+    店主NPC第1引数へ一般化(表示外の品の購入防止。M11割引関数は再利用=ガロの好感度)
+  - shared: 琥珀郷へ3人配置(caretaker(4,4)down・artisan(11,4)down・warden(14,7)left。
+    いずれも背後が壁=M17不変条件を充足)
+  - server: interactNpc を openShop/openInn ヘルパーへ整理(既存の灯宿・渡り物屋の
+    文言はバイト一致で不変)。warden は会話のみ(サブクエスト窓口はカイのみ据え置き)。
+    NPC_PERSONA・モック応答・クールダウン挨拶・affinityByNpc に3人追加
+  - テスト: 新規(宿代5G/店在庫と割引/旧セーブ互換/配置/ペルソナ存在/
+    日次カウンタのキー集合=npcIdSchema のメタ回帰)+既存fixture更新。
+    ガードレール攻撃リグレッションは**フィクスチャへのキー追加のみで全緑=防御不変**
+- 裁量事項: NPC id 命名(caretaker/artisan/warden=既存の役割ベース英語と統一)、
+  配置座標・facing、店・宿の挨拶/宿泊締め台詞(world-lore 3.6-3.8の口調)、
+  トワの初期話題は30-49帯(表の節)に抑え50-69の秘密を先出ししない
+- 検証: `pnpm check` 緑(unit 777)・`pnpm test:e2e` 12/12緑
+  (subagent実行+オーケストレーター再実行の二重確認)
+- 次にやること: M16-4(クライアント反映=マップ区分tint・スプライトは既存流用または
+  プレースホルダー+E2Eスモーク1本(第2エリア到達)。見た目=オーケストレーター自身)。
+  申し送り: conversation-overlay の INTERIOR_BY_NPC に3人の内装キーが無い、
+  立ち絵 npc-<id>・マップスプライト sprite-<id>(4方向)も未生成=M16-5のcodex委譲で
+  生成(現状はプレースホルダー退避で描画される)。第2エリア到達E2Eは
+  忘れ野西門(0,8)経由の経路(x=11縦断→横枝道)で書く
