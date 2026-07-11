@@ -2485,3 +2485,41 @@
   (4)解除でdialogを送らない・乱数を消費しない(combat-balance閾値・既存E2Eの決定論を守る)
   (5)viewへunlockedAchievements純追加=クライアント未着手でも既存E2E緑のまま
   (6)M24-3(トースト+K一覧+E2E+M24ゲート)はUI=オーケストレーター自身
+
+## [81] 2026-07-12 M24-2: 実績「夢の欠片」のshared/server実装(実装=subagent委譲・検証引き取り/検収=オーケストレーター)
+
+- やったこと(実装・ユニットテストはsubagent。subagentがAPIエラー+ストールで2回中断した
+  ため、検証(check/E2E)と検収はオーケストレーターが引き取って完遂):
+  - achievements.ts(新規): ACHIEVEMENT_IDS 12件+登録簿ACHIEVEMENTS(id/表示名/フレーバー/
+    isSatisfied。骨子の表どおり)+evaluateAchievements(input)純関数(入力=
+    AchievementStateSlice(構造的部分型=GameStateをそのまま渡せる・循環import回避)+
+    timeOfDay+events)+mergeUnlockedAchievements(∪単調更新。追加なしは同一参照=
+    recordVisitedMap流儀)
+  - game-state: unlockedAchievements=optional+default([])・GAME_STATE_VERSION据え置き・
+    advanceDayで持続。messages: snapshotViewSchemaへ純追加(クライアント未改修でも緑)
+  - session.ts: settleAchievements=snapshotMsg()内の一点差し込み(操作→view送信の共通経路。
+    フック散在なし)。評価後イベント消費で冪等・dialog非送出・乱数非消費。
+    宿泊のみ手順4(世界変化適用)後・手順5(セーブ)前に明示評価。イベント積み=
+    report-quest成功→sub-quest-reported/世界変化適用→world-event-applied
+    (hasAppliedWorldEvents=非累積系はevents件数・累積系(侵食度/シンボル数)は適用前比較)。
+    resetRuntimeでpendingイベントをクリア
+  - テスト+34(shared 25: 12条件成立/不成立・境界(Lv8/信頼80)・単調性・冪等・旧セーブ互換・
+    未知idはzod拒否・advanceDay持続/server 9: 装備2点解除+dialog非送出・不可逆・夜ピン解除・
+    報告失敗は非解除・宿泊セーブ搭載・悪意モード非解除)
+- 裁量で決めたこと(検収で採用):
+  - beyond-the-dreamも順序判定(isStageAtOrAfter)で表現(将来の段階末尾追記に強い)
+  - 中ボスフラグはmidBossDefeatFlag("failing-spinner")ヘルパー参照(文字列直書き回避)
+  - AchievementStateSliceを構造的部分型にし判定が読むフィールドを明示(依存の広がり防止)
+  - subagentの最終報告はストールで得られず、オーケストレーターがdiffから検収情報を再構成
+- 検証: pnpm check 緑・unit 997(+34)・pnpm test:e2e 20/20緑(いずれもオーケストレーター実行)
+- 次にやること: M24-3(クライアントUI=**オーケストレーター自身**)+M24ゲート(test:e2e:full)+
+  完了時BACKLOGチェック。申し送り:
+  (1)view契約確定: view.unlockedAchievements: AchievementId[](必須・visitedMapsの直後)。
+  表示名/フレーバー/総数はsharedのACHIEVEMENTS/ACHIEVEMENT_IDSを直接import
+  (2)トースト=snapshot間の差分検出+シーン開始後初回snapshotは抑制(旧セーブ再導出の
+  一斉発火防止)・非モーダル(pointer-events無効)・数秒フェード・複数解除は順送り
+  (3)一覧オーバーレイ=Kキー開閉(衝突なし確認済み)・未解除は靄(名・条件とも伏せる)・
+  ヘッダ「欠片 n/12」・タイトル「夢の欠片」・キーヒント「K: 欠片」追加
+  (4)data属性: data-achievements-unlocked(解除数)/data-achievement-last(直近id or "none")/
+  data-menu="achievements"
+  (5)E2E案: 装備2点(既存equipment.spec流儀)でtraveler-outfitted解除→カウント/last観測→K開閉

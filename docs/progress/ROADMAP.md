@@ -577,7 +577,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       view露出は解除id配列のみ+解除通知はview差分・UI要件(トースト=非モーダル/初回snapshot抑制、
       一覧=Kキー開閉/未解除は靄)・data-観測点3種・不干渉条件。
       「セーブ/ロード」章の保存内容列挙へ`unlockedAchievements`を追記(同章自身の指示に従う追記)
-- [ ] M24-2: shared/serverの実装(**subagent担当**。UIは書かない):
+- [x] M24-2: shared/serverの実装(**subagent担当**。UIは書かない):
       shared=`achievementIdSchema`+登録簿`ACHIEVEMENTS`12件(骨子の表が正)+
       `evaluateAchievements(input)`純関数(入力=GameState部分+`timeOfDay`+決定論イベント2種
       `sub-quest-reported`/`world-event-applied`)+ユニットテスト(12条件それぞれの成立/不成立・
