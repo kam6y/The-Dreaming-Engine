@@ -2452,3 +2452,36 @@
   後方互換(optional+default)の設計判断を骨子で先に固める (2)「夢の欠片」の
   ロア整合はworld-lore.mdを必ず参照 (3)通知UI(解除トースト等)はUI=オーケストレーター、
   判定ロジック(条件評価・進捗カウンタ)はshared純関数+ユニットテスト=subagent
+
+## [80] 2026-07-12 M24展開+M24-1: 実績システム「夢の欠片」の仕様骨子(骨子執筆=subagent委譲・検収/ROADMAP展開=オーケストレーター)
+
+- やったこと:
+  - BACKLOG「実績システム(夢の欠片収集)」をROADMAP末尾へM24として展開
+    (M24-1骨子/M24-2 shared+server=subagent/M24-3クライアントUI=オーケストレーター)
+  - game-design.md末尾へ「実績システム『夢の欠片』(拡張: M24)」骨子を追記(subagent執筆・
+    検収済み): 閲覧のみ(報酬/進行/経済に無影響)・shared静的登録簿ACHIEVEMENTS・
+    解除不可逆(∪単調更新)・AI非依存の決定論判定・初期セット12件の表(id/表示名/条件/
+    フレーバー全件明記)・evaluateAchievements純関数+サーバー単一チョークポイント評価・
+    unlockedAchievements=optional+default([])でGAME_STATE_VERSION据え置き・view露出は
+    解除id配列のみ(解除通知はview差分・専用メッセージなし)・トースト(初回snapshot抑制)+
+    Kキー一覧(未解除は靄)・data-観測点3種・「セーブ/ロード」章の保存内容列挙へ追記
+  - 検収で骨子の参照を全数照合: narratedEnemies/gimmicks(game-state.ts)・
+    rift-revealed/dream-eater-defeated/ch2-beyond(quests.ts)・「信頼」帯80+(npc.ts)・
+    全8マップ(mapIdSchema)=すべて実在。Kキーの衝突なし(subagentがkeydown登録を全数grep:
+    使用中はSPACE/ENTER/ESC/Q/M/X/移動系のみ)
+- 裁量で決めたこと(subagent提案を検収で採用):
+  - 「夢の欠片」=記憶を持たない旅人の心に結晶する記憶の器(健忘ロアの対位)。
+    悪夢の「断片」・がらくた「機関の欠片」・「琥珀」と別語で衝突なし
+  - 実績12件の選定・id・表示名・閾値(Lv8・信頼帯80+)・フレーバー全文
+  - 進捗カウンタは初期セットでは不要(永続状態+イベント2種で全件判定可)=追加せず、
+    将来の累積型向け拡張点として骨子に記載
+  - 好感度実績の表示名は「信頼の灯」(friendly帯ラベル「打ち解けた」との衝突回避)
+  - subagentがAPIエラーで1回中断→SendMessageで再開(コンテキスト保持。M23-2と同型)
+- 検証: pnpm check 緑(unit 963)。ドキュメントのみの変更
+- 次にやること: M24-2(shared+serverロジック。subagent委譲)。申し送り:
+  (1)登録簿は骨子の表が正(12件のid・条件を変えない) (2)評価は単一チョークポイント
+  =操作処理後・snapshot構築前(宿泊のみ手順4後・手順5前)。フック散在禁止
+  (3)イベント2種(sub-quest-reported/world-event-applied)は当該処理が積んで同じ評価に渡す
+  (4)解除でdialogを送らない・乱数を消費しない(combat-balance閾値・既存E2Eの決定論を守る)
+  (5)viewへunlockedAchievements純追加=クライアント未着手でも既存E2E緑のまま
+  (6)M24-3(トースト+K一覧+E2E+M24ゲート)はUI=オーケストレーター自身

@@ -562,3 +562,47 @@ JOURNALへ「仕様変更提案」として記録する)。
 既存の移動・戦闘・会話・店・宿・セーブ・M20/M22挙動・既存E2E(スモーク+`test:e2e:full`)が壊れず、
 新マップ・新敵・新規画像アセットを増やさず、AIツール・防御仕様・AIへの時刻帯受け渡しは不変。
 `pnpm check`+`pnpm test:e2e`緑(M23完了時は`pnpm test:e2e:full`も)。
+
+## M24: 実績システム「夢の欠片」(BACKLOG「優先度: 低」2件目の展開。
+## 閲覧のみの実績12件+解除トースト+Kキー一覧オーバーレイ。報酬なし・AI非波及の最小設計)
+
+- [x] M24-1: 仕様骨子の追記(BACKLOG展開に伴う骨子追記=CLAUDE.mdの例外に該当。
+      骨子執筆=subagent、検収=オーケストレーター)。
+      game-design.md「実績システム『夢の欠片』(拡張: M24)」=採用案(実績は閲覧のみ・
+      報酬/進行/経済に無影響・定義は`shared`静的登録簿`ACHIEVEMENTS`・解除は不可逆・
+      AI非依存の決定論判定)・初期セット12件の表(id/表示名/解除条件/フレーバー全件明記)・
+      判定は`shared`純関数`evaluateAchievements`+サーバー単一チョークポイント評価
+      (フック散在禁止・乱数非消費・dialog非送出)・`GameState.unlockedAchievements`=
+      `optional`+`default([])`で`GAME_STATE_VERSION`据え置き(旧セーブ=再収集で成立の論拠明記)・
+      view露出は解除id配列のみ+解除通知はview差分・UI要件(トースト=非モーダル/初回snapshot抑制、
+      一覧=Kキー開閉/未解除は靄)・data-観測点3種・不干渉条件。
+      「セーブ/ロード」章の保存内容列挙へ`unlockedAchievements`を追記(同章自身の指示に従う追記)
+- [ ] M24-2: shared/serverの実装(**subagent担当**。UIは書かない):
+      shared=`achievementIdSchema`+登録簿`ACHIEVEMENTS`12件(骨子の表が正)+
+      `evaluateAchievements(input)`純関数(入力=GameState部分+`timeOfDay`+決定論イベント2種
+      `sub-quest-reported`/`world-event-applied`)+ユニットテスト(12条件それぞれの成立/不成立・
+      単調性=解除集合は増えるのみ・イベント2種の意味論)。
+      `GameState.unlockedAchievements`を`optional`+`default([])`で追加(`advanceDay`で持続・
+      新規ゲームは空・`GAME_STATE_VERSION`据え置き)。
+      server=単一チョークポイント(操作処理後・snapshot構築前)での評価+∪単調更新の配線・
+      イベント積み(`report-quest`成功・宿泊手順4の世界変化適用=手順4後/手順5前に評価)・
+      `buildView`へ`unlockedAchievements`露出・旧セーブ互換(欠落フィールドが空で読める)テスト+
+      統合テスト。**セーブスキーマは後方互換の純追加のみ**。解除で`dialog`を送らない・
+      乱数を消費しない(既存combat-balance/E2Eの決定論を壊さない)。
+      viewは純追加フィールドのためクライアント未着手でも既存E2Eは緑のまま
+- [ ] M24-3: クライアントUI(**UI=オーケストレーター**):
+      解除トースト(snapshot間の`unlockedAchievements`差分検出・シーン開始後初回snapshotは抑制・
+      非モーダル/入力を奪わない/数秒フェード/複数解除は順送り)・実績一覧オーバーレイ
+      (`K`で開閉・`Esc`で閉じる・探索限定=M22「夢の地図」同流儀・解除済み=表示名+フレーバー/
+      未解除=靄で伏せる・ヘッダ「欠片 n/12」)・常設キーヒントへ「K: 欠片」追加・
+      `syncDomState`へ`data-achievements-unlocked`/`data-achievement-last`/`data-menu="achievements"`。
+      新規画像アセットなし+E2Eスモーク1本(決定論解除=装備2点等→カウント/last観測→K開閉)。
+      完了時にBACKLOG側へチェック+M24ゲート(test:e2e:full)
+
+完了条件: プレイの節目12件が「夢の欠片」として決定論的に解除・収集され(解除は不可逆・
+報酬/進行/経済/バランスへ無影響)、解除時トーストとKキーの一覧オーバーレイ(未解除は靄)で
+閲覧できる。実績はセーブへ後方互換(`optional`+`default([])`・`GAME_STATE_VERSION`据え置き)で
+永続化され、旧セーブは再収集で自然に成立する。判定はサーバー・クライアント共通の`shared`
+純関数+登録簿に一元化され、AIツール・防御仕様・`<world_state>`は不変。既存の移動・戦闘・
+会話・店・宿・セーブ・既存E2E(スモーク+`test:e2e:full`)が壊れず、新マップ・新敵・
+新規画像アセットを増やさない。`pnpm check`+`pnpm test:e2e`緑(M24完了時は`pnpm test:e2e:full`も)。
