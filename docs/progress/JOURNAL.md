@@ -2181,3 +2181,41 @@
   (4)耐性は実効付与確率=inflictChance×(1-耐性)をmaybeInflictへ組込み。プレイヤー耐性は
   装備由来・敵耐性は敵定義由来・毒耐性0維持。combat-balance.testは空装備計測のため
   プレイヤー耐性非干渉・ボス等へ付与時のみ全閾値再検証(緩めるの禁止)
+
+## [72] 2026-07-12 M21-3: 状態異常耐性(属性)+敵move割り当て+解除アイテム+サーバーガード(実装=subagent委譲・検収=オーケストレーター)
+
+- やったこと(実装・テスト・検証はsubagent、差分検収+check/E2E再実行+コミットはオーケストレーター):
+  - 耐性: StatusResistances(kind→0-1・既定0)・effectiveInflictChance=付与確率×(1−耐性)を
+    maybeInflictへ組込み(実効>=1はロールなし必付与・<=0はロールなし不付与・中間のみ乱数1消費=
+    「付与確率1.0・耐性0」の既存経路はRNG列バイト一致)。プレイヤー耐性は装備由来
+    (effectiveStatusResistances=合算+クランプ)・敵耐性は敵定義由来・毒耐性は誰にも付与せず0維持
+  - 敵move: 蝋燭喰らい=guttering-glare(眩惑・付与0.5)/軋み人形=creaking-dread(竦み・付与0.4)。
+    rotationは先頭手(strike/poison-bite)を保存し新moveを後方挿入(既存RNG列テストの依存を保護)。
+    両者はcombat-balance統計対象外=閾値非干渉。**ボス/中ボスへの付与は見送り**(統計対象のため)
+  - 解除アイテム: 灯明(warding-light・25G・cure-statuses:[dazzle,dread]・毒は対象外)。
+    SHOP_STOCK**末尾**へ追加(在庫順依存の既存E2E=world-events先頭購入/equipment 3つ下を保護)
+  - サーバーガード(JOURNAL[71]申し送り(1)): battleItemToConsume(command,events)=
+    「該当itemIdのitem-usedイベントがあるときだけ消費」の純関数。竦み不発(action-skipped)・
+    却下時は減算しない。**実装中に戦闘どうぐの減算自体がサーバー未実装だった既存ギャップを発見**→
+    減算を新規実装+未所持どうぐのnot-owned却下(二重防御)も追加
+  - クライアント最小追従: item-labels.tsのみ(cure-statuses型追従。灯明が既存経路で
+    「(眩惑・竦みを治す)」表示)。専用演出はM21-4
+  - テスト22件追加=unit 929(status-resistance.test.ts新規19+session.test.ts 3):
+    実効付与0/0.5/1.0・耐性の由来・新move behavioral付与/上書き・灯明・毒付与RNG列バイト一致・
+    どうぐ×竦みの層跨ぎ(不発時非減算)等。combat-balance.test全閾値は既存のまま緑
+- 裁量で決めたこと: アイテム名「灯明」(warding-light・25G・レンド店売り末尾)/効果種cure-statuses/
+  move名・付与確率(guttering-glare 0.5・creaking-dread 0.4・powerMultiplier 0.9/0.85)/
+  耐性値warded-mail={dazzle:0.5,dread:0.5}(護符新設せず既存防具へ)・自己免疫
+  candle-eater={dazzle:0.5}/creaking-doll={dread:0.5}/装備耐性はkindごと加算+0-1クランプ
+- 検証: pnpm check 緑(unit 929)・pnpm test:e2e 16/16緑(subagent実行+オーケストレーター
+  再実行の二重確認)。AI系・docs/spec・セーブ形式・ガードレール不変
+- 次にやること: M21-4(クライアント表示・演出+E2Eスモーク1本。**UI=オーケストレーター自身**)+
+  M21ゲート(test:e2e:full)+完了時BACKLOGチェック。申し送り:
+  (1)観測点: 新BattleEvent=attack-missed/action-skipped({actor,status,message})。
+  バッジは既存status-inflicted/expired+STATUS_DISPLAY_NAMES(眩惑/竦み)で拾える。
+  ViewBattleのplayer/enemy.statusesにdazzle/dreadが載る(毒バッジと同一形状)。
+  resistancesはViewに未搭載(耐性の暗示表示は任意=必要ならView拡張)
+  (2)灯明の解除はitem-used+status-cured(status付き)。どうぐ一覧はisBattleUsableで自然列挙
+  (3)**test:e2e:fullで要再検証の挙動変化2点**: 戦闘どうぐが実際に消費されるようになった/
+  眩惑・竦みが蝋燭喰らい・軋み人形戦で実戦投入(空装備の通しプレイで約25%空振り・
+  約30%行動不能を踏む。決着ターンのずれの可能性)
