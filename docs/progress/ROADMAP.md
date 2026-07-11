@@ -429,13 +429,16 @@ JOURNALへ「仕様変更提案」として記録する)。
       (npc_absenceはpriest/informant/warden除外+同時1人=宿・店の同時全滅なし、
       market_shiftは売値≤実効買値クランプ拡張=買い戻し増殖防止、
       dream_erosionは0-3累積クランプ・演出のみ。JOURNAL[67])
-- [ ] M20-2: shared/serverの実装(worldEventSchemaへ3kind追加=旧セーブ互換・
+- [x] M20-2: shared/serverの実装(worldEventSchemaへ3kind追加=旧セーブ互換・
       MarketShiftMode/AbsentNpcId列挙・world状態3フィールド(optional+default)・
       advanceDayのリセット群拡張(marketShift/absentNpc。dreamErosionは持続)・
       買値/売値クランプの市場倍率対応・validateDreamEventsの解決規則・
       applyDreamEvents適用・不在NPCのinteract遮断・モック+悪意応答)
       +攻撃リグレッション+ユニットテスト(subagent)。
       game-design.md「セーブ/ロード」保存内容列挙への3フィールド追記を含む
+      (shop関数はoptional第3引数=null時従来完全同値・売値≤実効買値クランプ・
+      夢モックは番兵recentPlay方式で既定不変・攻撃ID4種登録・テスト29件=unit 879。
+      JOURNAL[68])
 - [ ] M20-3: クライアント演出(市場の変化の店頭表示・NPC不在の表示・侵食度の
       画面tint演出。UI=オーケストレーター)+E2Eスモーク。
       完了時にBACKLOG側へチェック+M20ゲート(test:e2e:full)

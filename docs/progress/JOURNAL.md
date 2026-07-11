@@ -2022,3 +2022,47 @@
   applyDreamEventsへ3ケース・不在NPCのinteract遮断(「今日は姿が見えない」定型)・
   deliver受取NPC不在時は納品持ち越し・モック+悪意応答4種・
   game-design.md「セーブ/ロード」保存内容列挙へ3フィールド追記(骨子の積み残し)
+
+## [68] 2026-07-11 M20-2: 夢の世界変化3kindのshared/server実装(subagent委譲=Opus)
+
+- やったこと(実装=subagent、検収・コミット=オーケストレーター):
+  - shared: world-event.tsへMarketShiftMode(scarcity/surplus)・AbsentNpcId
+    (innkeeper/merchant/caretaker/artisan=priest/informant/warden不含)・
+    dreamErosionのクランプ(0-3)を既存パターンで新設。worldEventSchemaへ
+    3ブランチ追加(既存4kind不変)。worldStateSchemaへ3フィールド
+    (optional+default=旧セーブ後方互換・VERSION据え置き)。advanceDayは
+    marketShift/absentNpcをリセット・dreamErosionは持続
+  - shop.ts: 既存関数へoptional第3引数(marketShift)を追加=**null時は短絡して
+    従来完全同値**(既存テスト・E2E不変をテストで担保)。合成順序=好感度割引→
+    市場倍率→max(1,floor())。**売値≤market_shift適用後の実効買値クランプ**
+    (surplusでの買い戻しゴールド増殖を防止=既存不変条件の強化方向)
+  - server: validateDreamEvents=後勝ち2種+累積クランプ1種(一晩3件上限は
+    全kind合算で既存コードのまま有効)。applyDreamEvents 3ケース。
+    interactNpc最上流で不在NPC遮断(「〈名〉は、今日は姿が見えないようだ。」=
+    会話・店・宿・deliver納品を一括遮断、納品は持ち越し)。店の表示と請求は
+    同一計算(shopStockEntries/shopBuy/shopSellへ同じmarketShiftを配線)
+  - MockDreamMaster: 夢フローに自然な選択機構が無いため recentPlay 番兵方式
+    (MOCK_DREAM_EVENTS_SENTINEL。既定=narrate+weather:fogのまま不変)。
+    悪意応答へ新kind4種(priest失踪/enum外mode/レンジ外delta/一晩4件目)。
+    旧素材OVERLONG_RUMORは削除だが120字超却下の検証自体は
+    ai-tool-validation.test.tsに存置(検収で確認=防御網不変)
+  - テスト29件追加=unit 879。攻撃ID4種をmanifest登録
+    (ATK-world-{npc-absence-whitelist,market-shift-enum,erosion-range,event-newkind-fourth})
+- 検証: pnpm check 緑(unit 879)・pnpm test:e2e 15/15緑(subagent実行+
+  オーケストレーター再実行の二重確認。subagent側の初回でquest-typesが1回
+  timing flakeしたが単独・全体再実行とも緑。再発時はE2E安定化を検討)。
+  ガードレールは追加のみ
+- 次にやること: M20-3(クライアント演出。**UI=オーケストレーター自身**)+
+  E2E+M20ゲート(test:e2e:full)。subagentの申し送り:
+  (1)SnapshotViewへ world の marketShift/absentNpc/dreamErosion を最小追加
+  (現状viewは世界状態を露出していない)→不在NPCのスプライト非表示・
+  侵食度tint(既存tileTint重ね掛け)に使う
+  (2)**売値表示の乖離**: クライアントはmerchantAffinityからadjustedSellPriceを
+  再計算しており、surplus時にサーバーと乖離しうる→shop interactionへ
+  marketShiftを載せ第3引数を渡す(現データでは実害なしだが同一計算の原則)
+  (3)市場の買値表示はstock[].buyPriceに反映済=クライアント変更不要
+  (4)E2Eは番兵をrecentPlayへ注入する配線が必要(buildRecentPlayへのデバッグ
+  フック等。M19のtopic番兵に相当する仕掛け)。宿泊→翌朝の店価格変化 or
+  不在表示を観測
+  (5)live追従(防御外): prompt.tsの夢シーン候補に新kind未提示=提案させるには
+  候補追加が別途必要(M20-3内で小タスクとしてsubagent委譲可)
