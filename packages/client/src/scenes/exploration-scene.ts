@@ -32,6 +32,7 @@ import { DialogBox } from "../ui/dialog-box.js";
 import { DreamOverlay } from "../ui/dream-overlay.js";
 import { UI_FONT_FAMILY } from "../ui/font.js";
 import { InventoryOverlay } from "../ui/inventory-overlay.js";
+import { MapOverlay } from "../ui/map-overlay.js";
 import { QuestJournalOverlay } from "../ui/quest-journal-overlay.js";
 import { ShopOverlay } from "../ui/shop-overlay.js";
 
@@ -181,6 +182,9 @@ export class ExplorationScene extends Phaser.Scene {
   /** クエストジャーナル(Qで開閉) */
   private questJournal: QuestJournalOverlay | null = null;
 
+  /** 全体マップ「夢の地図」(M で開閉。閲覧のみ。M22-3) */
+  private mapOverlay: MapOverlay | null = null;
+
   /** サブクエスト放棄の確認ダイアログ(表示中は移動・調べるをブロック。M19-4) */
   private questConfirm: ConfirmDialog | null = null;
 
@@ -260,6 +264,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.dreamOverlay = null;
     this.pendingDream = null;
     this.questJournal = null;
+    this.mapOverlay = null;
     this.questConfirm = null;
     this.companionLight = null;
     this.npcViews.clear();
@@ -363,8 +368,8 @@ export class ExplorationScene extends Phaser.Scene {
             this.conversationOverlay.showMessage(next.body);
           }
         }
-      } else if (this.dreamOverlay !== null || this.questJournal !== null) {
-        // 夢・ジャーナル中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
+      } else if (this.dreamOverlay !== null || this.questJournal !== null || this.mapOverlay !== null) {
+        // 夢・ジャーナル・地図中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
       } else if (!this.dialog.isOpen && this.innConfirm === null && this.questConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
@@ -393,7 +398,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.conversationOverlay === null &&
       this.shopOverlay === null &&
       this.inventoryOverlay === null &&
-      this.questJournal === null
+      this.questJournal === null &&
+      this.mapOverlay === null
     ) {
       const text = this.pendingDream;
       this.pendingDream = null;
@@ -420,7 +426,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.inventoryOverlay !== null ||
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
-      this.questJournal !== null
+      this.questJournal !== null ||
+      this.mapOverlay !== null
     ) {
       // ダイアログ・オーバーレイ中に押した移動キーが、閉じた直後の「幽霊移動」に
       // ならないよう破棄する
@@ -646,7 +653,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.inventoryOverlay !== null ||
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
-      this.questJournal !== null
+      this.questJournal !== null ||
+      this.mapOverlay !== null
     ) {
       return;
     }
@@ -668,6 +676,41 @@ export class ExplorationScene extends Phaser.Scene {
     }
     this.questJournal.destroy();
     this.questJournal = null;
+    this.syncDomState(); // data-menu=none を反映
+  }
+
+  /**
+   * 全体マップ「夢の地図」を開く(M。M22-3)。他のオーバーレイ・ダイアログ・会話・
+   * 確認の最中は開かない(クエストジャーナルと同じガード)。閲覧のみで操作キーは持たない。
+   */
+  private openMapOverlay(): void {
+    if (
+      this.transitioning ||
+      this.moving ||
+      this.awaiting ||
+      this.dialog.isOpen ||
+      this.innConfirm !== null ||
+      this.pendingInn !== null ||
+      this.questConfirm !== null ||
+      this.shopOverlay !== null ||
+      this.inventoryOverlay !== null ||
+      this.conversationOverlay !== null ||
+      this.dreamOverlay !== null ||
+      this.questJournal !== null ||
+      this.mapOverlay !== null
+    ) {
+      return;
+    }
+    this.mapOverlay = new MapOverlay(this, this.uiLayer, { snapshot: this.snapshot });
+    this.syncDomState(); // data-menu=map を反映(E2E が開閉を観測する。M22-3)
+  }
+
+  private closeMapOverlay(): void {
+    if (this.mapOverlay === null) {
+      return;
+    }
+    this.mapOverlay.destroy();
+    this.mapOverlay = null;
     this.syncDomState(); // data-menu=none を反映
   }
 
@@ -771,6 +814,11 @@ export class ExplorationScene extends Phaser.Scene {
     // クエストジャーナルは Esc で閉じる
     if (this.questJournal !== null) {
       this.closeQuestJournal();
+      return;
+    }
+    // 夢の地図も Esc で閉じる(M22-3)
+    if (this.mapOverlay !== null) {
+      this.closeMapOverlay();
       return;
     }
     // 夢はスペースで目覚める(Esc は無視する)
@@ -1305,7 +1353,7 @@ export class ExplorationScene extends Phaser.Scene {
     });
     this.uiLayer.add(this.hudStatusText);
     this.keyHintText = this.add
-      .text(0, 0, "スペース: 調べる ・ Esc: もちもの ・ Q: クエスト", {
+      .text(0, 0, "スペース: 調べる ・ Esc: もちもの ・ Q: クエスト ・ M: 地図", {
         color: "#a9b0ba",
         fontFamily: UI_FONT_FAMILY,
         fontSize: "13px",
@@ -1369,6 +1417,14 @@ export class ExplorationScene extends Phaser.Scene {
         this.openQuestJournal();
       }
     });
+    // M: 全体マップ「夢の地図」の開閉(訪問済みマップの接続グラフ。M22-3)
+    keyboard.on("keydown-M", () => {
+      if (this.mapOverlay !== null) {
+        this.closeMapOverlay();
+      } else {
+        this.openMapOverlay();
+      }
+    });
 
     // ポーリング(長押し)に加えてkeydownでも1歩を予約する。
     // 短いタップがフレーム間に落ちてisDownで拾えなくても確実に1歩動く
@@ -1416,7 +1472,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.inventoryOverlay !== null ||
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
-      this.questJournal !== null
+      this.questJournal !== null ||
+      this.mapOverlay !== null
     ) {
       // 各オーバーレイ側(MenuList・夢の目覚まし)が入力を処理する
       return;
@@ -1483,13 +1540,18 @@ export class ExplorationScene extends Phaser.Scene {
     // E2E 用: 地の文/NPC ダイアログの開閉(dialog-only 応答は snapshot を伴わないため
     // これで開閉を観測して移動可否の回帰を決定論的にテストする)
     game.dataset["dialog"] = this.dialog.isOpen ? "open" : "closed";
-    // E2E 用: もちもの/ジャーナルの開閉(装備・クエストスモークがメニュー操作の同期点に使う。M8-4/M19-4)
+    // E2E 用: もちもの/ジャーナル/地図の開閉(装備・クエスト・地図スモークがメニュー操作の同期点に使う。
+    // M8-4/M19-4/M22-3)
     game.dataset["menu"] =
       this.inventoryOverlay !== null
         ? "inventory"
         : this.questJournal !== null
           ? "journal"
-          : "none";
+          : this.mapOverlay !== null
+            ? "map"
+            : "none";
+    // E2E 用: 訪問済みマップ数(「夢の地図」の観測点。新マップ到達で増える。M22-3)
+    game.dataset["visitedCount"] = String(view.visitedMaps.length);
     delete game.dataset["battleEnemy"];
   }
 }
