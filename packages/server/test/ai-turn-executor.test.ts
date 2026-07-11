@@ -36,6 +36,7 @@ function persistentBase(overrides: Partial<PersistentStateContext> = {}): Persis
     inventory: emptyInventory(),
     subQuests: [],
     dungeonSymbolCounts: initialDungeonSymbolCounts(),
+    dreamErosion: 0,
     nextQuestId: "q1",
     ...overrides
   };

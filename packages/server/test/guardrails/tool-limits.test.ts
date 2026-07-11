@@ -68,6 +68,7 @@ function persistentBase(overrides: Partial<PersistentStateContext> = {}): Persis
     inventory: emptyInventory(),
     subQuests: [],
     dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 },
+    dreamErosion: 0,
     nextQuestId: "q1",
     ...overrides
   };
@@ -434,11 +435,79 @@ describe("攻撃テストA: 世界イベントの上限(第1層)", () => {
         { kind: "street_event", eventId: "black-cat" },
         { kind: "street_event", eventId: "distant-bell" }
       ],
-      { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 } }
+      { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }, dreamErosion: 0 }
     );
     expect(r.rejected).toHaveLength(1);
     expect(r.rejected[0]?.index).toBe(3);
     expect(r.effect.events).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M20: 夢の世界変化 新kind(market_shift/npc_absence/dream_erosion)の却下
+// ai-guardrails.md 272-279。追加方向のみ(既存の一晩3件上限が全kind合算で不変)。
+// ---------------------------------------------------------------------------
+
+describe("攻撃テストA: 夢の世界変化 新kindの却下(第1層。M20)", () => {
+  const DREAM_CTX = { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }, dreamErosion: 0 } as const;
+
+  it("[ATK-world-npc-absence-whitelist] npc_absence: 進行役 priest・窓口 informant・番人 warden・存在しない npcId は却下", () => {
+    // ホワイトリスト外の3名(必須除外)をまとめて却下(承認0件)
+    const excluded = validateDreamEvents(
+      [
+        { kind: "npc_absence", npcId: "priest" },
+        { kind: "npc_absence", npcId: "informant" },
+        { kind: "npc_absence", npcId: "warden" }
+      ],
+      DREAM_CTX
+    );
+    expect(excluded.effect.events).toHaveLength(0);
+    expect(excluded.rejected).toHaveLength(3);
+    // 存在しない npcId も却下
+    const bogus = validateDreamEvents([{ kind: "npc_absence", npcId: "dragon" }], DREAM_CTX);
+    expect(bogus.effect.events).toHaveLength(0);
+    expect(bogus.rejected).toHaveLength(1);
+  });
+
+  it("[ATK-world-market-shift-enum] market_shift: enum 外 mode(未定義の倍率名・自由数値)は却下", () => {
+    const r = validateDreamEvents(
+      [
+        { kind: "market_shift", mode: "windfall" }, // 未定義の倍率名
+        { kind: "market_shift", mode: 2 } // 自由数値
+      ],
+      DREAM_CTX
+    );
+    expect(r.effect.events.filter((e) => e.kind === "market_shift")).toHaveLength(0);
+    expect(r.rejected).toHaveLength(2);
+  });
+
+  it("[ATK-world-erosion-range] dream_erosion: レンジ外 delta(-2/+2 等、-1|0|1 以外)は却下し侵食度を動かさない", () => {
+    const r = validateDreamEvents(
+      [
+        { kind: "dream_erosion", delta: 2 },
+        { kind: "dream_erosion", delta: -2 }
+      ],
+      { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }, dreamErosion: 1 }
+    );
+    expect(r.rejected).toHaveLength(2);
+    expect(r.effect.dreamErosion).toBe(1); // 起点のまま(却下されたので累積しない)
+  });
+
+  it("[ATK-world-event-newkind-fourth] 新kindを含む一晩4件目は上限超過で却下(全kind合算で3件上限が不変)", () => {
+    const r = validateDreamEvents(
+      [
+        { kind: "market_shift", mode: "surplus" },
+        { kind: "npc_absence", npcId: "merchant" },
+        { kind: "dream_erosion", delta: 1 },
+        { kind: "dream_erosion", delta: 1 } // 4件目=上限超過
+      ],
+      DREAM_CTX
+    );
+    expect(r.rejected).toHaveLength(1);
+    expect(r.rejected[0]?.index).toBe(3);
+    // 先頭3件は適用(market_shift+npc_absence が events、dream_erosion は +1 まで)
+    expect(r.effect.events).toHaveLength(2);
+    expect(r.effect.dreamErosion).toBe(1); // 4件目の +1 は却下されるため 2 にはならない
   });
 });
 

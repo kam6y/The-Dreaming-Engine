@@ -68,6 +68,9 @@ export function validateToolCall(
       });
     }
     case "trigger_world_event":
-      return validateWorldEvent(rawInput, { dungeonSymbolCounts: persistent.dungeonSymbolCounts });
+      return validateWorldEvent(rawInput, {
+        dungeonSymbolCounts: persistent.dungeonSymbolCounts,
+        dreamErosion: persistent.dreamErosion
+      });
   }
 }

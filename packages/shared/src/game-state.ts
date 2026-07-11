@@ -2,8 +2,12 @@ import { z } from "zod";
 
 import { streetEventIdSchema } from "./ai/street-event.js";
 import {
+  absentNpcIdSchema,
   dungeonSymbolCountsSchema,
+  DREAM_EROSION_MAX,
+  DREAM_EROSION_MIN,
   initialDungeonSymbolCounts,
+  marketShiftModeSchema,
   weatherSchema
 } from "./ai/world-event.js";
 import { playerProgressSchema, statsForLevel } from "./combat/index.js";
@@ -95,7 +99,14 @@ export const worldStateSchema = z.object({
   /** 当日有効な街頭演出(複数可・同一 ID は重複しない)。日送りでクリア */
   activeStreetEvents: z.array(streetEventIdSchema).default([]),
   /** 各ダンジョン層の敵シンボル数(dungeon_shift 累積適用後の現在値。日送りでは持続) */
-  dungeonSymbolCounts: dungeonSymbolCountsSchema.default(initialDungeonSymbolCounts)
+  dungeonSymbolCounts: dungeonSymbolCountsSchema.default(initialDungeonSymbolCounts),
+  // --- M20 追加(旧セーブは未保持=default で補完。GAME_STATE_VERSION 据え置き) ---
+  /** market_shift の当日倍率(店の買値へ作用)。null=変化なし。日送りでリセット(翌日限り・後勝ち) */
+  marketShift: marketShiftModeSchema.nullable().default(null),
+  /** npc_absence の当日不在NPC(1人まで)。null=全員在席。日送りでリセット(翌日限り・後勝ち) */
+  absentNpc: absentNpcIdSchema.nullable().default(null),
+  /** dream_erosion の侵食度(0-3。dream_erosion 累積適用後の現在値。日送りでは持続=演出のみ) */
+  dreamErosion: z.number().int().min(DREAM_EROSION_MIN).max(DREAM_EROSION_MAX).default(0)
 });
 export type WorldState = z.infer<typeof worldStateSchema>;
 
@@ -104,7 +115,10 @@ export function createDefaultWorldState(): WorldState {
   return {
     weather: "clear",
     activeStreetEvents: [],
-    dungeonSymbolCounts: initialDungeonSymbolCounts()
+    dungeonSymbolCounts: initialDungeonSymbolCounts(),
+    marketShift: null,
+    absentNpc: null,
+    dreamErosion: 0
   };
 }
 
@@ -233,7 +247,8 @@ export function createNewGameState(): GameState {
  * - AI 日次カウンタのリセット(game-design.md「ゲーム内時間」)
  * - 「今日の話題」を NPC 別デフォルトへリセット(ai-integration.md「会話セッション管理」)
  * - 当日有効な street_event のクリア(「当日有効」のため翌日へ持ち越さない)
- * 天候・各層敵シンボル数・好感度・会話記憶は持続する。
+ * - market_shift(marketShift)・npc_absence(absentNpc)のリセット(翌日限りのため。M20)
+ * 天候・各層敵シンボル数・侵食度(dreamErosion)・好感度・会話記憶は持続する。
  */
 export function advanceDay(state: GameState): GameState {
   return {
@@ -249,7 +264,8 @@ export function advanceDay(state: GameState): GameState {
       artisan: { ...state.npcs.artisan, topic: DEFAULT_NPC_TOPICS.artisan },
       warden: { ...state.npcs.warden, topic: DEFAULT_NPC_TOPICS.warden }
     },
-    world: { ...state.world, activeStreetEvents: [] }
+    // marketShift/absentNpc は翌日限りゆえ null へ戻す。dreamErosion は持続(spread で保持)
+    world: { ...state.world, activeStreetEvents: [], marketShift: null, absentNpc: null }
   };
 }
 

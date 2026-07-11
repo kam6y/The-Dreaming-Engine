@@ -86,7 +86,7 @@ const proposeBase: ProposeQuestContext = {
   questId: "quest-1"
 };
 
-const dreamBase: DreamEventsContext = { dungeonSymbolCounts: DUNGEON_MID };
+const dreamBase: DreamEventsContext = { dungeonSymbolCounts: DUNGEON_MID, dreamErosion: 0 };
 
 const validHuntInput = {
   type: "hunt",
@@ -358,10 +358,10 @@ describe("validateWorldEvent(単一)", () => {
   });
 
   it("dungeon_shift は起点+delta をクランプした適用後カウントを返す", () => {
-    const r = validateWorldEvent({ event: { kind: "dungeon_shift", layer: 1, symbolCountDelta: 1 } }, { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 } });
+    const r = validateWorldEvent({ event: { kind: "dungeon_shift", layer: 1, symbolCountDelta: 1 } }, { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }, dreamErosion: 0 });
     expect(effectOf(r).dungeonSymbolCount).toEqual({ layer: 1, count: 5 });
     // 上限6での+1はクランプ
-    const clamped = validateWorldEvent({ event: { kind: "dungeon_shift", layer: 1, symbolCountDelta: 1 } }, { dungeonSymbolCounts: { 1: 6, 2: 4, 3: 4 } });
+    const clamped = validateWorldEvent({ event: { kind: "dungeon_shift", layer: 1, symbolCountDelta: 1 } }, { dungeonSymbolCounts: { 1: 6, 2: 4, 3: 4 }, dreamErosion: 0 });
     expect(effectOf(clamped).dungeonSymbolCount).toEqual({ layer: 1, count: 6 });
   });
 
@@ -431,7 +431,7 @@ describe("validateDreamEvents(解決規則)", () => {
         { kind: "dungeon_shift", layer: 1, symbolCountDelta: 1 },
         { kind: "dungeon_shift", layer: 1, symbolCountDelta: 1 }
       ],
-      { dungeonSymbolCounts: { 1: 5, 2: 4, 3: 4 } }
+      { dungeonSymbolCounts: { 1: 5, 2: 4, 3: 4 }, dreamErosion: 0 }
     );
     // 5→6→6(上限6でクランプ)
     expect(r.effect.dungeonSymbolCounts[1]).toBe(6);
@@ -446,7 +446,7 @@ describe("validateDreamEvents(解決規則)", () => {
         { kind: "dungeon_shift", layer: 2, symbolCountDelta: -1 },
         { kind: "dungeon_shift", layer: 2, symbolCountDelta: -1 }
       ],
-      { dungeonSymbolCounts: { 1: 4, 2: 3, 3: 4 } }
+      { dungeonSymbolCounts: { 1: 4, 2: 3, 3: 4 }, dreamErosion: 0 }
     );
     // 3→2→2→2(下限2でクランプ)
     expect(r.effect.dungeonSymbolCounts[2]).toBe(2);
@@ -474,7 +474,7 @@ describe("validateDreamEvents(解決規則)", () => {
         { kind: "npc_rumor", npcId: "priest", rumor: "灯が揺れている。" },
         { kind: "dungeon_shift", layer: 3, symbolCountDelta: 1 }
       ],
-      { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 } }
+      { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }, dreamErosion: 0 }
     );
     expect(r.effect.events.filter((e) => e.kind === "weather")).toHaveLength(1);
     expect(r.effect.events.filter((e) => e.kind === "npc_rumor")).toHaveLength(1);
@@ -495,6 +495,84 @@ describe("validateDreamEvents(解決規則)", () => {
     );
     expect(r.effect.events.filter((e) => e.kind === "weather")).toHaveLength(1);
     expect(r.rejected[0]?.index).toBe(1);
+  });
+
+  // --- M20: market_shift / npc_absence / dream_erosion の解決規則 ---
+
+  it("market_shift は後勝ち(最後の1件のみ有効)", () => {
+    const r = validateDreamEvents(
+      [
+        { kind: "market_shift", mode: "scarcity" },
+        { kind: "market_shift", mode: "surplus" }
+      ],
+      dreamBase
+    );
+    const shifts = r.effect.events.filter(
+      (e): e is Extract<WorldEvent, { kind: "market_shift" }> => e.kind === "market_shift"
+    );
+    expect(shifts).toHaveLength(1);
+    expect(shifts[0]?.mode).toBe("surplus"); // 後勝ち
+    expect(r.rejected).toHaveLength(0);
+  });
+
+  it("npc_absence は後勝ち(同時1人。最後の1件のみ有効)", () => {
+    const r = validateDreamEvents(
+      [
+        { kind: "npc_absence", npcId: "merchant" },
+        { kind: "npc_absence", npcId: "innkeeper" }
+      ],
+      dreamBase
+    );
+    const abs = r.effect.events.filter(
+      (e): e is Extract<WorldEvent, { kind: "npc_absence" }> => e.kind === "npc_absence"
+    );
+    expect(abs).toHaveLength(1);
+    expect(abs[0]?.npcId).toBe("innkeeper"); // 後勝ち
+  });
+
+  it("dream_erosion は承認順に累積適用し 0-3 へ絶対クランプする(events には載せない)", () => {
+    // 起点2 から +1 +1 +1 → 3 でクランプ(何件重ねてもレンジ外に出ない)
+    const up = validateDreamEvents(
+      [
+        { kind: "dream_erosion", delta: 1 },
+        { kind: "dream_erosion", delta: 1 },
+        { kind: "dream_erosion", delta: 1 }
+      ],
+      { dungeonSymbolCounts: DUNGEON_MID, dreamErosion: 2 }
+    );
+    expect(up.effect.dreamErosion).toBe(3);
+    expect(up.effect.events).toHaveLength(0); // 累積系は非累積イベント一覧に載せない
+
+    // 起点1 から -1 -1 -1 → 0 で下限クランプ
+    const down = validateDreamEvents(
+      [
+        { kind: "dream_erosion", delta: -1 },
+        { kind: "dream_erosion", delta: -1 },
+        { kind: "dream_erosion", delta: -1 }
+      ],
+      { dungeonSymbolCounts: DUNGEON_MID, dreamErosion: 1 }
+    );
+    expect(down.effect.dreamErosion).toBe(0);
+  });
+
+  it("一晩3件上限は新kindを含む全kind合算で不変(4件目は却下)", () => {
+    const r = validateDreamEvents(
+      [
+        { kind: "market_shift", mode: "surplus" },
+        { kind: "npc_absence", npcId: "artisan" },
+        { kind: "dream_erosion", delta: 1 },
+        { kind: "weather", value: "fog" } // 4件目=上限超過
+      ],
+      { dungeonSymbolCounts: DUNGEON_MID, dreamErosion: 0 }
+    );
+    expect(r.rejected).toHaveLength(1);
+    expect(r.rejected[0]?.index).toBe(3);
+    // 先頭3件は適用: market_shift + npc_absence が events に、dream_erosion は絶対値に
+    expect(r.effect.events.filter((e) => e.kind === "market_shift")).toHaveLength(1);
+    expect(r.effect.events.filter((e) => e.kind === "npc_absence")).toHaveLength(1);
+    expect(r.effect.dreamErosion).toBe(1);
+    // 4件目の weather は落ちる
+    expect(r.effect.events.filter((e) => e.kind === "weather")).toHaveLength(0);
   });
 });
 
@@ -517,6 +595,7 @@ function fullContext(overrides: {
       inventory: emptyInventory(),
       subQuests: [],
       dungeonSymbolCounts: DUNGEON_MID,
+      dreamErosion: 0,
       nextQuestId: "quest-1",
       ...overrides.persistent
     }

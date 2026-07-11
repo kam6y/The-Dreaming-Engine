@@ -1,4 +1,5 @@
 import {
+  clampDreamErosion,
   clampDungeonSymbolCount,
   NPC_RUMOR_MAX_LENGTH,
   worldEventSchema,
@@ -26,11 +27,14 @@ import {
  * 単一の {event} を検証する validateWorldEvent と、1回の夢シーンで最大3件のリストへ
  * 解決規則を適用する validateDreamEvents を提供する。
  *
- * 解決規則(ai-integration.md 213-216):
+ * 解決規則(ai-integration.md 213-216・「6b」M20):
  * - weather        : 後勝ち(最後に承認された1件のみ有効)
  * - npc_rumor      : 同一NPCは後勝ち・別NPCは併存
  * - street_event   : 同一 eventId の2件目以降は却下・異なる id は併存
  * - dungeon_shift  : 承認順に累積適用(各層レンジへ絶対クランプ)
+ * - market_shift   : 後勝ち(1件のみ有効。events へ載せ ai-effects が world.marketShift へ反映)
+ * - npc_absence    : 後勝ち(同時1人。events へ載せ ai-effects が world.absentNpc へ反映)
+ * - dream_erosion  : 承認順に累積適用(0-3 へ絶対クランプ。effect.dreamErosion へ反映)
  */
 
 /** 単一ツール入力 { event: WorldEvent } のスキーマ */
@@ -97,11 +101,17 @@ export function validateWorldEvent(
 export function validateDreamEvents(rawEvents: unknown, ctx: DreamEventsContext): DreamEventsResult {
   const rejected: RejectedEvent[] = [];
   const running: DungeonSymbolCounts = { ...ctx.dungeonSymbolCounts };
+  let erosion = clampDreamErosion(ctx.dreamErosion); // dream_erosion 累積適用の起点
 
   if (!Array.isArray(rawEvents)) {
     rejected.push({ index: -1, reason: "trigger_world_event: events が配列でない" });
     return {
-      effect: { kind: "dream_world_events", events: [], dungeonSymbolCounts: running },
+      effect: {
+        kind: "dream_world_events",
+        events: [],
+        dungeonSymbolCounts: running,
+        dreamErosion: erosion
+      },
       rejected
     };
   }
@@ -110,6 +120,8 @@ export function validateDreamEvents(rawEvents: unknown, ctx: DreamEventsContext)
   let weather: WorldEvent | null = null;
   const rumorByNpc = new Map<NpcId, WorldEvent>();
   const streetByEventId = new Map<StreetEventId, WorldEvent>();
+  let marketShift: WorldEvent | null = null; // 後勝ち(M20)
+  let npcAbsence: WorldEvent | null = null; // 後勝ち・同時1人(M20)
 
   rawEvents.forEach((raw, index) => {
     if (index >= DREAM_EVENTS_MAX) {
@@ -145,6 +157,15 @@ export function validateDreamEvents(rawEvents: unknown, ctx: DreamEventsContext)
       case "dungeon_shift":
         running[event.layer] = applyDungeonShift(running, event); // 承認順に累積適用
         return;
+      case "market_shift":
+        marketShift = event; // 後勝ち
+        return;
+      case "npc_absence":
+        npcAbsence = event; // 後勝ち(同時1人)
+        return;
+      case "dream_erosion":
+        erosion = clampDreamErosion(erosion + event.delta); // 承認順に累積適用(0-3 クランプ)
+        return;
     }
   });
 
@@ -152,9 +173,16 @@ export function validateDreamEvents(rawEvents: unknown, ctx: DreamEventsContext)
   if (weather !== null) events.push(weather);
   for (const rumor of rumorByNpc.values()) events.push(rumor);
   for (const street of streetByEventId.values()) events.push(street);
+  if (marketShift !== null) events.push(marketShift);
+  if (npcAbsence !== null) events.push(npcAbsence);
 
   return {
-    effect: { kind: "dream_world_events", events, dungeonSymbolCounts: running },
+    effect: {
+      kind: "dream_world_events",
+      events,
+      dungeonSymbolCounts: running,
+      dreamErosion: erosion
+    },
     rejected
   };
 }

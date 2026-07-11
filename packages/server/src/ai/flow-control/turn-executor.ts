@@ -449,7 +449,8 @@ export class AiTurnExecutor {
 
     // 世界変化をバッチ検証(最大3件・後勝ち/累積などの解決規則)
     const dreamEvents = validateDreamEvents(rawEvents, {
-      dungeonSymbolCounts: input.persistent.dungeonSymbolCounts
+      dungeonSymbolCounts: input.persistent.dungeonSymbolCounts,
+      dreamErosion: input.persistent.dreamErosion
     });
     for (const call of worldEventCalls) {
       const rej = dreamEvents.rejected.find((r) => r.index === call.eventIndex);
@@ -629,6 +630,7 @@ export class AiTurnExecutor {
         inventory: input.persistent.inventory,
         subQuests: input.persistent.subQuests,
         dungeonSymbolCounts: input.persistent.dungeonSymbolCounts,
+        dreamErosion: input.persistent.dreamErosion,
         nextQuestId: input.persistent.nextQuestId
       }
     };

@@ -109,7 +109,8 @@ describe("applyStateChangeEffect: dream_world_events", () => {
         { kind: "street_event", eventId: "black-cat" },
         { kind: "npc_rumor", npcId: "informant", rumor: "忘れ野の霧が濃くなったという噂" }
       ],
-      dungeonSymbolCounts: { 1: 5, 2: 4, 3: 3 }
+      dungeonSymbolCounts: { 1: 5, 2: 4, 3: 3 },
+      dreamErosion: 0
     };
     const next = applyStateChangeEffect(base, effect);
     expect(next.world.weather).toBe("fog");
@@ -124,9 +125,44 @@ describe("applyStateChangeEffect: dream_world_events", () => {
     const effect: DreamEventsEffect = {
       kind: "dream_world_events",
       events: [{ kind: "street_event", eventId: "black-cat" }],
-      dungeonSymbolCounts: base.world.dungeonSymbolCounts
+      dungeonSymbolCounts: base.world.dungeonSymbolCounts,
+      dreamErosion: base.world.dreamErosion
     };
     const next = applyStateChangeEffect(base, effect);
     expect(next.world.activeStreetEvents).toEqual(["black-cat"]);
+  });
+
+  it("M20: market_shift→world.marketShift / npc_absence→world.absentNpc / dream_erosion→world.dreamErosion", () => {
+    const base = createNewGameState();
+    const effect: DreamEventsEffect = {
+      kind: "dream_world_events",
+      events: [
+        { kind: "market_shift", mode: "surplus" },
+        { kind: "npc_absence", npcId: "merchant" }
+      ],
+      dungeonSymbolCounts: base.world.dungeonSymbolCounts,
+      dreamErosion: 2 // 累積適用後の絶対値
+    };
+    const next = applyStateChangeEffect(base, effect);
+    expect(next.world.marketShift).toBe("surplus");
+    expect(next.world.absentNpc).toBe("merchant");
+    expect(next.world.dreamErosion).toBe(2);
+    // 既存フィールドは保持(weather 等は初期のまま)
+    expect(next.world.weather).toBe(base.world.weather);
+  });
+
+  it("M20: 新kindを含まない effect は marketShift/absentNpc を起点(null)のまま据え置く", () => {
+    const base = createNewGameState();
+    const effect: DreamEventsEffect = {
+      kind: "dream_world_events",
+      events: [{ kind: "weather", value: "rain" }],
+      dungeonSymbolCounts: base.world.dungeonSymbolCounts,
+      dreamErosion: base.world.dreamErosion
+    };
+    const next = applyStateChangeEffect(base, effect);
+    expect(next.world.marketShift).toBeNull();
+    expect(next.world.absentNpc).toBeNull();
+    expect(next.world.dreamErosion).toBe(0);
+    expect(next.world.weather).toBe("rain");
   });
 });

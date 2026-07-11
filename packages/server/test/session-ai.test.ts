@@ -594,7 +594,7 @@ describe("セーブ往復とマスク", () => {
       recentExchanges: [{ player: "この街のことを教えて", npc: "「灯は揺れている」" }]
     };
     state.subQuests = [activeHunt("pq-3", 2)];
-    state.world = { weather: "fog", activeStreetEvents: ["black-cat"], dungeonSymbolCounts: { 1: 5, 2: 4, 3: 3 } };
+    state.world = { weather: "fog", activeStreetEvents: ["black-cat"], dungeonSymbolCounts: { 1: 5, 2: 4, 3: 3 }, marketShift: null, absentNpc: null, dreamErosion: 0 };
     state.narratedEnemies = ["mist-wolf", "candle-eater"];
     state.aiDaily = {
       giveItemCount: 2,
@@ -1124,6 +1124,38 @@ describe("deliver: 受取NPC への納品(決定論)", () => {
     expect(st.subQuests[0]?.status).toBe("active"); // 納品されない
     expect(countQuestItem(st.inventory, "sealed-letter")).toBe(1); // 預かり品は手元のまま
     expect(mustView(session).interaction?.kind).toBe("shop"); // 通常どおり店は開く
+  });
+
+  it("M20: 受取NPC(オルガ)が不在(world.absentNpc)の日は納品されず持ち越し、翌日の復帰で納品される", async () => {
+    const { session, store } = makeAiSession();
+    store.loadResult = {
+      ok: true,
+      state: townState((s) => {
+        s.subQuests = [activeDeliver("pq-1", "innkeeper", "sealed-letter", 1)];
+        s.inventory = addItem(s.inventory, "sealed-letter", 1).inventory;
+        s.world.absentNpc = "innkeeper"; // 受取NPCが当日不在
+      })
+    };
+    await session.handle({ type: "continue" });
+
+    // 不在の日: 話しかけても納品されず(quest active・預かり品は手元)、宿も開かず、定型表示のみ
+    const blocked = await talkTo(session, "innkeeper");
+    const st1 = mustState(session);
+    expect(st1.subQuests[0]?.status).toBe("active");
+    expect(countQuestItem(st1.inventory, "sealed-letter")).toBe(1);
+    expect(mustView(session).interaction).toBeUndefined(); // 宿は開かない
+    const dialogs1 = blocked.filter(
+      (m): m is Extract<ServerMessage, { type: "dialog" }> => m.type === "dialog"
+    );
+    expect(dialogs1.some((d) => d.body.includes("姿が見えない"))).toBe(true);
+    expect(dialogs1.some((d) => d.body.includes("手渡した"))).toBe(false); // 納品の手渡しは起きない
+
+    // 翌日(absentNpc=null で復帰)→ 話しかけると納品される(持ち越しの遂行)
+    mustState(session).world.absentNpc = null;
+    await talkTo(session, "innkeeper");
+    const st2 = mustState(session);
+    expect(st2.subQuests[0]?.status).toBe("completed");
+    expect(countQuestItem(st2.inventory, "sealed-letter")).toBe(0);
   });
 });
 

@@ -66,7 +66,11 @@ describe("advanceDay(日送り)", () => {
       world: {
         weather: "fog",
         activeStreetEvents: ["peddler"],
-        dungeonSymbolCounts: { 1: 6, 2: 2, 3: 5 }
+        dungeonSymbolCounts: { 1: 6, 2: 2, 3: 5 },
+        // M20: market_shift / npc_absence は翌日限り(日送りでリセット)、dream_erosion は持続
+        marketShift: "scarcity",
+        absentNpc: "merchant",
+        dreamErosion: 2
       }
     };
   })();
@@ -86,6 +90,13 @@ describe("advanceDay(日送り)", () => {
     expect(next.npcs.innkeeper.affinity).toBe(80);
     expect(next.npcs.innkeeper.memory.summary).toBe("旅人と親しくなった");
     expect(next.npcs.innkeeper.memory.recentExchanges).toHaveLength(1);
+  });
+
+  it("M20: market_shift/npc_absence は日送りでリセット、dream_erosion(侵食度)は持続する", () => {
+    const next = advanceDay(modified);
+    expect(next.world.marketShift).toBeNull();
+    expect(next.world.absentNpc).toBeNull();
+    expect(next.world.dreamErosion).toBe(2);
   });
 });
 
@@ -132,6 +143,32 @@ describe("後方互換(M3 形式セーブの読み込み)", () => {
       expect(result.data.narratedEnemies).toEqual([]);
       expect(result.data.aiDaily).toEqual(createDefaultAiDailyCounters());
       expect(result.data.equipment).toEqual(createEmptyEquipment());
+    }
+  });
+
+  it("M20 前の world(marketShift/absentNpc/dreamErosion を持たない)を default 補完で読める", () => {
+    const full = createNewGameState();
+    // M20 直前形式: world は旧3フィールドのみ(GAME_STATE_VERSION は 1 のまま据え置き)
+    const legacySave = {
+      ...full,
+      world: {
+        weather: "fog",
+        activeStreetEvents: ["peddler"],
+        dungeonSymbolCounts: { 1: 5, 2: 3, 3: 6 }
+      }
+    };
+
+    const result = gameStateSchema.safeParse(legacySave);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.version).toBe(1);
+      // 旧フィールドは保持
+      expect(result.data.world.weather).toBe("fog");
+      expect(result.data.world.dungeonSymbolCounts).toEqual({ 1: 5, 2: 3, 3: 6 });
+      // M20 新フィールドは default 補完(非侵食・変化なし)
+      expect(result.data.world.marketShift).toBeNull();
+      expect(result.data.world.absentNpc).toBeNull();
+      expect(result.data.world.dreamErosion).toBe(0);
     }
   });
 });

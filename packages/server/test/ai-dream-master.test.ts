@@ -24,6 +24,7 @@ import {
   FLOW_DIVISION,
   FLOW_MODEL_TIER,
   FLOW_THINKING_DISABLED,
+  MOCK_DREAM_EVENTS_SENTINEL,
   MockDreamMaster,
   resolveFlowSpec,
   type DreamMasterContext,
@@ -40,6 +41,7 @@ import {
   validateGiveItem,
   validateNarrate,
   validateProposeQuest,
+  validateDreamEvents,
   validateSpeak,
   validateToolCall,
   validateWorldEvent,
@@ -97,6 +99,7 @@ function makeCtx(partnerNpcId: NpcId = "innkeeper"): ToolValidationContext {
       inventory: emptyInventory(),
       subQuests: [],
       dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 },
+      dreamErosion: 0,
       nextQuestId: "q-test"
     }
   };
@@ -302,7 +305,8 @@ describe("MockDreamMaster 通常モード", () => {
 
     const event = oneCallOf(result, "trigger_world_event");
     const eventResult = validateWorldEvent(event.rawInput, {
-      dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }
+      dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 },
+      dreamErosion: 0
     });
     expect(eventResult.ok).toBe(true);
     if (eventResult.ok && eventResult.effect.event.kind === "weather") {
@@ -310,6 +314,39 @@ describe("MockDreamMaster 通常モード", () => {
     } else {
       throw new Error("dream は weather イベントを含むべき");
     }
+  });
+
+  it("dream: 番兵マーカーが無い recentPlay では weather: fog のみ(M20 新kindを出さない=既存E2E不干渉)", async () => {
+    // dreamCtx(番兵無し)の世界変化は weather: fog ちょうど1件(既定挙動が不変であることの回帰)
+    const result = successOf(await dm.run(dreamCtx));
+    const events = callsOf(result, "trigger_world_event").map(
+      (c) => (c.rawInput as { event: { kind: string } }).event
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]?.kind).toBe("weather");
+  });
+
+  it("dream: 番兵マーカーを含む recentPlay では M20 新kind(market_shift/npc_absence/dream_erosion)を出し、すべて検証を通る", async () => {
+    const ctx: DreamMasterContext = {
+      flow: "dream",
+      recentPlay: `忘れ野を歩いた ${MOCK_DREAM_EVENTS_SENTINEL}`
+    };
+    const result = successOf(await dm.run(ctx));
+    // narrate は必ず伴う(表示系0件破棄を避ける)
+    expect(validateNarrate(oneCallOf(result, "narrate").rawInput).ok).toBe(true);
+    const events = callsOf(result, "trigger_world_event").map(
+      (c) => (c.rawInput as { event: unknown }).event
+    );
+    expect(events).toHaveLength(3);
+    // バッチ検証を通し、3件すべて承認(却下0)されることを確認する
+    const batch = validateDreamEvents(events, {
+      dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 },
+      dreamErosion: 0
+    });
+    expect(batch.rejected).toHaveLength(0);
+    expect(batch.effect.events.filter((e) => e.kind === "market_shift")).toHaveLength(1);
+    expect(batch.effect.events.filter((e) => e.kind === "npc_absence")).toHaveLength(1);
+    expect(batch.effect.dreamErosion).toBe(1); // dream_erosion +1
   });
 
   it("battleResult: narrate のみ(初見敵の戦果描写。敵別に決定論的)", async () => {
@@ -424,13 +461,20 @@ describe("MockDreamMaster 悪意モード", () => {
     }
   });
 
-  it("dream: 出力壁逸脱の narrate と上限超過 rumor の違反意図を出す", async () => {
+  it("dream: 出力壁逸脱 narrate と M20 新kindのホワイトリスト外/レンジ外/一晩4件目の違反意図を出す", async () => {
     const result = successOf(await dm.run(dreamCtx));
     const narrate = oneCallOf(result, "narrate");
     expect(validateNarrate(narrate.rawInput).ok).toBe(false);
 
-    const event = oneCallOf(result, "trigger_world_event");
-    expect(validateWorldEvent(event.rawInput, { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 } }).ok).toBe(false);
+    // M20 の悪意応答は世界変化4件(npc_absence priest / market_shift enum外 / dream_erosion レンジ外 /
+    // 一晩4件目)。バッチ検証(validateDreamEvents)へ通し、承認が1件も出ない(全却下)ことを確認する。
+    const events = callsOf(result, "trigger_world_event").map(
+      (c) => (c.rawInput as { event: unknown }).event
+    );
+    expect(events).toHaveLength(4);
+    const batch = validateDreamEvents(events, { dungeonSymbolCounts: { 1: 4, 2: 4, 3: 4 }, dreamErosion: 0 });
+    expect(batch.effect.events).toHaveLength(0);
+    expect(batch.rejected).toHaveLength(4);
   });
 
   it("battleResult: 出力壁逸脱 narrate と フロー非許可ツール(adjust_affinity)の違反意図を出す", async () => {

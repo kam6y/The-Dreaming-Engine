@@ -6,6 +6,8 @@ import {
   AMBER_WORKSHOP_STOCK,
   INITIAL_AFFINITY,
   ITEMS,
+  MARKET_SHIFT_MODES,
+  MARKET_SHIFT_MULTIPLIERS,
   SHOP_BUY_DISCOUNT_PERCENT,
   SHOP_SELL_BONUS_PERCENT,
   SHOP_STOCK,
@@ -126,6 +128,117 @@ describe("段階割引率の定数(仕様表との一致)", () => {
   it("買値割引率: 0/0/5/10、売値増し率: 0/0/0/5", () => {
     expect(SHOP_BUY_DISCOUNT_PERCENT).toEqual({ wary: 0, distant: 0, friendly: 5, trusted: 10 });
     expect(SHOP_SELL_BONUS_PERCENT).toEqual({ wary: 0, distant: 0, friendly: 0, trusted: 5 });
+  });
+});
+
+// ===========================================================================
+// market_shift(市場の変化。M20。ai-integration.md「6b」)
+// 合成順序: base → 好感度割引 d → 市場倍率 m=floor(d×倍率) → 絶対クランプ max(1, m)。
+// 売値は「売値 ≤ market_shift 適用後の実効買値」を維持する(買い戻し増殖の防止)。
+// ===========================================================================
+
+const ALL_MARKET_MODES = [null, ...MARKET_SHIFT_MODES] as const;
+
+describe("MARKET_SHIFT_MULTIPLIERS(市場倍率の定義)", () => {
+  it("scarcity=×1.2 / surplus=×0.9 の2種で、MarketShiftMode を網羅する", () => {
+    expect(MARKET_SHIFT_MULTIPLIERS).toEqual({ scarcity: 1.2, surplus: 0.9 });
+    expect(Object.keys(MARKET_SHIFT_MULTIPLIERS).sort()).toEqual([...MARKET_SHIFT_MODES].sort());
+  });
+});
+
+describe("discountedBuyPrice: market_shift 倍率の合成", () => {
+  it("marketShift 未指定(省略)・null は従来の割引後価格と完全同値(全品・全好感度)", () => {
+    for (let affinity = AFFINITY_MIN; affinity <= AFFINITY_MAX; affinity += 7) {
+      for (const itemId of ALL_ITEM_IDS) {
+        const legacy = discountedBuyPrice(itemId, affinity);
+        expect(discountedBuyPrice(itemId, affinity, null)).toBe(legacy);
+      }
+    }
+  });
+
+  it("scarcity(×1.2)・surplus(×0.9)は割引後価格へ倍率を掛け floor する(錆びた片刃60G)", () => {
+    // 好感度30(割引なし)=基準60G: scarcity floor(72)=72 / surplus floor(54)=54
+    expect(discountedBuyPrice("worn-blade", INITIAL_AFFINITY, "scarcity")).toBe(72);
+    expect(discountedBuyPrice("worn-blade", INITIAL_AFFINITY, "surplus")).toBe(54);
+    // 信頼80(10%引き=54G)に倍率: scarcity floor(64.8)=64 / surplus floor(48.6)=48
+    expect(discountedBuyPrice("worn-blade", 80)).toBe(54);
+    expect(discountedBuyPrice("worn-blade", 80, "scarcity")).toBe(64);
+    expect(discountedBuyPrice("worn-blade", 80, "surplus")).toBe(48);
+  });
+
+  it("最低1Gにクランプする(surplus で 0 に落ちる小額品も1G以上)", () => {
+    for (const itemId of ALL_ITEM_IDS) {
+      if (buyPriceOf(itemId) <= 0) continue; // 店で買えない品は倍率対象外(0のまま)
+      for (const mode of MARKET_SHIFT_MODES) {
+        expect(discountedBuyPrice(itemId, 100, mode)).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  it("買えない品(buyPrice=0)は market_shift の対象外(0のまま=max(1)クランプもしない)", () => {
+    for (const itemId of ALL_ITEM_IDS) {
+      if (buyPriceOf(itemId) > 0) continue;
+      for (const mode of ALL_MARKET_MODES) {
+        expect(discountedBuyPrice(itemId, 50, mode)).toBe(0);
+      }
+    }
+  });
+});
+
+describe("adjustedSellPrice: market_shift 適用後の実効買値クランプ(買い戻し増殖の防止)", () => {
+  it("marketShift 未指定・null は従来の売値と完全同値(全品・全好感度)", () => {
+    for (let affinity = AFFINITY_MIN; affinity <= AFFINITY_MAX; affinity += 7) {
+      for (const itemId of ALL_ITEM_IDS) {
+        const legacy = adjustedSellPrice(itemId, affinity);
+        expect(adjustedSellPrice(itemId, affinity, null)).toBe(legacy);
+      }
+    }
+  });
+
+  it("全品・全好感度・全 market_shift(surplus 含む)で 売値 ≤ 同条件の実効買値(増殖不能)", () => {
+    for (let affinity = AFFINITY_MIN; affinity <= AFFINITY_MAX; affinity += 1) {
+      for (const itemId of ALL_ITEM_IDS) {
+        if (buyPriceOf(itemId) <= 0) continue;
+        for (const mode of ALL_MARKET_MODES) {
+          const sell = adjustedSellPrice(itemId, affinity, mode);
+          const effectiveBuy = discountedBuyPrice(itemId, affinity, mode);
+          // 買い戻し往復(実効買値で買い→売る)で純増しない
+          expect(sell).toBeLessThanOrEqual(effectiveBuy);
+          expect(Number.isInteger(sell)).toBe(true);
+          expect(sell).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
+  });
+
+  it("surplus 下でも「実効買値で買い→売る」往復で純益が出ない(増殖不能。具体値)", () => {
+    // 現行アイテムは売値≈買値の半額のため surplus(×0.9)でもクランプは実際には発火しないが、
+    // 往復純益(売値 − 実効買値)が常に負になることを具体値で示す(将来アイテム増でもクランプが保証)。
+    const affinity = 100; // 信頼(買値10%引き・売値+5%)=最も差が縮む段階
+    for (const itemId of ["potion-small", "potion-mid", "worn-blade", "amber-blade"] as const) {
+      const effectiveBuy = discountedBuyPrice(itemId, affinity, "surplus");
+      const sell = adjustedSellPrice(itemId, affinity, "surplus");
+      expect(sell - effectiveBuy).toBeLessThanOrEqual(0); // 買い戻しで増えない
+    }
+    // 合成の具体値(potion-small buy20: 割引10%=18 → surplus floor(16.2)=16。売値10 は据え置き=16以下)
+    expect(discountedBuyPrice("potion-small", affinity, "surplus")).toBe(16);
+    expect(adjustedSellPrice("potion-small", affinity, "surplus")).toBe(10);
+  });
+});
+
+describe("shopStockEntries: market_shift を反映した店頭表示(表示=請求)", () => {
+  it("marketShift 未指定・null は従来の在庫価格と完全同値(既存 E2E 回帰)", () => {
+    const legacy = shopStockEntries("merchant", INITIAL_AFFINITY);
+    expect(shopStockEntries("merchant", INITIAL_AFFINITY, null)).toEqual(legacy);
+  });
+
+  it("market_shift 指定時は各品の買値が discountedBuyPrice(同引数)と一致する(表示と請求の同一計算)", () => {
+    for (const mode of MARKET_SHIFT_MODES) {
+      const entries = shopStockEntries("merchant", 80, mode);
+      for (const entry of entries) {
+        expect(entry.buyPrice).toBe(discountedBuyPrice(entry.itemId, 80, mode));
+      }
+    }
   });
 });
 

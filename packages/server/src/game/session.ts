@@ -757,8 +757,14 @@ export class GameSession {
    * 受取NPC(recipientId)に active な deliver クエストがあれば決定論の納品イベント(AI 非依存)を先に処理し、
    * その手渡し dialog を通常フローの先頭 snapshot 直後に差し込む(宿・店 overlay を持つ NPC も納品後に開く)。
    * 受取NPC以外・預かり品を持たない相手では納品は起きない(deliverPendingParcel が無変化・空を返す)。
+   *
+   * npc_absence(M20): 当日不在の NPC(world.absentNpc)は会話・店・宿とも利用不可の定型表示のみ返し、
+   * 通常フローも deliver 納品も行わない(納品は翌日以降へ持ち越し。翌朝の advanceDay で自動復帰)。
    */
   private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
+    if (this.requireState().world.absentNpc === npcId) {
+      return [this.dialogMsg(null, `${NPC_DISPLAY_NAMES[npcId]}は、今日は姿が見えないようだ。`)];
+    }
     const deliveryDialogs = this.deliverPendingParcel(npcId);
     const normal = await this.openNpcInteraction(npcId);
     if (deliveryDialogs.length === 0) return normal;
@@ -841,12 +847,15 @@ export class GameSession {
    * 開いている間は好感度が変わらない(adjust_affinity は会話 interaction 中のみ)ため、開店時の値で一貫する。
    */
   private openShop(npcId: NpcId): ServerMessage[] {
-    const affinity = this.requireState().npcs[npcId].affinity;
+    const state = this.requireState();
+    const affinity = state.npcs[npcId].affinity;
+    // 当日の market_shift(買値倍率)。stock の買値表示・請求(shopBuy)とも同一計算にする(M20)
+    const marketShift = state.world.marketShift;
     this.activeInteraction = {
       kind: "shop",
       npcId,
       npcName: NPC_DISPLAY_NAMES[npcId],
-      stock: shopStockEntries(npcId, affinity),
+      stock: shopStockEntries(npcId, affinity, marketShift),
       // 売値表示をクライアントがサーバーと同一計算するための店主好感度(M11-3。フィールド名は既存互換)
       merchantAffinity: affinity
     };
@@ -1388,9 +1397,15 @@ export class GameSession {
     if (!isInShopStock(this.activeInteraction.npcId, itemId)) {
       return this.errorMsgs("not-sold", "それは、この店では扱っていない。");
     }
-    // 店主(商人)の好感度による段階割引を適用(0-49 は従来価格と完全同値。
-    // stock の表示価格と同じ関数・同じ好感度で計算するため、表示と請求は常に一致する)
-    const cost = discountedBuyPrice(itemId, state.npcs[this.activeInteraction.npcId].affinity) * quantity;
+    // 店主(商人)の好感度による段階割引 + 当日の market_shift 倍率を適用(0-49・market_shift 無しは
+    // 従来価格と完全同値。stock の表示価格(shopStockEntries)と同じ関数・同じ引数で計算するため
+    // 表示と請求は常に一致する)
+    const cost =
+      discountedBuyPrice(
+        itemId,
+        state.npcs[this.activeInteraction.npcId].affinity,
+        state.world.marketShift
+      ) * quantity;
     if (state.player.gold < cost) return this.errorMsgs("not-enough-gold", "持ち合わせが足りない。");
     // 事前に容量チェックし、不足なら購入をブロック(game-design.md「成長・経済」)
     if (freeSpace(state.inventory) < quantity) return this.errorMsgs("inventory-full", "そんなに持ちきれない。");
@@ -1406,10 +1421,14 @@ export class GameSession {
     if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
     if (ITEMS[itemId].questItem) return this.errorMsgs("not-sellable", "これは、売れるものではない。");
     if (countOf(state.inventory, itemId) < quantity) return this.errorMsgs("not-owned", "そんなには持っていない。");
-    // 売値の段階増し(信頼のみ+5%。買い戻し増殖防止クランプ込み)。クライアントの売値表示も
-    // interaction.merchantAffinity から同じ関数で計算するため、表示と実受取は常に一致する(M11-3)
+    // 売値の段階増し(信頼のみ+5%)。買い戻し増殖防止クランプは当日の market_shift 適用後の
+    // 実効買値に対して効かせる(surplus でも売値 ≤ 実効買値=往復で増殖しない。M20)
     const gain =
-      adjustedSellPrice(itemId, state.npcs[this.activeInteraction.npcId].affinity) * quantity;
+      adjustedSellPrice(
+        itemId,
+        state.npcs[this.activeInteraction.npcId].affinity,
+        state.world.marketShift
+      ) * quantity;
     state.inventory = removeItem(state.inventory, itemId, quantity).inventory;
     state.player.gold += gain;
     return [this.snapshotMsg()];
@@ -1537,6 +1556,7 @@ export class GameSession {
       inventory: state.inventory,
       subQuests: state.subQuests,
       dungeonSymbolCounts: state.world.dungeonSymbolCounts,
+      dreamErosion: state.world.dreamErosion,
       nextQuestId: this.peekQuestId()
     };
   }

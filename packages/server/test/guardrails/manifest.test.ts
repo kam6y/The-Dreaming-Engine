@@ -71,6 +71,11 @@ export const REQUIRED_ATTACK_TEST_IDS: readonly string[] = [
   "ATK-nonpositive-count",
   "ATK-non-integer",
   "ATK-world-event-fourth",
+  // 夢の世界変化 新kind(market_shift/npc_absence/dream_erosion)の却下(拡張: M20。ai-guardrails.md 272-279)
+  "ATK-world-npc-absence-whitelist",
+  "ATK-world-market-shift-enum",
+  "ATK-world-erosion-range",
+  "ATK-world-event-newkind-fourth",
   "ATK-display-zero-discard",
 
   // 悪意モードの全却下(表示系0件ターンのオール・オア・ナッシング破棄)

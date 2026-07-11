@@ -63,13 +63,19 @@ export function applyStateChangeEffect(state: GameState, effect: StateChangeEffe
  * - weather      : 後勝ち(events に最後の1件のみ含まれる)
  * - street_event : 当日有効集合へ追加(同一 id は重複しない)
  * - npc_rumor    : 対象 NPC の「今日の話題」を置換
+ * - market_shift : 後勝ち(events に最後の1件)。world.marketShift へ反映(M20)
+ * - npc_absence  : 後勝ち・同時1人(events に最後の1件)。world.absentNpc へ反映(M20)
  * - dungeon_shift : effect.dungeonSymbolCounts(累積適用後の絶対値)を採用する
- *   (events には含まれないため、ここでは各層カウントを丸ごと差し替える)
+ * - dream_erosion : effect.dreamErosion(累積適用後の絶対値 0-3)を採用する(M20)
+ *   (dungeon_shift・dream_erosion は events には含まれないため絶対値を丸ごと差し替える)
+ * 起点(marketShift/absentNpc)は宿泊手順2の advanceDay で既に null。夢で承認があれば上書きする。
  */
 function applyDreamEvents(state: GameState, effect: DreamEventsEffect): GameState {
   let weather = state.world.weather;
   const streetSet = new Set(state.world.activeStreetEvents);
   const npcs: NpcStates = { ...state.npcs };
+  let marketShift = state.world.marketShift;
+  let absentNpc = state.world.absentNpc;
 
   for (const ev of effect.events) {
     switch (ev.kind) {
@@ -82,8 +88,15 @@ function applyDreamEvents(state: GameState, effect: DreamEventsEffect): GameStat
       case "npc_rumor":
         npcs[ev.npcId] = { ...npcs[ev.npcId], topic: ev.rumor };
         break;
+      case "market_shift":
+        marketShift = ev.mode; // 後勝ち
+        break;
+      case "npc_absence":
+        absentNpc = ev.npcId; // 後勝ち(同時1人)
+        break;
       case "dungeon_shift":
-        // dungeon_shift は effect.dungeonSymbolCounts に反映済み(events には現れない)
+      case "dream_erosion":
+        // 累積系は effect.dungeonSymbolCounts / effect.dreamErosion に反映済み(events には現れない)
         break;
     }
   }
@@ -92,9 +105,13 @@ function applyDreamEvents(state: GameState, effect: DreamEventsEffect): GameStat
     ...state,
     npcs,
     world: {
+      ...state.world,
       weather,
       activeStreetEvents: [...streetSet],
-      dungeonSymbolCounts: effect.dungeonSymbolCounts
+      dungeonSymbolCounts: effect.dungeonSymbolCounts,
+      marketShift,
+      absentNpc,
+      dreamErosion: effect.dreamErosion
     }
   };
 }

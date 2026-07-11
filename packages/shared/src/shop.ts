@@ -1,3 +1,4 @@
+import type { MarketShiftMode } from "./ai/world-event.js";
 import { ARMOR_ITEM_IDS, ITEMS, WEAPON_ITEM_IDS, buyPriceOf, sellPriceOf } from "./combat/items.js";
 import type { ItemId } from "./combat/items.js";
 import type { NpcId } from "./ids.js";
@@ -82,29 +83,56 @@ export const SHOP_SELL_BONUS_PERCENT: Record<AffinityTier, number> = {
 };
 
 /**
- * 商人の好感度を反映した購入価格(純関数)。
- * 0-49 では buyPriceOf と完全同値(初期好感度30の既存テスト・E2E を変えない)。
- * 端数は割引額側の切り捨て(floor)= 価格は仕様の端数規則どおり。
+ * market_shift の買値倍率(ai-integration.md「6b」。買値のみに作用・翌日限り)。
+ * scarcity(品薄)=×1.2 / surplus(供給過多)=×0.9。値の正はここ(MarketShiftMode の意味)。
  */
-export function discountedBuyPrice(itemId: ItemId, affinity: number): number {
+export const MARKET_SHIFT_MULTIPLIERS: Record<MarketShiftMode, number> = {
+  scarcity: 1.2,
+  surplus: 0.9
+};
+
+/**
+ * 商人の好感度と当日の market_shift を反映した購入価格(純関数)。
+ * 合成順序(ai-integration.md「6b」): base=buyPriceOf → 好感度割引 d → 市場倍率 m=floor(d×倍率)
+ * → 絶対クランプ max(1, m)(最低1G)。すなわち割引を先に、市場倍率を後に掛ける。
+ * - marketShift 未指定(null)時は市場倍率を掛けず、従来の割引後価格と**完全同値**
+ *   (0-49 なら buyPriceOf と同値。初期好感度30の既存テスト・E2E を変えない)。
+ * - 買えない品(base=0)は market_shift の対象外(0 のまま。max(1) クランプもしない)。
+ * 端数は割引額側・市場倍率側とも切り捨て(floor)= 価格は仕様の端数規則どおり。
+ */
+export function discountedBuyPrice(
+  itemId: ItemId,
+  affinity: number,
+  marketShift: MarketShiftMode | null = null
+): number {
   const base = buyPriceOf(itemId);
   const percent = SHOP_BUY_DISCOUNT_PERCENT[affinityTier(affinity)];
-  return base - Math.floor((base * percent) / 100);
+  const discounted = base - Math.floor((base * percent) / 100);
+  // 市場倍率は買える品(base>0)にのみ作用。null 時は割引後価格をそのまま返す(従来同値)
+  if (marketShift === null || base <= 0) return discounted;
+  const multiplied = Math.floor(discounted * MARKET_SHIFT_MULTIPLIERS[marketShift]);
+  return Math.max(1, multiplied);
 }
 
 /**
- * 商人の好感度を反映した売却価格(純関数)。信頼(80-100)のみ+5%。
- * 店で購入できる品(買値>0)は、同じ好感度での割引後買値を上回らないよう
- * クランプする(買い戻し往復によるゴールド増殖の防止。仕様の保証)。
- * ※ M11-1 のサーバー適用は買値割引のみ。本関数の配線(売却適用+表示)は M11-3 で行う。
+ * 商人の好感度と当日の market_shift を反映した売却価格(純関数)。信頼(80-100)のみ+5%。
+ * 店で購入できる品(買値>0)は、同じ好感度・**同じ market_shift を適用した実効買値**を
+ * 上回らないようクランプする(買い戻し往復によるゴールド増殖の防止。仕様の保証)。
+ * surplus で買値が下がると売値もこの実効買値まで下がるため、往復で増殖しない
+ * (既存不変条件「売値 ≤ 割引後買値」を market_shift 適用後の実効買値へ拡張=強化方向)。
+ * marketShift 未指定(null)時は従来のクランプと**完全同値**。
  */
-export function adjustedSellPrice(itemId: ItemId, affinity: number): number {
+export function adjustedSellPrice(
+  itemId: ItemId,
+  affinity: number,
+  marketShift: MarketShiftMode | null = null
+): number {
   const base = sellPriceOf(itemId);
   const percent = SHOP_SELL_BONUS_PERCENT[affinityTier(affinity)];
   const raised = base + Math.floor((base * percent) / 100);
   const buyBase = buyPriceOf(itemId);
   if (buyBase > 0) {
-    return Math.min(raised, discountedBuyPrice(itemId, affinity));
+    return Math.min(raised, discountedBuyPrice(itemId, affinity, marketShift));
   }
   return raised;
 }
@@ -117,13 +145,18 @@ export interface ShopStockEntry {
 
 /**
  * 店頭に並ぶ品の一覧(UI 表示用)。品揃えは店主 NPC ごと(shopStockFor)、buyPrice は
- * その店主の好感度を反映した割引後の値(クライアントはこの値をそのまま表示する。
- * 初期好感度30では従来価格と同値)。割引規則(discountedBuyPrice)は全店で同一を再利用する。
+ * その店主の好感度と当日の market_shift を反映した実効買値(クライアントはこの値をそのまま表示する。
+ * 初期好感度30・market_shift 無し(null)では従来価格と同値)。表示と請求は同一計算
+ * (shopBuy も discountedBuyPrice を同じ引数で呼ぶ)。割引・市場倍率規則は全店で同一を再利用する。
  */
-export function shopStockEntries(npcId: NpcId, affinity: number): ShopStockEntry[] {
+export function shopStockEntries(
+  npcId: NpcId,
+  affinity: number,
+  marketShift: MarketShiftMode | null = null
+): ShopStockEntry[] {
   return shopStockFor(npcId).map((itemId) => ({
     itemId,
     name: ITEMS[itemId].name,
-    buyPrice: discountedBuyPrice(itemId, affinity)
+    buyPrice: discountedBuyPrice(itemId, affinity, marketShift)
   }));
 }

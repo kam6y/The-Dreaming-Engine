@@ -102,10 +102,17 @@ export interface RejectedEvent {
 /** 夢シーンの世界状態変化記述子(解決規則適用後の有効イベントと、累積適用後のシンボル数) */
 export interface DreamEventsEffect {
   readonly kind: "dream_world_events";
-  /** 解決後に有効な非累積イベント(weather=後勝ち1件 / npc_rumor=NPC別後勝ち / street_event=id別1件) */
+  /**
+   * 解決後に有効な非累積イベント(後勝ち・id別)。
+   * weather=後勝ち1件 / npc_rumor=NPC別後勝ち / street_event=id別1件 /
+   * market_shift=後勝ち1件 / npc_absence=後勝ち1件(M20)。
+   * dungeon_shift・dream_erosion(累積)は events には現れず、下記の絶対値フィールドに反映する。
+   */
   readonly events: readonly WorldEvent[];
   /** dungeon_shift を承認順に累積適用した後の各層シンボル数 */
   readonly dungeonSymbolCounts: DungeonSymbolCounts;
+  /** dream_erosion を承認順に累積適用し 0-3 へクランプした後の侵食度(M20) */
+  readonly dreamErosion: number;
 }
 
 /** 夢シーンのイベントリスト検証結果(常に effect を返し、却下要素は rejected に記録) */
@@ -156,6 +163,8 @@ export interface ProposeQuestContext {
 export interface DreamEventsContext {
   /** 各ダンジョン層の現在のシンボル数(dungeon_shift 累積適用の起点。永続) */
   readonly dungeonSymbolCounts: DungeonSymbolCounts;
+  /** 現在の侵食度 0-3(dream_erosion 累積適用の起点。永続。M20) */
+  readonly dreamErosion: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +187,8 @@ export interface PersistentStateContext {
   readonly inventory: Inventory;
   readonly subQuests: readonly SubQuest[];
   readonly dungeonSymbolCounts: DungeonSymbolCounts;
+  /** 現在の侵食度 0-3(dream_erosion 累積適用の起点。永続。M20) */
+  readonly dreamErosion: number;
   /** 生成する提案 SubQuest の id(セッションマネージャが採番) */
   readonly nextQuestId: string;
 }

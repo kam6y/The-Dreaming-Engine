@@ -682,6 +682,22 @@ describe("調べる・話す", () => {
     expect(dialogsOf(msgs1)[0]?.speaker).toBe(NPC_DISPLAY_NAMES.informant);
     expect(mustView(informant.session).interaction).toBeUndefined();
   });
+
+  it("M20: 不在NPC(world.absentNpc)は店を開かず定型表示のみ / absentNpc=null で復帰する", async () => {
+    const { session } = await townSession({ x: 16, y: 5 }, "up"); // 商人レンド (16,4)
+    mustState(session).world.absentNpc = "merchant";
+    const blocked = await session.handle({ type: "interact" });
+    expect(blocked).toEqual([
+      { type: "dialog", speaker: null, body: "レンドは、今日は姿が見えないようだ。" }
+    ]);
+    expect(mustView(session).interaction).toBeUndefined(); // 店は開かない
+    // 不在は interact では解除されない(翌朝の日送りで自動復帰する)
+    expect(mustState(session).world.absentNpc).toBe("merchant");
+    // 翌日(advanceDay 相当で absentNpc=null)→ 店が開く
+    mustState(session).world.absentNpc = null;
+    const opened = await session.handle({ type: "interact" });
+    expect(firstSnapshot(opened).interaction?.kind).toBe("shop");
+  });
 });
 
 // ===========================================================================

@@ -62,6 +62,17 @@ const BATTLE_RESULT_LINES: Record<EnemyId, string> = {
 const DREAM_NARRATION =
   "霧が濃い。まどろみの底で、灯町の輪郭がゆっくりと溶けていく。遠くで誰かが、あなたの名を呼んだ気がした。";
 
+/**
+ * 夢シーンで新kind(M20)の世界変化を混ぜるための番兵マーカー(テスト専用)。
+ * 夢フローには情報屋 topic のような自然な選択機構が無いため、決定論の入力である
+ * `recentPlay`(当日の行動サマリ)にこのマーカーが含まれるときだけ、夢の定型応答へ
+ * market_shift/npc_absence/dream_erosion の実在値(すべて検証を通る一晩3件)を出す。
+ * **既定(マーカー無し)は narrate + weather: fog のまま**なので、既存 E2E(dream.spec)・
+ * full通しの応答内容・件数を一切変えない(M19-3 の番兵 topic 方式と同じ不干渉設計)。
+ * 実プレイの recentPlay(buildRecentPlay のロア文)とは衝突しない。
+ */
+export const MOCK_DREAM_EVENTS_SENTINEL = "__mock_dream_world_shift__";
+
 /** サブクエスト生成時の情報屋の台詞(speak)。hunt=既定(文言は既存テスト回帰のため不変) */
 const QUEST_GENERATION_LINE =
   "「ちょうどいいところに来た。忘れ野で霧狼が増えていてね。腕に覚えがあるなら、頼まれてくれるかい」";
@@ -192,7 +203,29 @@ function buildNormalToolCalls(context: DreamMasterContext): {
       };
     }
     case "dream": {
-      // 必ず narrate + trigger_world_event(weather: fog)。状態変更に表示系を伴わせる(仕様327-330)。
+      // 番兵マーカー時のみ M20 新kind(market_shift/npc_absence/dream_erosion)を出す。
+      // narrate + 世界変化3件(一晩3件上限ちょうど・すべて実在値で検証通過)。
+      if (context.recentPlay.includes(MOCK_DREAM_EVENTS_SENTINEL)) {
+        return {
+          toolCalls: [
+            { toolName: "narrate", rawInput: { text: DREAM_NARRATION } },
+            {
+              toolName: "trigger_world_event",
+              rawInput: { event: { kind: "market_shift", mode: "surplus" } }
+            },
+            {
+              toolName: "trigger_world_event",
+              rawInput: { event: { kind: "npc_absence", npcId: "merchant" } }
+            },
+            {
+              toolName: "trigger_world_event",
+              rawInput: { event: { kind: "dream_erosion", delta: 1 } }
+            }
+          ],
+          text: null
+        };
+      }
+      // 既定: 必ず narrate + trigger_world_event(weather: fog)。状態変更に表示系を伴わせる(仕様327-330)。
       return {
         toolCalls: [
           { toolName: "narrate", rawInput: { text: DREAM_NARRATION } },
@@ -230,9 +263,6 @@ function buildNormalToolCalls(context: DreamMasterContext): {
 
 /** 出力壁の逸脱パターンに該当する文字列(deviation + 日本語比率不足で却下される) */
 const DEVIATION_TEXT = "As an AI language model, I cannot comply with that request.";
-
-/** npc_rumor の上限(120字)を超える文字列(too_long で却下される) */
-const OVERLONG_RUMOR = "霧が".repeat(80); // 160 字
 
 function buildMaliciousToolCalls(context: DreamMasterContext): {
   toolCalls: RawToolCall[];
@@ -332,14 +362,32 @@ function buildMaliciousToolCalls(context: DreamMasterContext): {
       };
     }
     case "dream": {
+      // narrate 逸脱で表示系承認0件を誘発しつつ、M20 新kindのホワイトリスト外/レンジ外/一晩4件目を
+      // 生の違反意図として出す(いずれも検証層で却下されるべき素材。攻撃テストが個別に精査する)。
+      // 世界変化は index 0-2 が各スキーマ却下、index 3(新kindを含む一晩4件目)が上限超過却下。
       return {
         toolCalls: [
           // 出力壁逸脱の narrate
           { toolName: "narrate", rawInput: { text: DEVIATION_TEXT } },
-          // 上限超過の rumor(120字超)
+          // (M20) npc_absence: ホワイトリスト外 priest(進行役フィオル)の失踪指定=スキーマ段却下
           {
             toolName: "trigger_world_event",
-            rawInput: { event: { kind: "npc_rumor", npcId: "informant", rumor: OVERLONG_RUMOR } }
+            rawInput: { event: { kind: "npc_absence", npcId: "priest" } }
+          },
+          // (M20) market_shift: enum 外 mode(未定義の倍率名)=スキーマ段却下
+          {
+            toolName: "trigger_world_event",
+            rawInput: { event: { kind: "market_shift", mode: "windfall" } }
+          },
+          // (M20) dream_erosion: レンジ外 delta(+2。-1|0|1 以外)=スキーマ段却下
+          {
+            toolName: "trigger_world_event",
+            rawInput: { event: { kind: "dream_erosion", delta: 2 } }
+          },
+          // (M20) 新kind(dream_erosion)を含む一晩4件目=既存の一晩3件上限超過で却下(index>=3)
+          {
+            toolName: "trigger_world_event",
+            rawInput: { event: { kind: "dream_erosion", delta: 1 } }
           }
         ],
         text: null
