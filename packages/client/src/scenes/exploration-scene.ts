@@ -11,6 +11,7 @@ import {
   npcPlacementsForTime,
   samePosition,
   tileTypeAt,
+  type AchievementId,
   type ActiveInteraction,
   type Direction,
   type EnemyId,
@@ -28,6 +29,8 @@ import { playSe, requestBgm } from "../audio.js";
 import { dequeueDialog, enqueueDialog, hasPendingDialog } from "../dialog-queue.js";
 import { getGameClient, type GameClient } from "../net/game-client.js";
 import { TILESET_KEY, TILESET_TILE_PX, tileFrame, tileTint, wallFrame } from "../tile-frames.js";
+import { AchievementToaster } from "../ui/achievement-toast.js";
+import { AchievementsOverlay } from "../ui/achievements-overlay.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { ConversationOverlay } from "../ui/conversation-overlay.js";
 import { DialogBox } from "../ui/dialog-box.js";
@@ -187,6 +190,19 @@ export class ExplorationScene extends Phaser.Scene {
   /** 全体マップ「夢の地図」(M で開閉。閲覧のみ。M22-3) */
   private mapOverlay: MapOverlay | null = null;
 
+  /** 実績一覧「夢の欠片」(K で開閉。閲覧のみ。M24-3) */
+  private achievementsOverlay: AchievementsOverlay | null = null;
+
+  /** 実績解除トーストの通知係(非モーダル・複数解除は順送り。M24-3) */
+  private achievementToaster: AchievementToaster | null = null;
+
+  /**
+   * トースト通知済みの解除実績(M24-3)。シーン開始時のスナップショットで初期化する
+   * =シーン開始後の最初のスナップショットでは鳴らさない(接続直後・新規/つづきから直後に
+   * 旧セーブの再導出分をまとめて鳴らさない。game-design.md「UI要件」)。
+   */
+  private knownAchievements = new Set<AchievementId>();
+
   /** サブクエスト放棄の確認ダイアログ(表示中は移動・調べるをブロック。M19-4) */
   private questConfirm: ConfirmDialog | null = null;
 
@@ -273,6 +289,9 @@ export class ExplorationScene extends Phaser.Scene {
     this.pendingDream = null;
     this.questJournal = null;
     this.mapOverlay = null;
+    this.achievementsOverlay = null;
+    this.achievementToaster = null;
+    this.knownAchievements = new Set(snapshot.unlockedAchievements);
     this.questConfirm = null;
     this.companionLight = null;
     this.npcViews.clear();
@@ -307,6 +326,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.setupInput();
 
     this.dialog = new DialogBox(this, this.uiLayer);
+    this.achievementToaster = new AchievementToaster(this, this.uiLayer);
 
     this.unsubscribes = [
       client.on("snapshot", (view) => {
@@ -379,8 +399,13 @@ export class ExplorationScene extends Phaser.Scene {
             this.conversationOverlay.showMessage(next.body);
           }
         }
-      } else if (this.dreamOverlay !== null || this.questJournal !== null || this.mapOverlay !== null) {
-        // 夢・ジャーナル・地図中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
+      } else if (
+        this.dreamOverlay !== null ||
+        this.questJournal !== null ||
+        this.mapOverlay !== null ||
+        this.achievementsOverlay !== null
+      ) {
+        // 夢・ジャーナル・地図・欠片一覧中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
       } else if (!this.dialog.isOpen && this.innConfirm === null && this.questConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
@@ -410,7 +435,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.shopOverlay === null &&
       this.inventoryOverlay === null &&
       this.questJournal === null &&
-      this.mapOverlay === null
+      this.mapOverlay === null &&
+      this.achievementsOverlay === null
     ) {
       const text = this.pendingDream;
       this.pendingDream = null;
@@ -438,7 +464,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
       this.questJournal !== null ||
-      this.mapOverlay !== null
+      this.mapOverlay !== null ||
+      this.achievementsOverlay !== null
     ) {
       // ダイアログ・オーバーレイ中に押した移動キーが、閉じた直後の「幽霊移動」に
       // ならないよう破棄する
@@ -499,6 +526,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateAbsentNpc();
     this.updateErosionOverlay();
     this.updateTimeOfDay();
+    this.updateAchievementToasts();
     this.updateInteraction(view);
     this.shopOverlay?.refresh(view);
     this.inventoryOverlay?.refresh(view);
@@ -666,7 +694,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
       this.questJournal !== null ||
-      this.mapOverlay !== null
+      this.mapOverlay !== null ||
+      this.achievementsOverlay !== null
     ) {
       return;
     }
@@ -709,7 +738,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
       this.questJournal !== null ||
-      this.mapOverlay !== null
+      this.mapOverlay !== null ||
+      this.achievementsOverlay !== null
     ) {
       return;
     }
@@ -724,6 +754,59 @@ export class ExplorationScene extends Phaser.Scene {
     this.mapOverlay.destroy();
     this.mapOverlay = null;
     this.syncDomState(); // data-menu=none を反映
+  }
+
+  /**
+   * 実績一覧「夢の欠片」を開く(K。M24-3)。他のオーバーレイ・ダイアログ・会話・
+   * 確認の最中は開かない(夢の地図と同じガード)。閲覧のみで操作キーは持たない。
+   */
+  private openAchievementsOverlay(): void {
+    if (
+      this.transitioning ||
+      this.moving ||
+      this.awaiting ||
+      this.dialog.isOpen ||
+      this.innConfirm !== null ||
+      this.pendingInn !== null ||
+      this.questConfirm !== null ||
+      this.shopOverlay !== null ||
+      this.inventoryOverlay !== null ||
+      this.conversationOverlay !== null ||
+      this.dreamOverlay !== null ||
+      this.questJournal !== null ||
+      this.mapOverlay !== null ||
+      this.achievementsOverlay !== null
+    ) {
+      return;
+    }
+    this.achievementsOverlay = new AchievementsOverlay(this, this.uiLayer, {
+      snapshot: this.snapshot
+    });
+    this.syncDomState(); // data-menu=achievements を反映(E2E が開閉を観測する。M24-3)
+  }
+
+  private closeAchievementsOverlay(): void {
+    if (this.achievementsOverlay === null) {
+      return;
+    }
+    this.achievementsOverlay.destroy();
+    this.achievementsOverlay = null;
+    this.syncDomState(); // data-menu=none を反映
+  }
+
+  /**
+   * 実績解除トースト(M24-3): スナップショット間の unlockedAchievements 差分で新規解除を
+   * 検出して順送り表示する。通知済み集合はシーン開始時のスナップショットで初期化される
+   * (初回スナップショットでの一斉発火の抑制)。表示のみで入力・data属性には干渉しない。
+   */
+  private updateAchievementToasts(): void {
+    for (const id of this.snapshot.unlockedAchievements) {
+      if (this.knownAchievements.has(id)) {
+        continue;
+      }
+      this.knownAchievements.add(id);
+      this.achievementToaster?.enqueue(id);
+    }
   }
 
   /**
@@ -831,6 +914,11 @@ export class ExplorationScene extends Phaser.Scene {
     // 夢の地図も Esc で閉じる(M22-3)
     if (this.mapOverlay !== null) {
       this.closeMapOverlay();
+      return;
+    }
+    // 夢の欠片(実績一覧)も Esc で閉じる(M24-3)
+    if (this.achievementsOverlay !== null) {
+      this.closeAchievementsOverlay();
       return;
     }
     // 夢はスペースで目覚める(Esc は無視する)
@@ -1405,7 +1493,7 @@ export class ExplorationScene extends Phaser.Scene {
     });
     this.uiLayer.add(this.hudStatusText);
     this.keyHintText = this.add
-      .text(0, 0, "スペース: 調べる ・ Esc: もちもの ・ Q: クエスト ・ M: 地図", {
+      .text(0, 0, "スペース: 調べる ・ Esc: もちもの ・ Q: クエスト ・ M: 地図 ・ K: 欠片", {
         color: "#a9b0ba",
         fontFamily: UI_FONT_FAMILY,
         fontSize: "13px",
@@ -1479,6 +1567,14 @@ export class ExplorationScene extends Phaser.Scene {
         this.openMapOverlay();
       }
     });
+    // K: 実績一覧「夢の欠片」の開閉(解除済み実績の収集閲覧。M24-3)
+    keyboard.on("keydown-K", () => {
+      if (this.achievementsOverlay !== null) {
+        this.closeAchievementsOverlay();
+      } else {
+        this.openAchievementsOverlay();
+      }
+    });
 
     // ポーリング(長押し)に加えてkeydownでも1歩を予約する。
     // 短いタップがフレーム間に落ちてisDownで拾えなくても確実に1歩動く
@@ -1527,7 +1623,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.conversationOverlay !== null ||
       this.dreamOverlay !== null ||
       this.questJournal !== null ||
-      this.mapOverlay !== null
+      this.mapOverlay !== null ||
+      this.achievementsOverlay !== null
     ) {
       // 各オーバーレイ側(MenuList・夢の目覚まし)が入力を処理する
       return;
@@ -1605,9 +1702,14 @@ export class ExplorationScene extends Phaser.Scene {
           ? "journal"
           : this.mapOverlay !== null
             ? "map"
-            : "none";
+            : this.achievementsOverlay !== null
+              ? "achievements"
+              : "none";
     // E2E 用: 訪問済みマップ数(「夢の地図」の観測点。新マップ到達で増える。M22-3)
     game.dataset["visitedCount"] = String(view.visitedMaps.length);
+    // E2E 用: 実績「夢の欠片」の解除数と直近解除 id(サーバーの解除順が末尾に来る。M24-3)
+    game.dataset["achievementsUnlocked"] = String(view.unlockedAchievements.length);
+    game.dataset["achievementLast"] = view.unlockedAchievements.at(-1) ?? "none";
     delete game.dataset["battleEnemy"];
   }
 }
