@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { StatusId } from "./status.js";
+import type { StatusId, StatusResistances } from "./status.js";
 
 /**
  * アイテム識別子。戦闘消耗品(M2)に加え、M3のインベントリ・店・採取で使う
@@ -18,7 +18,8 @@ import type { StatusId } from "./status.js";
  * - worn-blade  : 錆びた片刃。初級の武器(weapon スロット。M8-1)。
  * - amber-blade : 琥珀刃。上級の武器(weapon スロット。M8-1)。
  * - worn-cloak  : 擦り切れた外套。初級の防具(armor スロット。M8-1)。
- * - warded-mail : 灯守りの帷子。上級の防具(armor スロット。M8-1)。
+ * - warded-mail : 灯守りの帷子。上級の防具(armor スロット。M8-1)。眩惑・竦みへの耐性を持つ(M21-3)。
+ * - warding-light: 灯明(ともしあかり)。松明状の灯火。眩惑・竦みを鎮める解除アイテム(M21-3)。
  */
 
 /** 装備スロット(武器・防具の2種。game-design.md「装備(拡張: M8)」) */
@@ -49,14 +50,21 @@ export const itemIdSchema = z.enum([
   "worn-blade",
   "amber-blade",
   "worn-cloak",
-  "warded-mail"
+  "warded-mail",
+  "warding-light"
 ]);
 export type ItemId = z.infer<typeof itemIdSchema>;
 
-/** 戦闘中のアイテム効果(判別可能union) */
+/**
+ * 戦闘中のアイテム効果(判別可能union)。
+ * - heal-hp      : HPを固定量回復。
+ * - cure-status  : 単一の状態異常を治す(解毒薬=毒。既存不変)。
+ * - cure-statuses: 複数の状態異常をまとめて治す(灯明=眩惑・竦み。M21-3)。
+ */
 export type ItemBattleEffect =
   | { kind: "heal-hp"; amount: number }
-  | { kind: "cure-status"; status: StatusId };
+  | { kind: "cure-status"; status: StatusId }
+  | { kind: "cure-statuses"; statuses: readonly StatusId[] };
 
 /** アイテム定義。price/questItem はM3(店・所持上限)で使うメタ情報。 */
 export interface ItemDefinition {
@@ -83,6 +91,12 @@ export interface ItemDefinition {
   atkBonus?: number;
   /** 防具の防御ボーナス(実効防御力 = レベル基礎防御力 + defBonus)。armor スロットのみ */
   defBonus?: number;
+  /**
+   * 状態異常への耐性(0-1。M21-3)。装備すると、その kind の被付与確率が (1 − 耐性) 倍になる
+   * (equipment.ts の effectiveStatusResistances が装備品を横断して合算・クランプする)。
+   * 主に防具へ持たせる(毒へは付与しない=既存の毒挙動を保存)。
+   */
+  resistances?: StatusResistances;
 }
 
 /** アイテム定義表(識別子 → 定義)。効果値・価格はClaude Codeの裁量。 */
@@ -189,7 +203,20 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
     buyPrice: 150,
     questItem: false,
     slot: "armor",
-    defBonus: 5
+    defBonus: 5,
+    // 縫い込まれた琥珀の環が、視界を惑わす揺らめきと身を竦ませる悪夢の気配を半ば弾く(M21-3)。
+    // 毒へは耐性を持たせない(既存の毒挙動を保存)。
+    resistances: { dazzle: 0.5, dread: 0.5 }
+  },
+  "warding-light": {
+    id: "warding-light",
+    name: "灯明",
+    description:
+      "手に馴染む松明状の小さな灯火(ともしあかり)。かざせば揺らめく惑いも、身を縛る竦みも、淡い光がそっと払っていく。",
+    buyPrice: 25,
+    questItem: false,
+    // 眩惑・竦みをまとめて鎮める(毒には効かない=解毒薬の役割は不変)。
+    battleEffect: { kind: "cure-statuses", statuses: ["dazzle", "dread"] }
   }
 };
 

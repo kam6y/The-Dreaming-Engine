@@ -37,6 +37,35 @@ export function poisonTickDamage(maxHP: number): number {
   return Math.max(1, Math.floor(maxHP * 0.05));
 }
 
+// ---------------------------------------------------------------------------
+// 状態異常への耐性(=「属性」。M21-3)
+// ---------------------------------------------------------------------------
+
+/**
+ * 状態異常kindごとの耐性値(0.0〜1.0)。未指定のkindは耐性0(耐性なし)扱い。
+ * プレイヤーは装備由来(equipment.ts の effectiveStatusResistances)、敵は敵定義由来
+ * (enemies.ts の EnemyDefinition.resistances)で決まる。戦闘中の一時状態(BattleState)で
+ * のみ保持し、セーブには持たない(装備・敵定義から都度導出する。game-design.md「耐性」)。
+ * 毒(poison)へは新規付与しない方針(既定0を維持=既存の毒挙動を保存する)。
+ */
+export type StatusResistances = Partial<Record<StatusId, number>>;
+
+/** 耐性値を 0.0〜1.0 にクランプする(定義側の値が範囲外でも安全に扱う) */
+export function clampResistance(resistance: number): number {
+  return Math.min(1, Math.max(0, resistance));
+}
+
+/**
+ * 実効付与確率 = 技の付与確率 ×(1 − 対象の耐性)。耐性1.0で完全無効(0)・耐性0で付与確率そのまま。
+ * battle.ts の付与判定(maybeInflict)はこの値で乱数消費の要否を決める:
+ *   実効>=1(=付与確率>=1 かつ 耐性0)は乱数を引かず必ず付与し、実効<=0 は乱数を引かず付与しない。
+ *   その中間のときだけ乱数を1つ消費する。これにより「付与確率1.0・耐性0」の既存経路は
+ *   現状どおり乱数を引かず、combat-balance.test のRNG列がバイト一致で保存される。
+ */
+export function effectiveInflictChance(baseChance: number, resistance: number): number {
+  return baseChance * (1 - clampResistance(resistance));
+}
+
 /** 状態異常の表示名(UIメッセージ用) */
 export const STATUS_DISPLAY_NAMES: Record<StatusId, string> = {
   poison: "毒",

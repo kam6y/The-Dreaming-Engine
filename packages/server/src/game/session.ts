@@ -12,6 +12,7 @@ import {
   addItem,
   advanceDay,
   applyPartyWipe,
+  battleItemToConsume,
   bossAt,
   midBossAt,
   isMidBossEnemyId,
@@ -627,8 +628,19 @@ export class GameSession {
     if (this.mode !== "battle" || this.battle === null) {
       return this.errorMsgs("invalid-mode", "今は戦っていない。");
     }
+    // どうぐは所持していない品を受け付けない(クライアントは所持品のみ提示するが二重防御。ラウンドを進めない)
+    if (command.kind === "item" && countOf(this.requireState().inventory, command.itemId) <= 0) {
+      return this.errorMsgs("not-owned", "それは持っていない。");
+    }
     const result = resolveTurn(this.battle, command);
     this.battle = result.state;
+    // どうぐ消費: 実際に使用された(該当 itemId の item-used イベントがある)ときだけ数量を1つ減らす。
+    // 竦みで行動不能=不発(action-skipped・item-used なし)や却下時は減算しない(battleItemToConsume が判定)。
+    const consumed = battleItemToConsume(command, result.events);
+    if (consumed !== null) {
+      const state = this.requireState();
+      state.inventory = removeItem(state.inventory, consumed, 1).inventory;
+    }
     // 勝敗を適用してから(状態を確定してから)スナップショットを組む
     const trailing = await this.settleBattleOutcome(result.state, result.events);
     return [{ type: "battle-events", events: result.events }, this.snapshotMsg(), ...trailing];
@@ -1811,5 +1823,13 @@ export class GameSession {
   /** 現在の GameState(セーブ形)を取得する(テスト用。undefined なら未開始) */
   public getState(): GameState | null {
     return this.state;
+  }
+
+  /**
+   * 現在の戦闘状態を取得する(テスト用。非戦闘中は null)。
+   * 状態異常(竦み等)を差し込んで層跨ぎのガード(どうぐ消費の不発時非減算)を検証するのに使う。
+   */
+  public getBattleForTest(): BattleState | null {
+    return this.battle;
   }
 }

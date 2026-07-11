@@ -624,6 +624,66 @@ describe("戦闘解決", () => {
 });
 
 // ===========================================================================
+// 戦闘中のどうぐ消費(インベントリ減算とガード。M21-3)
+// ===========================================================================
+
+describe("戦闘中のどうぐ消費(M21-3)", () => {
+  it("どうぐを使うとインベントリから1個減り、item-used が出る", async () => {
+    const { session } = await sessionInBattle();
+    // 回復薬(小)を2個持たせる(満HPでも item-used は出て消費される=戦闘での使用)
+    mustState(session).inventory = addItem(emptyInventory(), "potion-small", 2).inventory;
+    expect(countOf(mustState(session).inventory, "potion-small")).toBe(2);
+
+    const msgs = await session.handle({ type: "battle-command", command: { kind: "item", itemId: "potion-small" } });
+    const events = battleEventsOf(msgs).events;
+    expect(events.some((e) => e.type === "item-used" && e.itemId === "potion-small")).toBe(true);
+    // インベントリは1個減る。スナップショットにも反映される。
+    expect(countOf(mustState(session).inventory, "potion-small")).toBe(1);
+    const view = firstSnapshot(msgs);
+    expect(view.inventory.find((s) => s.itemId === "potion-small")?.count).toBe(1);
+  });
+
+  it("所持していないどうぐは not-owned で弾かれ、ラウンドを進めない", async () => {
+    const { session } = await sessionInBattle();
+    mustState(session).inventory = emptyInventory(); // 何も持たない
+    const turnBefore = mustView(session).battle?.turn ?? -1;
+    const msgs = await session.handle({ type: "battle-command", command: { kind: "item", itemId: "potion-small" } });
+    expectError(msgs, "not-owned");
+    // 戦闘は継続・ラウンドは進んでいない(コマンド却下)
+    expect(mustView(session).mode).toBe("battle");
+    expect(mustView(session).battle?.turn).toBe(turnBefore);
+  });
+
+  it("竦みで行動不能=不発のときはインベントリを減らさない(層跨ぎのガード)", async () => {
+    // 竦み中に回復薬を使い、行動不能ラウンドを引き当てて数量が減らないことを確認する。
+    // battle は private のためテスト用アクセサ経由で dread を差し込み、固定シード群で skip を引くまで試す。
+    let skipConfirmed = false;
+    for (let seed = 1; seed <= 60 && !skipConfirmed; seed += 1) {
+      const { session } = await sessionInBattle(seed);
+      mustState(session).inventory = addItem(emptyInventory(), "potion-small", 2).inventory;
+      const battle = session.getBattleForTest();
+      if (battle === null) continue;
+      battle.player.statuses = [{ id: "dread", remainingTurns: 2 }];
+
+      const msgs = await session.handle({ type: "battle-command", command: { kind: "item", itemId: "potion-small" } });
+      const events = battleEventsOf(msgs).events;
+      const skipped = events.some((e) => e.type === "action-skipped" && e.actor === "player");
+      if (skipped) {
+        skipConfirmed = true;
+        // 行動不能=不発: item-used なし・インベントリは減っていない
+        expect(events.some((e) => e.type === "item-used")).toBe(false);
+        expect(countOf(mustState(session).inventory, "potion-small")).toBe(2);
+      } else {
+        // 行動できたラウンドでは1個減る(happy path の回帰)
+        expect(events.some((e) => e.type === "item-used" && e.itemId === "potion-small")).toBe(true);
+        expect(countOf(mustState(session).inventory, "potion-small")).toBe(1);
+      }
+    }
+    expect(skipConfirmed).toBe(true);
+  });
+});
+
+// ===========================================================================
 // 調べる・話す
 // ===========================================================================
 

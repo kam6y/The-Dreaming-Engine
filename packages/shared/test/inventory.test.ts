@@ -121,7 +121,9 @@ describe("店(在庫・価格)", () => {
     expect(SHOP_STOCK).toContain("warded-mail");
   });
 
-  it("在庫の並び順は 消耗品 → 武器(初級→上級)→ 防具(初級→上級)", () => {
+  it("在庫の並び順は 消耗品 → 武器(初級→上級)→ 防具(初級→上級)→ 灯明(M21-3で末尾へ追加)", () => {
+    // 灯明(眩惑・竦みの解除具)は末尾へ追加した(在庫順に依存する既存E2E=先頭購入・
+    // 装備インデックスを壊さないため。shop.ts のコメント参照)。
     expect(SHOP_STOCK).toEqual([
       "potion-small",
       "potion-mid",
@@ -129,7 +131,8 @@ describe("店(在庫・価格)", () => {
       "worn-blade",
       "amber-blade",
       "worn-cloak",
-      "warded-mail"
+      "warded-mail",
+      "warding-light"
     ]);
   });
 

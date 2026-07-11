@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { createEmptyEquipment, effectiveStats } from "../equipment.js";
+import { createEmptyEquipment, effectiveStats, effectiveStatusResistances } from "../equipment.js";
 import type { Equipment } from "../equipment.js";
 import { ENEMY_DISPLAY_NAMES, enemyIdSchema } from "../ids.js";
 import type { EnemyId } from "../ids.js";
@@ -15,8 +15,8 @@ import { isSkillLearned, SKILLS } from "./skills.js";
 import { skillIdSchema } from "./skills.js";
 import type { BuffSkillDefinition } from "./skills.js";
 import { statsForLevel, xpToNext, MAX_LEVEL } from "./stats.js";
-import { STATUS_DEFS, STATUS_DISPLAY_NAMES, statusIdSchema, statusStateSchema } from "./status.js";
-import type { StatusId, StatusState } from "./status.js";
+import { effectiveInflictChance, STATUS_DEFS, STATUS_DISPLAY_NAMES, statusIdSchema, statusStateSchema } from "./status.js";
+import type { StatusId, StatusResistances, StatusState } from "./status.js";
 
 // ---------------------------------------------------------------------------
 // プレイヤーの永続進行状態(戦闘の入出力。セーブ対象の一部)
@@ -76,6 +76,11 @@ export interface BattlePlayerState {
   defense: number;
   speed: number;
   statuses: StatusState[];
+  /**
+   * 状態異常への耐性(装備由来。M21-3)。付与時に (1 − 耐性) 倍される。戦闘生成時に装備から導出し、
+   * 戦闘中は不変(装備は戦闘中に変えられない)。セーブには持たない(装備から都度導出)。
+   */
+  resistances: StatusResistances;
   /** 発動中の防御バフ(なければ null)。実効防御へ加算される(M9-2 灯守りの構え) */
   defenseBuff: DefenseBuffState | null;
 }
@@ -88,6 +93,8 @@ export interface BattleEnemyState {
   defense: number;
   speed: number;
   statuses: StatusState[];
+  /** 状態異常への耐性(敵定義由来。M21-3)。付与時に (1 − 耐性) 倍される。 */
+  resistances: StatusResistances;
   /** 現在の行動フェーズ(enemies の phases インデックス)。HP減少で前進のみ */
   phaseIndex: number;
   /** 現フェーズ内のローテーション位置(行動ごとに +1) */
@@ -292,6 +299,8 @@ export function createBattle(
     defense: stats.defense,
     speed: stats.speed,
     statuses: [],
+    // 装備由来の状態異常耐性(空装備なら全0=従来と同一挙動)。
+    resistances: effectiveStatusResistances(equipment),
     defenseBuff: null
   };
 
@@ -303,6 +312,8 @@ export function createBattle(
     defense: def.stats.defense,
     speed: def.stats.speed,
     statuses: [],
+    // 敵定義由来の状態異常耐性(省略時は全0)。参照共有を避けて浅くコピーする。
+    resistances: { ...(def.resistances ?? {}) },
     phaseIndex: 0,
     rotationStep: 0
   };
@@ -385,9 +396,18 @@ function rollAttackMiss(next: BattleState, actor: Combatant, rng: Rng, events: B
   return true;
 }
 
+/** 対象の状態異常kindへの耐性(0-1。未設定は0)。M21-3 */
+function statusResistanceOf(unit: BattlePlayerState | BattleEnemyState, status: StatusId): number {
+  return unit.resistances[status] ?? 0;
+}
+
 /**
- * 付与確率に従って状態異常を付与する(M21)。chance>=1(既定)なら付与ロールをせず必ず付与する
- * (乱数を引かない=既存の毒付与技・スキルの挙動を保存する)。chance<1 のときだけ乱数を1つ消費する。
+ * 付与確率と対象の耐性に従って状態異常を付与する(M21)。
+ * 実効付与確率 = chance ×(1 − 対象の耐性)(effectiveInflictChance)。
+ * - 実効>=1(=付与確率>=1 かつ 耐性0)なら付与ロールをせず必ず付与する(乱数を引かない=
+ *   既存の毒付与技・スキルの挙動を保存し、combat-balance.test のRNG列をバイト一致で保つ)。
+ * - 実効<=0(=耐性1.0で完全無効、または付与確率0)なら乱数を引かず付与しない。
+ * - その中間のときだけ乱数を1つ消費して付与判定する。
  */
 function maybeInflict(
   next: BattleState,
@@ -397,11 +417,14 @@ function maybeInflict(
   rng: Rng,
   events: BattleEvent[]
 ): void {
-  if (chance >= 1) {
+  const unit = target === "player" ? next.player : next.enemy;
+  const effective = effectiveInflictChance(chance, statusResistanceOf(unit, status));
+  if (effective >= 1) {
     inflictStatus(next, target, status, events);
     return;
   }
-  if (rng.next() < chance) {
+  if (effective <= 0) return; // 完全耐性 or 付与確率0 → ロールなし・付与なし
+  if (rng.next() < effective) {
     inflictStatus(next, target, status, events);
   }
 }
@@ -675,17 +698,30 @@ function applyItem(next: BattleState, itemId: ItemId, events: BattleEvent[]): vo
   events.push({ type: "item-used", itemId, itemName: item.name, message: `旅人は${item.name}を使った。` });
   const effect = item.battleEffect;
   if (!effect) return; // validateCommand で弾かれるため到達しない
-  if (effect.kind === "heal-hp") {
-    healTarget(next, "player", effect.amount, events, `${item.name}が、旅人の傷を癒した。`);
+  switch (effect.kind) {
+    case "heal-hp":
+      healTarget(next, "player", effect.amount, events, `${item.name}が、旅人の傷を癒した。`);
+      break;
+    case "cure-status":
+      cureStatus(next, effect.status, events);
+      break;
+    case "cure-statuses":
+      // 複数の状態異常をまとめて鎮める(灯明=眩惑・竦み。M21-3)。各kindごとに単一治療と同じ流儀で
+      // status-cured を積む(付与中は「鎮まった」・非付与は「巣食っていなかった」)。付随イベントは既存型のみ。
+      for (const status of effect.statuses) cureStatus(next, status, events);
+      break;
+  }
+}
+
+/** 単一の状態異常を治す(付与中なら除去+status-cured、なければ「巣食っていなかった」旨を出す)。M21-3で共通化 */
+function cureStatus(next: BattleState, status: StatusId, events: BattleEvent[]): void {
+  const unit = next.player;
+  const existing = findStatus(unit.statuses, status);
+  if (existing) {
+    unit.statuses = unit.statuses.filter((s) => s.id !== status);
+    events.push({ type: "status-cured", target: "player", status, message: `${STATUS_DISPLAY_NAMES[status]}が鎮まった。` });
   } else {
-    const unit = next.player;
-    const existing = findStatus(unit.statuses, effect.status);
-    if (existing) {
-      unit.statuses = unit.statuses.filter((s) => s.id !== effect.status);
-      events.push({ type: "status-cured", target: "player", status: effect.status, message: `${STATUS_DISPLAY_NAMES[effect.status]}が鎮まった。` });
-    } else {
-      events.push({ type: "status-cured", target: "player", status: effect.status, message: `だが、${STATUS_DISPLAY_NAMES[effect.status]}は巣食っていなかった。` });
-    }
+    events.push({ type: "status-cured", target: "player", status, message: `だが、${STATUS_DISPLAY_NAMES[status]}は巣食っていなかった。` });
   }
 }
 
@@ -831,4 +867,24 @@ export function applyPartyWipe(progress: PlayerProgress): PartyWipeResult {
     },
     goldLost: parsed.gold - remainingGold
   };
+}
+
+// ---------------------------------------------------------------------------
+// 戦闘アイテムの消費判定(サーバーのインベントリ減算ガード。M21-3)
+// ---------------------------------------------------------------------------
+
+/**
+ * どうぐコマンドの結果イベント列から、インベントリから減らすべきアイテムIDを返す(消費なしは null)。
+ *
+ * 戦闘エンジンは「アイテムが実際に使われた」ときだけ item-used イベントを積む(applyItem 内)。
+ * 竦み(dread)で行動不能=不発のとき(rollActionIncapacitated が true で行動を丸ごと失う)や、
+ * コマンド却下(command-rejected)のときは applyItem を呼ばないため item-used が出ない。
+ * よって「該当 itemId の item-used が存在する」ことを消費の正確な信号とする
+ * (= action-skipped/command-rejected では消費しない)。サーバー(session.ts)はこの判定に
+ * 従ってインベントリ数量を1つ減らす。エンジン外の状態(インベントリ)はサーバーが唯一の正本。
+ */
+export function battleItemToConsume(command: BattleCommand, events: readonly BattleEvent[]): ItemId | null {
+  if (command.kind !== "item") return null;
+  const used = events.some((e) => e.type === "item-used" && e.itemId === command.itemId);
+  return used ? command.itemId : null;
 }

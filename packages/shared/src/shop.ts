@@ -23,7 +23,11 @@ export const SHOP_STOCK: readonly ItemId[] = [
   "potion-mid",
   "antidote",
   ...WEAPON_ITEM_IDS,
-  ...ARMOR_ITEM_IDS
+  ...ARMOR_ITEM_IDS,
+  // 灯明(眩惑・竦みの解除具。M21-3)は末尾へ追加する。
+  // 既存の在庫先頭(=回復薬(小))と装備の並び順(worn-blade がインデックス3)を変えず、
+  // 在庫順に依存する既存E2E(world-events=先頭購入 / equipment=3つ下=錆びた片刃)を壊さないため。
+  "warding-light"
 ];
 
 /**

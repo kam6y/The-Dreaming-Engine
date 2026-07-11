@@ -4,7 +4,7 @@ import { enemyIdSchema } from "../ids.js";
 import type { EnemyId } from "../ids.js";
 import type { CombatantStats } from "./stats.js";
 import type { ItemId } from "./items.js";
-import type { StatusId } from "./status.js";
+import type { StatusId, StatusResistances } from "./status.js";
 
 // ---------------------------------------------------------------------------
 // 敵の行動(技)カタログ — 決定論的な行動選択で参照する
@@ -25,7 +25,10 @@ export const enemyMoveIdSchema = z.enum([
   "whisper", // 囁き仮面: 囁き(通常)
   "rust-gnaw", // 錆喰い: 錆びた顎(通常)
   "thread-lash", // 紡ぎ損ない: 解れ糸の鞭
-  "unravel" // 紡ぎ損ない第2形態: 締めあげ(高倍率)
+  "unravel", // 紡ぎ損ない第2形態: 締めあげ(高倍率)
+  // --- M21-3拡張(眩惑/竦みを付与する新move。付与確率<1・combat-balance統計対象外の雑魚専用) ---
+  "guttering-glare", // 蝋燭喰らい: 揺らめく焔で視界を惑わす(眩惑)
+  "creaking-dread" // 軋み人形: 軋みが不安を掻き立てる(竦み)
 ]);
 export type EnemyMoveId = z.infer<typeof enemyMoveIdSchema>;
 
@@ -69,7 +72,23 @@ export const ENEMY_MOVES: Record<EnemyMoveId, EnemyMoveDefinition> = {
   whisper: { id: "whisper", flavor: "は聞き取れない声で囁いた。", powerMultiplier: 1.0 },
   "rust-gnaw": { id: "rust-gnaw", flavor: "は錆びた顎で軋み噛んだ。", powerMultiplier: 1.05 },
   "thread-lash": { id: "thread-lash", flavor: "は解れた糸を鞭のように振るった。", powerMultiplier: 1.1 },
-  unravel: { id: "unravel", flavor: "は喪った糸を手繰り寄せ、軋みながら締めあげた。", powerMultiplier: 1.5 }
+  unravel: { id: "unravel", flavor: "は喪った糸を手繰り寄せ、軋みながら締めあげた。", powerMultiplier: 1.5 },
+  // --- M21-3拡張。付与確率<1(裁量)=battle.ts が乱数を1つ消費して付与判定する。
+  // 割り当て先(蝋燭喰らい/軋み人形)は combat-balance.test の統計対象外=既存閾値に非干渉。 ---
+  "guttering-glare": {
+    id: "guttering-glare",
+    flavor: "は蝋涙の焔を掲げ、揺らめく光で視界を惑わせた。",
+    powerMultiplier: 0.9,
+    inflicts: "dazzle",
+    inflictChance: 0.5
+  },
+  "creaking-dread": {
+    id: "creaking-dread",
+    flavor: "は継ぎ目を軋ませ、底知れぬ不安を掻き立てた。",
+    powerMultiplier: 0.85,
+    inflicts: "dread",
+    inflictChance: 0.4
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -112,6 +131,13 @@ export interface EnemyDefinition {
   /** 行動フェーズ(hpThreshold 降順)。雑魚は単一フェーズ、ボスは2形態 */
   phases: EnemyBehaviorPhase[];
   reward: EnemyReward;
+  /**
+   * 状態異常への耐性(0-1・省略時は全kind 0=耐性なし。M21-3)。付与時に (1 − 耐性) 倍される。
+   * combat-balance.test の方策はプレイヤー→敵への状態異常付与を行わないため、
+   * 敵の耐性を設定しても統計対象の戦闘には一切干渉しない(既存閾値を保存)。
+   * 毒へは付与しない方針(既存の毒挙動を保存)。
+   */
+  resistances?: StatusResistances;
 }
 
 /**
@@ -133,31 +159,35 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
       drop: { itemId: "potion-small", chance: 0.2 }
     }
   },
-  // 蝋燭喰らい(ダンジョン浅層)
+  // 蝋燭喰らい(ダンジョン浅層)— 眩惑を持つ(M21-3)。自らが焔ゆえ、揺らめく光に惑わされない(眩惑耐性)。
   "candle-eater": {
     id: "candle-eater",
     displayName: "蝋燭喰らい",
     stats: { maxHP: 32, maxMP: 0, attack: 9, defense: 4, speed: 8 },
     isBoss: false,
-    phases: [{ hpThreshold: 1.0, rotation: ["strike", "heavy"] }],
+    // rotation[0]=strike を維持(status-effects.test のRNG列不変が1手目に依存)。眩惑moveは2手目。
+    phases: [{ hpThreshold: 1.0, rotation: ["strike", "guttering-glare", "heavy"] }],
     reward: {
       xp: 9,
       gold: { min: 6, max: 12 },
       drop: { itemId: "potion-small", chance: 0.25 }
-    }
+    },
+    resistances: { dazzle: 0.5 }
   },
-  // 軋み人形(ダンジョン深層)— 毒を持つ
+  // 軋み人形(ダンジョン深層)— 毒と竦みを持つ(M21-3)。継ぎ接ぎの人形ゆえ、竦みに沈まない(竦み耐性)。
   "creaking-doll": {
     id: "creaking-doll",
     displayName: "軋み人形",
     stats: { maxHP: 48, maxMP: 0, attack: 12, defense: 7, speed: 6 },
     isBoss: false,
-    phases: [{ hpThreshold: 1.0, rotation: ["strike", "poison-bite", "heavy"] }],
+    // rotation[0]=strike / rotation[1]=poison-bite を維持(status-effects.test が1-2手目に依存)。竦みmoveは3手目。
+    phases: [{ hpThreshold: 1.0, rotation: ["strike", "poison-bite", "creaking-dread", "heavy"] }],
     reward: {
       xp: 16,
       gold: { min: 12, max: 20 },
       drop: { itemId: "antidote", chance: 0.25 }
-    }
+    },
+    resistances: { dread: 0.5 }
   },
   // 夢喰い(ボス)— HP多め・2形態(HP50%以下で行動変化)。推奨Lv5-6
   "dream-eater": {

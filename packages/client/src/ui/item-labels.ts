@@ -21,5 +21,9 @@ export function itemShortLabel(itemId: ItemId): string {
   if (effect.kind === "heal-hp") {
     return `(HP+${effect.amount})`;
   }
-  return `(${STATUS_DISPLAY_NAMES[effect.status]}を治す)`;
+  if (effect.kind === "cure-status") {
+    return `(${STATUS_DISPLAY_NAMES[effect.status]}を治す)`;
+  }
+  // cure-statuses(灯明=眩惑・竦みの解除。M21-3の型追従。演出詳細はM21-4)
+  return `(${effect.statuses.map((s) => STATUS_DISPLAY_NAMES[s]).join("・")}を治す)`;
 }

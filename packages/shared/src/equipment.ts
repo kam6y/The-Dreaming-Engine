@@ -9,6 +9,8 @@ import {
 import type { EquipmentSlot, ItemId } from "./combat/items.js";
 import { statsForLevel } from "./combat/stats.js";
 import type { CombatantStats } from "./combat/stats.js";
+import { clampResistance, statusIdSchema } from "./combat/status.js";
+import type { StatusId, StatusResistances } from "./combat/status.js";
 import { addItem, canAdd, countOf, removeItem } from "./inventory.js";
 import type { Inventory } from "./inventory.js";
 
@@ -103,4 +105,32 @@ export function effectiveStats(level: number, equipment: Equipment): CombatantSt
     attack: base.attack + atkBonus,
     defense: base.defense + defBonus
   };
+}
+
+/**
+ * 装備由来の状態異常耐性(M21-3)。装備中の武器・防具の resistances を kind ごとに合算し、
+ * 0.0〜1.0 にクランプして返す(複数装備が同じ kind へ耐性を持つ場合は加算・上限1.0)。
+ * プレイヤーの耐性は装備由来のみ(レベル基礎値には持たせない=game-design.md「耐性」)。
+ * 空装備なら空の耐性(すべて0)を返し、装備なしの計測(combat-balance.test)へ一切影響しない。
+ */
+export function effectiveStatusResistances(equipment: Equipment): StatusResistances {
+  const totals: Partial<Record<StatusId, number>> = {};
+  const slots = [equipment.weapon, equipment.armor];
+  for (const itemId of slots) {
+    if (itemId === null) continue;
+    const res = ITEMS[itemId].resistances;
+    if (res === undefined) continue;
+    for (const [kind, value] of Object.entries(res)) {
+      // Object.entries のキーは string なので StatusId へ厳格に絞り込む(想定外キーは無視)
+      const parsed = statusIdSchema.safeParse(kind);
+      if (!parsed.success || value === undefined) continue;
+      totals[parsed.data] = (totals[parsed.data] ?? 0) + value;
+    }
+  }
+  const result: StatusResistances = {};
+  for (const [kind, value] of Object.entries(totals)) {
+    const parsed = statusIdSchema.safeParse(kind);
+    if (parsed.success && value !== undefined) result[parsed.data] = clampResistance(value);
+  }
+  return result;
 }
