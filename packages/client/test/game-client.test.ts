@@ -138,6 +138,8 @@ function sampleView(): SnapshotView {
       effectiveDefense: 5
     },
     day: state.day,
+    // 時間帯(M23。view 必須フィールド追従)。新規ゲームは昼開始
+    timeOfDay: "day",
     playtimeSeconds: 0,
     location: state.location,
     inventory: [{ itemId: "potion-small", name: "回復薬(小)", count: 2, questItem: false }],

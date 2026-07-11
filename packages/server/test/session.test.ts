@@ -3,6 +3,7 @@ import {
   INITIAL_GOLD,
   INN_COST,
   INVENTORY_CAPACITY,
+  NIGHTFALL_STEPS,
   NPC_DISPLAY_NAMES,
   TOWN_WAKE_POINT,
   addItem,
@@ -1890,5 +1891,186 @@ describe("宿泊", () => {
     // セーブ後も基点を引き継いで加算される
     advance(10_000);
     expect(mustView(session).playtimeSeconds).toBe(130);
+  });
+});
+
+// ===========================================================================
+// 昼夜サイクル(M23-2。歩数進行・時間帯配置の衝突/対話・リセット・固定オプション)
+// ===========================================================================
+
+describe("昼夜サイクル(M23)", () => {
+  /**
+   * 灯町で (10,10)⇄(9,10) を往復して「移動成立」を n 回積む(どちらも床・非占有)。
+   * 途中で移動が不成立になったらテスト前提の破れとして失敗させる。
+   */
+  async function paceTownSteps(session: GameSession, n: number): Promise<void> {
+    let dir: Direction = "left";
+    for (let i = 0; i < n; i += 1) {
+      const before = { ...mustView(session).location.position };
+      await session.handle({ type: "move", direction: dir });
+      const after = mustView(session).location.position;
+      if (samePosition(before, after)) throw new Error("往復歩行が塞がれた(テスト前提の破れ)");
+      dir = dir === "left" ? "right" : "left";
+    }
+  }
+
+  it("新規ゲームは昼で始まり、view に timeOfDay が載る", async () => {
+    const { session } = createSession();
+    const view = firstSnapshot(await session.handle({ type: "new-game" }));
+    expect(view.timeOfDay).toBe("day");
+    expect(session.getDayStepsForTest()).toBe(0);
+  });
+
+  it("移動成立39歩では昼のまま、40歩目で夜になる(閾値境界)", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    await paceTownSteps(session, NIGHTFALL_STEPS - 1);
+    expect(mustView(session).timeOfDay).toBe("day");
+    await paceTownSteps(session, 1);
+    expect(mustView(session).timeOfDay).toBe("night");
+    expect(session.getDayStepsForTest()).toBe(NIGHTFALL_STEPS);
+  });
+
+  it("衝突(NPC・壁)で動けなかった移動は歩数に数えない", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    // (10,10)→左へ5歩で (5,10)。その先 (4,10) は情報屋カイの占有マス
+    for (let i = 0; i < 5; i += 1) await session.handle({ type: "move", direction: "left" });
+    expect(session.getDayStepsForTest()).toBe(5);
+    // NPC 占有マスへの移動は不成立=加算しない
+    await session.handle({ type: "move", direction: "left" });
+    await session.handle({ type: "move", direction: "left" });
+    expect(mustView(session).location.position).toEqual({ x: 5, y: 10 });
+    expect(session.getDayStepsForTest()).toBe(5);
+    // 壁への移動も不成立=加算しない((5,11) は霧笛亭の壁)
+    await session.handle({ type: "move", direction: "down" });
+    expect(session.getDayStepsForTest()).toBe(5);
+  });
+
+  it("敵シンボルへの踏み込み(戦闘開始=移動なし)は歩数に数えない", async () => {
+    const ctx = createSession({ seed: 1, noSymbols: false });
+    ctx.store.loadResult = { ok: true, state: fieldState() };
+    await ctx.session.handle({ type: "continue" });
+    await engageBattle(ctx.session);
+    expect(mustView(ctx.session).mode).toBe("battle");
+    expect(ctx.session.getDayStepsForTest()).toBe(0);
+  });
+
+  it("夜は商人が霧笛亭脇 (7,11) に居て店を開ける(正面インタラクションが時間帯配置)", async () => {
+    const { session } = createSession(); // 既定 aiMode=mock
+    await session.handle({ type: "new-game", options: { timeOfDay: "night" } });
+    expect(mustView(session).timeOfDay).toBe("night");
+    // 夜位置 (7,11) の正面 (8,11) から左向きで interact → 店が開く
+    mustState(session).location.position = { x: 8, y: 11 };
+    mustState(session).location.facing = "left";
+    const msgs = await session.handle({ type: "interact" });
+    const snap = firstSnapshot(msgs);
+    if (snap.interaction?.kind !== "shop") throw new Error("店が開いていない");
+    expect(snap.interaction.npcId).toBe("merchant");
+    // 昼位置 (16,4) の正面 (16,5) からは誰も居ない
+    mustState(session).location.position = { x: 16, y: 5 };
+    mustState(session).location.facing = "up";
+    const empty = await session.handle({ type: "interact" });
+    expect(dialogsOf(empty)[0]?.body).toContain("何もない");
+  });
+
+  it("占有判定が時間帯配置: 夜は昼位置 (16,4) へ歩けて夜位置 (7,11) は塞がる(昼は逆)", async () => {
+    // 夜: 商人が (16,4) を空けて (7,11) を塞ぐ
+    const night = createSession();
+    await night.session.handle({ type: "new-game", options: { timeOfDay: "night" } });
+    mustState(night.session).location.position = { x: 16, y: 5 };
+    await night.session.handle({ type: "move", direction: "up" });
+    expect(mustView(night.session).location.position).toEqual({ x: 16, y: 4 });
+    mustState(night.session).location.position = { x: 8, y: 11 };
+    await night.session.handle({ type: "move", direction: "left" });
+    expect(mustView(night.session).location.position).toEqual({ x: 8, y: 11 }); // 塞がる
+    // 昼: 商人が (16,4) を塞ぎ (7,11) は空く
+    const day = createSession();
+    await day.session.handle({ type: "new-game" });
+    mustState(day.session).location.position = { x: 16, y: 5 };
+    await day.session.handle({ type: "move", direction: "up" });
+    expect(mustView(day.session).location.position).toEqual({ x: 16, y: 5 }); // 塞がる
+    mustState(day.session).location.position = { x: 8, y: 11 };
+    await day.session.handle({ type: "move", direction: "left" });
+    expect(mustView(day.session).location.position).toEqual({ x: 7, y: 11 });
+  });
+
+  it("宿泊(日送り)で昼へ戻り歩数もリセットされる(夜でも宿は据え置きで利用できる)", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    await paceTownSteps(session, NIGHTFALL_STEPS);
+    expect(mustView(session).timeOfDay).toBe("night");
+    // 夜でも宿屋オルガ (4,4) は据え置き=正面 (4,5) から宿が開く(ソフトロックしない)
+    mustState(session).location.position = { x: 4, y: 5 };
+    mustState(session).location.facing = "up";
+    await session.handle({ type: "interact" });
+    const msgs = await session.handle({ type: "rest" });
+    const view = firstSnapshot(msgs);
+    expect(view.timeOfDay).toBe("day");
+    expect(view.day).toBe(2);
+    expect(session.getDayStepsForTest()).toBe(0);
+  });
+
+  it("全滅帰還(翌朝の目覚め)で昼へ戻る", async () => {
+    const { session } = createSession({ seed: 1, noSymbols: false });
+    await session.handle({ type: "new-game" });
+    await paceTownSteps(session, NIGHTFALL_STEPS);
+    expect(mustView(session).timeOfDay).toBe("night");
+    // 南の門からフィールドへ((10,10)→右→下×4で遷移マス (11,14) へ)
+    await session.handle({ type: "move", direction: "right" });
+    for (let i = 0; i < 4; i += 1) await session.handle({ type: "move", direction: "down" });
+    expect(mustView(session).location.mapId).toBe("field");
+    expect(mustView(session).timeOfDay).toBe("night"); // マップ遷移では時間帯は変わらない
+    // HP1 で戦闘に入り全滅する
+    mustState(session).player.hp = 1;
+    await engageBattle(session);
+    let rounds = 0;
+    while (mustView(session).mode === "battle") {
+      await session.handle({ type: "battle-command", command: { kind: "attack" } });
+      rounds += 1;
+      if (rounds > 10) throw new Error("戦闘が終わらない(想定外)");
+    }
+    const view = mustView(session);
+    expect(view.location.mapId).toBe(TOWN_WAKE_POINT.mapId);
+    expect(view.day).toBe(2); // 全滅で日送り
+    expect(view.timeOfDay).toBe("day"); // 翌朝=昼へリセット
+    expect(session.getDayStepsForTest()).toBe(0);
+  });
+
+  it("つづきから(ロード)で昼へ戻る(時間帯はセーブに永続化しない)", async () => {
+    const { session, store } = createSession();
+    store.loadResult = { ok: true, state: createNewGameState() };
+    await session.handle({ type: "new-game" });
+    await paceTownSteps(session, NIGHTFALL_STEPS);
+    expect(mustView(session).timeOfDay).toBe("night");
+    const snap = firstSnapshot(await session.handle({ type: "continue" }));
+    expect(snap.timeOfDay).toBe("day");
+    expect(session.getDayStepsForTest()).toBe(0);
+  });
+
+  it("timeOfDay固定オプションは mock のみ尊重し、live では無視して昼開始を守る", async () => {
+    const live = createSession({ aiMode: "live" });
+    const view = firstSnapshot(
+      await live.session.handle({ type: "new-game", options: { timeOfDay: "night" } })
+    );
+    expect(view.timeOfDay).toBe("day");
+  });
+
+  it("timeOfDay固定は進行・リセットに勝つ(day固定は40歩でも昼・night固定は宿泊後も夜)", async () => {
+    // day 固定: 40歩歩いても夜にならない(長い spec の昼固定用)
+    const pinnedDay = createSession();
+    await pinnedDay.session.handle({ type: "new-game", options: { timeOfDay: "day" } });
+    await paceTownSteps(pinnedDay.session, NIGHTFALL_STEPS);
+    expect(mustView(pinnedDay.session).timeOfDay).toBe("day");
+    // night 固定: 宿泊の日送り後も夜のまま(固定=決定論再現の意味論)
+    const pinnedNight = createSession();
+    await pinnedNight.session.handle({ type: "new-game", options: { timeOfDay: "night" } });
+    mustState(pinnedNight.session).location.position = { x: 4, y: 5 };
+    mustState(pinnedNight.session).location.facing = "up";
+    await pinnedNight.session.handle({ type: "interact" });
+    await pinnedNight.session.handle({ type: "rest" });
+    const view = mustView(pinnedNight.session);
+    expect(view.day).toBe(2);
+    expect(view.timeOfDay).toBe("night");
   });
 });

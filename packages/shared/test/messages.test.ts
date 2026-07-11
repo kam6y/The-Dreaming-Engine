@@ -40,6 +40,23 @@ describe("クライアント→サーバー 操作メッセージ(M3)", () => {
     expect(withOptions).toEqual({ type: "new-game", options: { seed: 42, noSymbols: true } });
   });
 
+  it("new-gameのtimeOfDay固定オプション(M23)はday/nightのみ受理する", () => {
+    const night = clientMessageSchema.parse({
+      type: "new-game",
+      options: { timeOfDay: "night" }
+    });
+    expect(night).toEqual({ type: "new-game", options: { timeOfDay: "night" } });
+    expect(() =>
+      clientMessageSchema.parse({ type: "new-game", options: { timeOfDay: "dusk" } })
+    ).toThrow();
+    // continue は部分集合(seed/noSymbols)のみ=timeOfDay は剥がされる(常に昼で再開)
+    const stripped = clientMessageSchema.parse({
+      type: "continue",
+      options: { seed: 7, timeOfDay: "night" }
+    });
+    expect(stripped).toEqual({ type: "continue", options: { seed: 7 } });
+  });
+
   it("continue / interact / restは追加フィールド無しでパースできる", () => {
     expect(clientMessageSchema.parse({ type: "continue" })).toEqual({ type: "continue" });
     expect(clientMessageSchema.parse({ type: "interact" })).toEqual({ type: "interact" });
@@ -147,6 +164,8 @@ describe("サーバー→クライアント メッセージ(M3)", () => {
         effectiveDefense: 5
       },
       day: state.day,
+      // 時間帯(M23。view 必須フィールド)。新規ゲームは昼開始
+      timeOfDay: "day",
       playtimeSeconds: 0,
       location: state.location,
       inventory: [{ itemId: "potion-small", name: "回復薬(小)", count: 2, questItem: false }],

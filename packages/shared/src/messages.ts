@@ -18,6 +18,7 @@ import { mapIdSchema } from "./map.js";
 import { enemyIdSchema, npcIdSchema } from "./ids.js";
 import { affinityTierSchema } from "./npc.js";
 import { mainQuestStageSchema, subQuestStatusSchema, subQuestTypeSchema } from "./quests.js";
+import { timeOfDaySchema } from "./time-of-day.js";
 
 export const GAME_TITLE = "The Dreaming Engine";
 
@@ -218,6 +219,12 @@ export const snapshotViewSchema = z.object({
   player: viewPlayerSchema,
   /** ゲーム内日付(1日目〜) */
   day: z.number().int().positive(),
+  /**
+   * 時間帯(昼/夜。M23)。サーバーの非永続ランタイム状態(移動成立歩数で昼→夜、
+   * 新規/ロード/宿泊/全滅帰還で昼へリセット)。クライアントは描画(夜の帳・HUD)と
+   * NPC配置(npcPlacementsForTime(map, timeOfDay)=サーバーの衝突判定と同一の純関数)に使う。
+   */
+  timeOfDay: timeOfDaySchema,
   /** プレイ時間(秒) */
   playtimeSeconds: z.number().int().nonnegative(),
   /** 現在地(マップ・座標・向き)。戦闘中も直前の探索位置を保持 */
@@ -271,7 +278,13 @@ export const newGameOptionsSchema = z.object({
   seed: z.number().int().optional(),
   noSymbols: z.boolean().optional(),
   startLevel: z.number().int().min(1).max(MAX_LEVEL).optional(),
-  startGold: z.number().int().min(0).max(99999).optional()
+  startGold: z.number().int().min(0).max(99999).optional(),
+  /**
+   * 時間帯の固定(M23。テスト用・mock 限定=live では無視)。指定するとその時間帯に
+   * 固定され、歩数進行・昼リセットの影響を受けない("night"=夜スモークの決定論再現 /
+   * "day"=長い spec の昼固定)。startLevel と同流儀のテスト加速フラグ。
+   */
+  timeOfDay: timeOfDaySchema.optional()
 });
 
 export const clientNewGameMessageSchema = z.object({

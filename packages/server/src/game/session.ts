@@ -36,6 +36,7 @@ import {
   lootForChest,
   lootForGather,
   neighbor,
+  npcPlacementsForTime,
   receiveQuestParcel,
   reclaimQuestParcel,
   recordDelivery,
@@ -51,6 +52,7 @@ import {
   subQuestTargetLabel,
   sampleEnemySymbols,
   samePosition,
+  timeOfDayForSteps,
   shopStockEntries,
   statsForLevel,
   toPlayerProgress,
@@ -74,6 +76,7 @@ import {
   type GameState,
   type ItemId,
   type LootEntry,
+  type MapDefinition,
   type MapObject,
   type NpcId,
   type NpcMemory,
@@ -82,6 +85,7 @@ import {
   type ServerMessage,
   type SnapshotView,
   type SubQuest,
+  type TimeOfDay,
   type ViewBattle,
   type ViewEquipmentSlot,
   type ViewItemStack
@@ -253,6 +257,23 @@ export class GameSession {
 
   private mode: Mode = "exploration";
 
+  /**
+   * 時間帯(昼/夜。M23)。`mode` と同格の非永続ランタイム状態(セーブスキーマ変更なし=
+   * セーブは宿泊手順5のみで必ず日送り(→朝)の後のため、あらゆるセーブは昼で取られ、
+   * ロードは常に昼で再開できる: game-design.md「セーブ/ロードへの影響」)。
+   */
+  private timeOfDay: TimeOfDay = "day";
+
+  /** その日の移動成立歩数(M23。timeOfDay の唯一の進行源。リセット規則は resetTimeOfDay 参照) */
+  private daySteps = 0;
+
+  /**
+   * 時間帯の固定ピン(M23。テスト用・mock 限定)。new-game の options.timeOfDay で設定し、
+   * non-null の間は歩数進行・昼リセットに関わらずこの値に固定する(E2E の決定論再現用。
+   * live では無視して null のまま=通常進行)。continue では常に null(通常進行)。
+   */
+  private timeOfDayPin: TimeOfDay | null = null;
+
   private battle: BattleState | null = null;
 
   /** 戦闘中の敵シンボルの this.symbols 上のインデックス(勝利で除去する) */
@@ -407,6 +428,7 @@ export class GameSession {
     noSymbols?: boolean | undefined;
     startLevel?: number | undefined;
     startGold?: number | undefined;
+    timeOfDay?: TimeOfDay | undefined;
   }): ServerMessage[] {
     const seed = options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0);
     this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
@@ -420,6 +442,10 @@ export class GameSession {
       // 装備購入スモーク(M8-4)等の資金確保。startLevel と同じテスト加速の扱い
       this.state.player.gold = options.startGold;
     }
+    // テスト用の時間帯固定ピン(M23。startLevel と同流儀=mock 限定・live では無視)。
+    // resetRuntime(→resetTimeOfDay)がこのピンを参照するため、必ず先に確定する
+    this.timeOfDayPin =
+      options?.timeOfDay !== undefined && this.aiMode !== "live" ? options.timeOfDay : null;
     this.syncQuestSeq();
     this.resetRuntime();
     this.activeSince = this.clock();
@@ -456,6 +482,9 @@ export class GameSession {
       return this.errorMsgs("save-corrupted", "記録が霧に滲んでいる……新しく始めるほかないようだ。");
     }
     this.state = result.state;
+    // つづきからは常に通常進行(時間帯固定ピンなし)。ロードは必ず昼で再開する
+    // (セーブは必ず朝の状態で取られるため: game-design.md「セーブ/ロードへの影響」)
+    this.timeOfDayPin = null;
     this.syncQuestSeq();
     // E2E/デバッグ用の options(seed / noSymbols)で既定を上書きする。未指定なら従来どおり
     // 既定シード(GAME_SEED)→clock、既定 noSymbols(GAME_NO_SYMBOLS)を使う。
@@ -478,6 +507,45 @@ export class GameSession {
     this.battleSymbolIndex = null;
     this.activeInteraction = null;
     this.gatheredThisVisit.clear();
+    // 新規/ロードで時間帯は昼へ(M23。固定ピンがあればピンの値=テスト用の決定論再現)
+    this.resetTimeOfDay();
+  }
+
+  // =========================================================================
+  // 昼夜サイクル(M23。非永続ランタイム。進行源は移動成立歩数のみ)
+  // =========================================================================
+
+  /**
+   * 時間帯を昼(朝)へ戻し歩数カウンタを 0 にする(M23)。呼び出し元は仕様の4リセット点:
+   * 新規ゲーム/ロード(resetRuntime 経由)・宿泊(advanceDay の日送り直後)・全滅帰還。
+   * テスト用の固定ピン(mock 限定)がある場合はピンの値に固定する。
+   */
+  private resetTimeOfDay(): void {
+    this.daySteps = 0;
+    this.timeOfDay = this.timeOfDayPin ?? "day";
+  }
+
+  /**
+   * 移動が実際に成立した歩数を1つ積み、時間帯を再計算する(M23)。
+   * 呼び出すのは move の tryMove 成立時のみ(戦闘開始の踏み込み・衝突・ボス接触では
+   * 移動が成立しないため加算しない。調べる・会話・売買でも進めない=歩数が唯一の進行源)。
+   */
+  private registerStep(): void {
+    this.daySteps += 1;
+    this.timeOfDay = this.timeOfDayPin ?? timeOfDayForSteps(this.daySteps);
+  }
+
+  /**
+   * 現在地マップの時間帯適用済み定義(M23)。npcs を npcPlacementsForTime
+   * (配置の唯一の正。クライアント描画も同一関数を通す)の結果へ差し替えて返す。
+   * 移動衝突・正面インタラクション・占有判定は必ずこのマップに対して行う
+   * (絵と当たり判定の乖離防止)。変化が無い(昼・灯町以外)場合は元の定義をそのまま返す。
+   */
+  private currentMapForTime(): MapDefinition {
+    const state = this.requireState();
+    const map = MAPS[state.location.mapId];
+    const npcs = npcPlacementsForTime(map, this.timeOfDay);
+    return npcs === map.npcs ? map : { ...map, npcs };
   }
 
   /** 現在地のマップに入場する: 敵シンボルをサンプリングし、採取状態と対話をリセットする */
@@ -492,7 +560,9 @@ export class GameSession {
     const state = this.requireState();
     this.gatheredThisVisit.clear();
     this.activeInteraction = null;
-    const map = MAPS[state.location.mapId];
+    // 時間帯適用済みマップ(M23)。現状は夜上書きが灯町(safe=シンボルなし)のみで
+    // サンプリング結果は不変だが、占有判定の正を一元化しておく(将来の上書き拡張に備える)
+    const map = this.currentMapForTime();
     const sampled = this.noSymbols ? [] : sampleEnemySymbols(map, this.rng);
     // プレイヤーの現在マスに湧いたシンボルは除去(入場即戦闘を避ける)
     this.symbols = sampled.filter((s) => !samePosition(s.position, state.location.position));
@@ -510,7 +580,8 @@ export class GameSession {
     state.location.facing = direction;
     this.clearInteraction(); // 移動で対話は解除(会話中なら要約せず破棄)
 
-    const map = MAPS[state.location.mapId];
+    // 時間帯適用済みマップ(M23)。衝突・占有判定は夜配置(npcPlacementsForTime)に対して行う
+    const map = this.currentMapForTime();
     const target = neighbor(state.location.position, direction);
 
     // 敵シンボルへの踏み込み = 戦闘開始(移動はしない)
@@ -530,6 +601,8 @@ export class GameSession {
 
     const result = tryMove(map, state.location.position, direction);
     if (result.moved) {
+      // 移動成立=歩数を積んで時間帯を再計算(M23。衝突・戦闘開始・ボス接触では積まない)
+      this.registerStep();
       state.location.position = result.position;
       const transition = transitionAt(map, result.position);
       if (transition) {
@@ -721,6 +794,8 @@ export class GameSession {
         // 日送り(advanceDay: 日付+1・aiDaily/話題/street_event リセット)+ 縮退解除フック
         this.state = advanceDay(this.requireState());
         this.gatekeeper?.onDayAdvanced();
+        // 全滅帰還=翌朝に目覚める: 時間帯を昼へ戻す(M23)
+        this.resetTimeOfDay();
         this.endBattle();
         this.enterCurrentMap();
         const body =
@@ -767,7 +842,8 @@ export class GameSession {
     const state = this.requireState();
     this.clearInteraction();
 
-    const map = MAPS[state.location.mapId];
+    // 時間帯適用済みマップ(M23)。正面インタラクションも夜配置に対して行う(絵との乖離防止)
+    const map = this.currentMapForTime();
     const target = interactionTarget(map, state.location.position, state.location.facing);
     if (target === null) {
       return [this.dialogMsg(null, "……この手が触れるものは、何もない。")];
@@ -1488,6 +1564,8 @@ export class GameSession {
 
     // 手順2: 日送り(日付+1・aiDaily/話題/street_event リセット)
     this.state = advanceDay(this.requireState());
+    // 手順2直後: 宿泊の日送り=翌朝。時間帯を昼へ戻す(M23。夢シーン・セーブの前後を問わず朝から)
+    this.resetTimeOfDay();
     // 手順2直後: 縮退解除フック(通常縮退のみ解除。セッション上限縮退は残す)
     this.gatekeeper?.onDayAdvanced();
 
@@ -1722,6 +1800,9 @@ export class GameSession {
         effectiveDefense: effective.defense
       },
       day: state.day,
+      // 時間帯(昼/夜。M23)。クライアントは描画(夜の帳・HUD)と NPC 配置
+      // (npcPlacementsForTime=サーバーの衝突判定と同一の純関数)に使う
+      timeOfDay: this.timeOfDay,
       playtimeSeconds: this.currentPlaytimeSeconds(),
       location: {
         mapId: state.location.mapId,
@@ -1847,5 +1928,14 @@ export class GameSession {
    */
   public getBattleForTest(): BattleState | null {
     return this.battle;
+  }
+
+  /**
+   * その日の移動成立歩数を取得する(テスト用。M23)。
+   * 「衝突・戦闘開始の踏み込みでは加算しない」「リセットで 0 に戻る」の検証に使う
+   * (timeOfDay 自体は view に露出するが、閾値未満の歩数は view から観測できないため)。
+   */
+  public getDayStepsForTest(): number {
+    return this.daySteps;
   }
 }
