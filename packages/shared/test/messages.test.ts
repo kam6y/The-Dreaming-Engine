@@ -157,7 +157,9 @@ describe("サーバー→クライアント メッセージ(M3)", () => {
       resolvedObjectIds: [],
       subQuests: [],
       // 世界状態の表示情報(M20-3)。既定=平常(市場なし・全員在席・侵食0)
-      world: { marketShift: null, absentNpc: null, dreamErosion: 0 }
+      world: { marketShift: null, absentNpc: null, dreamErosion: 0 },
+      // 訪問済みマップ(M22。view 必須フィールド)。開始マップのみ訪問済み
+      visitedMaps: state.visitedMaps
     };
   }
 

@@ -14,6 +14,7 @@ import { MAX_LEVEL } from "./combat/stats.js";
 import { statusStateSchema } from "./combat/status.js";
 import { gameLocationSchema } from "./game-state.js";
 import { directionSchema } from "./geometry.js";
+import { mapIdSchema } from "./map.js";
 import { enemyIdSchema, npcIdSchema } from "./ids.js";
 import { affinityTierSchema } from "./npc.js";
 import { mainQuestStageSchema, subQuestStatusSchema, subQuestTypeSchema } from "./quests.js";
@@ -238,6 +239,12 @@ export const snapshotViewSchema = z.object({
   subQuests: z.array(subQuestViewSchema),
   /** 世界状態の表示情報(市場・不在・侵食度。M20-3) */
   world: viewWorldSchema,
+  /**
+   * 訪問済みマップ(全体マップUI「夢の地図」用。M22)。クライアントは MAPS 登録簿から
+   * 接続グラフ(mapConnectionEdges)と displayName を直接引くため、view へ増やすのはこれのみ
+   * (現在地 location は既出)。未訪問マップは靄で伏せる=描画側の判定に使う。
+   */
+  visitedMaps: z.array(mapIdSchema),
   /** 有効な対話(店/宿/会話)。無ければ省略 */
   interaction: activeInteractionSchema.optional(),
   /** 戦闘ビュー(mode==="battle" のときのみ) */

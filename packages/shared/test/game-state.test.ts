@@ -18,6 +18,7 @@ import {
   npcDailyAffinityDeltaSchema,
   npcIdSchema,
   recordNarratedEnemy,
+  recordVisitedMap,
   SETTLEMENT_INN_COST
 } from "../src/index.js";
 import type { GameState } from "../src/index.js";
@@ -32,6 +33,11 @@ describe("createNewGameState(新フィールドの既定値)", () => {
     expect(s.narratedEnemies).toEqual([]);
     expect(s.aiDaily).toEqual(createDefaultAiDailyCounters());
     expect(s.equipment).toEqual(createEmptyEquipment());
+  });
+
+  it("M22: visitedMaps は開始マップ(town)のみで初期化される", () => {
+    const s = createNewGameState();
+    expect(s.visitedMaps).toEqual(["town"]);
   });
 });
 
@@ -71,7 +77,9 @@ describe("advanceDay(日送り)", () => {
         marketShift: "scarcity",
         absentNpc: "merchant",
         dreamErosion: 2
-      }
+      },
+      // M22: 訪問済みマップは探索進捗=日送りで持続する
+      visitedMaps: ["town", "field", "dungeon-1"]
     };
   })();
 
@@ -97,6 +105,29 @@ describe("advanceDay(日送り)", () => {
     expect(next.world.marketShift).toBeNull();
     expect(next.world.absentNpc).toBeNull();
     expect(next.world.dreamErosion).toBe(2);
+  });
+
+  it("M22: visitedMaps(訪問済みマップ)は日送りで持続する", () => {
+    const next = advanceDay(modified);
+    expect(next.visitedMaps).toEqual(["town", "field", "dungeon-1"]);
+  });
+});
+
+describe("recordVisitedMap(訪問済みマップ記録)", () => {
+  it("未収録なら追記し、重複は追加しない(既収録なら同一参照を返す)", () => {
+    const s = createNewGameState();
+    expect(s.visitedMaps).toEqual(["town"]);
+
+    const s2 = recordVisitedMap(s, "field");
+    expect(s2.visitedMaps).toEqual(["town", "field"]);
+
+    const s3 = recordVisitedMap(s2, "dungeon-1");
+    expect(s3.visitedMaps).toEqual(["town", "field", "dungeon-1"]);
+
+    // 既収録(town)は追加せず、同一参照を返す(不要な再生成をしない)
+    const s4 = recordVisitedMap(s3, "town");
+    expect(s4.visitedMaps).toEqual(["town", "field", "dungeon-1"]);
+    expect(s4).toBe(s3);
   });
 });
 
@@ -143,6 +174,8 @@ describe("後方互換(M3 形式セーブの読み込み)", () => {
       expect(result.data.narratedEnemies).toEqual([]);
       expect(result.data.aiDaily).toEqual(createDefaultAiDailyCounters());
       expect(result.data.equipment).toEqual(createEmptyEquipment());
+      // M22: visitedMaps 欠落は default([]) で補完(現在地補完は server ロード経路の責務)
+      expect(result.data.visitedMaps).toEqual([]);
     }
   });
 

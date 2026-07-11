@@ -443,6 +443,47 @@ describe("移動", () => {
 });
 
 // ===========================================================================
+// 訪問済みマップ visitedMaps(M22。全体マップUI「夢の地図」のデータ基盤)
+// ===========================================================================
+
+describe("訪問済みマップ visitedMaps(M22)", () => {
+  it("新規ゲームは開始マップ(town)のみを訪問済みとして view に載せる", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    expect(mustView(session).visitedMaps).toEqual(["town"]);
+  });
+
+  it("遷移で行き先を追記し、既訪問マップの再訪では重複しない(view反映)", async () => {
+    const { session } = createSession();
+    await session.handle({ type: "new-game" });
+    expect(mustView(session).visitedMaps).toEqual(["town"]);
+
+    // 街→フィールド(南門 (11,14) を踏む)。行き先 field が追記される
+    mustState(session).location.position = { x: 11, y: 13 };
+    const toField = firstSnapshot(await session.handle({ type: "move", direction: "down" }));
+    expect(toField.location.mapId).toBe("field");
+    expect(toField.visitedMaps).toEqual(["town", "field"]);
+
+    // フィールド→街(北門 (11,0) を踏む)。街は既訪問=重複追加されない
+    const backToTown = firstSnapshot(await session.handle({ type: "move", direction: "up" }));
+    expect(backToTown.location.mapId).toBe("town");
+    expect(backToTown.visitedMaps).toEqual(["town", "field"]);
+  });
+
+  it("ロード時に現在地マップを補完する(旧セーブ互換=現在地のみ訪問済み・履歴は復元しない)", async () => {
+    const { session, store } = createSession();
+    const legacy = createNewGameState();
+    legacy.location = { mapId: "field", position: { x: 11, y: 8 }, facing: "down" };
+    legacy.visitedMaps = []; // 旧セーブ: visitedMaps 欠落 → schema default([]) 相当
+    store.loadResult = { ok: true, state: legacy };
+
+    const view = firstSnapshot(await session.handle({ type: "continue" }));
+    expect(view.visitedMaps).toContain("field"); // 現在地は必ず訪問済みへ補完される
+    expect(view.visitedMaps).not.toContain("town"); // 旧セーブの履歴(現在地以外)は復元されない
+  });
+});
+
+// ===========================================================================
 // 第2エリア(M16)の遷移と、非層マップの敵シンボル経路
 // ===========================================================================
 

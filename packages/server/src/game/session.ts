@@ -43,6 +43,7 @@ import {
   recordHuntKill,
   recordNarratedEnemy,
   recordSurvey,
+  recordVisitedMap,
   removeItem,
   removeQuestFromList,
   reportQuest,
@@ -481,6 +482,13 @@ export class GameSession {
 
   /** 現在地のマップに入場する: 敵シンボルをサンプリングし、採取状態と対話をリセットする */
   private enterCurrentMap(): void {
+    // 訪問済みマップの記録(M22。「夢の地図」用)。マップ入場の唯一の合流点である本メソッドで
+    // 現在地 mapId を visitedMaps へ(未収録なら)追記する。呼び出し元は4箇所=
+    // newGame(開始 town。createNewGameState で初期化済み=冪等)/ continueGame(ロード時に
+    // 現在地を補完=旧セーブの visitedMaps 欠落を救う)/ move(遷移成立で行き先を追記)/
+    // 全滅帰還(TOWN_WAKE_POINT。冪等)。将来ここ以外でマップを変える経路を足すときは要追記。
+    const arrived = this.requireState();
+    this.state = recordVisitedMap(arrived, arrived.location.mapId);
     const state = this.requireState();
     this.gatheredThisVisit.clear();
     this.activeInteraction = null;
@@ -1732,7 +1740,9 @@ export class GameSession {
         marketShift: state.world.marketShift,
         absentNpc: state.world.absentNpc,
         dreamErosion: state.world.dreamErosion
-      }
+      },
+      // 訪問済みマップ(M22。「夢の地図」用)。接続グラフ・displayName はクライアントが MAPS から引く
+      visitedMaps: [...state.visitedMaps]
     };
 
     return {

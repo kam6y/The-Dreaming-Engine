@@ -17,6 +17,7 @@ import { enemyIdSchema } from "./ids.js";
 import type { EnemyId, NpcId } from "./ids.js";
 import { addItem, emptyInventory, inventorySchema } from "./inventory.js";
 import { mapIdSchema } from "./map.js";
+import type { MapId } from "./map.js";
 import { NEW_GAME_START } from "./maps/index.js";
 import { createDefaultNpcStates, DEFAULT_NPC_TOPICS, npcStatesSchema } from "./npc.js";
 import {
@@ -204,7 +205,15 @@ export const gameStateSchema = z.object({
   /** 戦果描写済みの敵種(「初見」判定用。ロード後に AI 呼び出しが再発しない) */
   narratedEnemies: z.array(enemyIdSchema).default([]),
   /** AI 日次カウンタ(日送りでリセット) */
-  aiDaily: aiDailyCountersSchema.default(createDefaultAiDailyCounters)
+  aiDaily: aiDailyCountersSchema.default(createDefaultAiDailyCounters),
+  /**
+   * 訪問済みマップ(全体マップUI「夢の地図」で訪問済みのみ表示するため。M22。
+   * game-design.md「全体マップUI『夢の地図』」データ設計)。旧セーブは未保持=
+   * `default([])` で補完(GAME_STATE_VERSION 据え置き)。マップ遷移成立ごとに行き先を
+   * 追記し、ロード時は現在地を補完する(記録タイミングは server の enterCurrentMap)。
+   * 探索進捗のため advanceDay(日送り)では持続する。
+   */
+  visitedMaps: z.array(mapIdSchema).default([])
 });
 export type GameState = z.infer<typeof gameStateSchema>;
 
@@ -233,7 +242,9 @@ export function createNewGameState(): GameState {
     subQuests: [],
     world: createDefaultWorldState(),
     narratedEnemies: [],
-    aiDaily: createDefaultAiDailyCounters()
+    aiDaily: createDefaultAiDailyCounters(),
+    // 開始マップ(灯町)を訪問済みで初期化する(location.mapId と同一の単一の正)
+    visitedMaps: [NEW_GAME_START.mapId]
   };
 }
 
@@ -248,7 +259,8 @@ export function createNewGameState(): GameState {
  * - 「今日の話題」を NPC 別デフォルトへリセット(ai-integration.md「会話セッション管理」)
  * - 当日有効な street_event のクリア(「当日有効」のため翌日へ持ち越さない)
  * - market_shift(marketShift)・npc_absence(absentNpc)のリセット(翌日限りのため。M20)
- * 天候・各層敵シンボル数・侵食度(dreamErosion)・好感度・会話記憶は持続する。
+ * 天候・各層敵シンボル数・侵食度(dreamErosion)・好感度・会話記憶・訪問済みマップ
+ * (visitedMaps。探索進捗)は持続する(`...state` の spread で保持=明示的なリセット対象外)。
  */
 export function advanceDay(state: GameState): GameState {
   return {
@@ -278,4 +290,13 @@ export function hasNarratedEnemy(state: GameState, enemyId: EnemyId): boolean {
 export function recordNarratedEnemy(state: GameState, enemyId: EnemyId): GameState {
   if (hasNarratedEnemy(state, enemyId)) return state;
   return { ...state, narratedEnemies: [...state.narratedEnemies, enemyId] };
+}
+
+/**
+ * 訪問済みマップとして記録する(純関数。M22。重複は追加しない=既収録なら同一参照を返す)。
+ * server はマップ入場時(enterCurrentMap)に現在地 mapId でこれを呼ぶ(recordNarratedEnemy と同流儀)。
+ */
+export function recordVisitedMap(state: GameState, mapId: MapId): GameState {
+  if (state.visitedMaps.includes(mapId)) return state;
+  return { ...state, visitedMaps: [...state.visitedMaps, mapId] };
 }
