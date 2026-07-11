@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import {
   ITEMS,
   SKILLS,
+  STATUS_DISPLAY_NAMES,
   battleCommandSchema,
   encounterMessage,
   isBattleUsable,
@@ -92,6 +93,12 @@ export class BattleScene extends Phaser.Scene {
   private playerMpBar!: GaugeBar;
 
   private playerLevelText!: Phaser.GameObjects.Text;
+
+  /** プレイヤーの状態異常バッジ(【毒】【眩惑】等。ラウンド確定後に view から更新する。M21-4) */
+  private playerStatusText!: Phaser.GameObjects.Text;
+
+  /** 敵の状態異常バッジ(敵スプライトの下。M21-4) */
+  private enemyStatusText!: Phaser.GameObjects.Text;
 
   private commandMenu!: MenuList;
 
@@ -237,6 +244,16 @@ export class BattleScene extends Phaser.Scene {
       max: this.view.enemy.maxHp,
       value: this.view.enemy.hp
     });
+
+    // 状態異常バッジ(敵スプライトの下)。表示名は STATUS_DEFS の一般形から引き、種別を決め打ちしない
+    this.enemyStatusText = this.add
+      .text(cx, cy + slotHeight / 2 + 14, "", {
+        color: "#c9a25c",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "15px"
+      })
+      .setOrigin(0.5, 0);
+    this.uiLayer.add(this.enemyStatusText);
   }
 
   private buildPlayerPanel(): void {
@@ -257,6 +274,16 @@ export class BattleScene extends Phaser.Scene {
       fontSize: "17px"
     });
     this.uiLayer.add(this.playerLevelText);
+
+    // 状態異常バッジ(レベル行の右端。【毒】【眩惑】【竦み】をまとめて表示。M21-4)
+    this.playerStatusText = this.add
+      .text(x + width - 14, y + 12, "", {
+        color: "#c9a25c",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "14px"
+      })
+      .setOrigin(1, 0);
+    this.uiLayer.add(this.playerStatusText);
 
     this.playerHpBar = new GaugeBar(this, this.uiLayer, {
       x: x + 14,
@@ -285,6 +312,15 @@ export class BattleScene extends Phaser.Scene {
     this.playerHpBar.setValue(this.view.player.hp, this.view.player.maxHp);
     this.playerMpBar.setValue(this.view.player.mp, this.view.player.maxMp);
     this.currentMp = this.view.player.mp;
+    this.updateStatusBadges();
+  }
+
+  /** 状態異常バッジをviewから更新する(表示名は STATUS_DISPLAY_NAMES の一般形。M21-4) */
+  private updateStatusBadges(): void {
+    const format = (statuses: readonly { id: keyof typeof STATUS_DISPLAY_NAMES }[]): string =>
+      statuses.map((s) => `【${STATUS_DISPLAY_NAMES[s.id]}】`).join("");
+    this.playerStatusText.setText(format(this.view.player.statuses));
+    this.enemyStatusText.setText(format(this.view.enemy.statuses));
   }
 
   private buildMessageWindow(): void {
@@ -359,6 +395,10 @@ export class BattleScene extends Phaser.Scene {
     this.commandMenu.deactivate();
     this.messageText.setText(text);
     this.advanceHint.setVisible(true);
+    // data-battle-mode を実際のモードと常に一致させる(E2Eがコマンド入力フェーズと
+    // メッセージ送りを取り違えないように。openCommandMenu 時だけの同期だと
+    // コマンド送信後も古い "command" が残る。M21-4)
+    this.syncDomState();
   }
 
   private advanceMessage(): void {
@@ -444,6 +484,23 @@ export class BattleScene extends Phaser.Scene {
         break;
       case "level-up":
         playSe(this, "se-levelup");
+        break;
+      case "attack-missed":
+        // 眩惑での空振り: 敵スプライトの小さな横揺れで「逸れた」ことを暗示する
+        // (命中フラッシュ・ヒット音は鳴らさない=命中と誤読させない。M21-4)
+        this.tweens.add({
+          targets: this.enemySprite,
+          x: this.enemySprite.x + (event.actor === "player" ? 10 : -10),
+          duration: 80,
+          yoyo: true,
+          repeat: 1
+        });
+        break;
+      case "action-skipped":
+        // 竦みでの行動不能: 敵側は一瞬沈む(alpha)。プレイヤー側は文言のみ(パネルを暗転させない。M21-4)
+        if (event.actor === "enemy") {
+          this.tweens.add({ targets: this.enemySprite, alpha: 0.55, duration: 140, yoyo: true });
+        }
         break;
       case "defeat":
       case "flee":
@@ -590,6 +647,7 @@ export class BattleScene extends Phaser.Scene {
     const command: BattleCommand = battleCommandSchema.parse(raw);
     this.mode = "message";
     this.advanceHint.setVisible(false);
+    this.syncDomState(); // コマンド送信=入力フェーズ終了を即座に data 属性へ反映する(M21-4)
     this.awaiting = this.client.send({ type: "battle-command", command });
     if (!this.awaiting) {
       // 未接続。メニューへ戻して再試行できるようにする
@@ -650,6 +708,8 @@ export class BattleScene extends Phaser.Scene {
       // E2E 用: スキル効果の観測(MP消費・敵の状態異常。コマンド入力フェーズ毎に更新される。M9-3)
       game.dataset["playerMp"] = String(this.view.player.mp);
       game.dataset["enemyStatus"] = this.view.enemy.statuses.map((status) => status.id).join(",");
+      // E2E 用: プレイヤー側の状態異常(眩惑・竦み・毒の付与/解除の観測点。M21-4)
+      game.dataset["playerStatus"] = this.view.player.statuses.map((status) => status.id).join(",");
       // E2E 用: コマンド入力フェーズの検出(メッセージ送りの Space がコマンド決定を
       // 誤発火しないよう、E2E は command になるまで「確認してから1回押す」方式を取る)
       game.dataset["battleMode"] = this.mode;

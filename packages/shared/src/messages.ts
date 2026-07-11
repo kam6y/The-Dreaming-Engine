@@ -272,7 +272,17 @@ export const clientNewGameMessageSchema = z.object({
   options: newGameOptionsSchema.optional()
 });
 
-export const clientContinueMessageSchema = z.object({ type: z.literal("continue") });
+/**
+ * つづきから(continue)の開始オプション(E2E/デバッグ用のシード固定・シンボル無効化)。
+ * newGameOptionsSchema の部分集合(seed / noSymbols のみ)。startLevel / startGold は
+ * 含めない=セーブ済みの進行が正で、continue は保存地点をそのまま再開するため加速フラグを持たせない。
+ */
+export const continueGameOptionsSchema = newGameOptionsSchema.pick({ seed: true, noSymbols: true });
+
+export const clientContinueMessageSchema = z.object({
+  type: z.literal("continue"),
+  options: continueGameOptionsSchema.optional()
+});
 
 export const clientMoveMessageSchema = z.object({
   type: z.literal("move"),

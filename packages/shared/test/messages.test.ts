@@ -46,6 +46,21 @@ describe("クライアント→サーバー 操作メッセージ(M3)", () => {
     expect(clientMessageSchema.parse({ type: "rest" })).toEqual({ type: "rest" });
   });
 
+  it("continueはオプション無し・有り(seed/noSymbolsのみ)の両方をパースできる", () => {
+    expect(clientMessageSchema.parse({ type: "continue" })).toEqual({ type: "continue" });
+    const withOptions = clientMessageSchema.parse({
+      type: "continue",
+      options: { seed: 7, noSymbols: true }
+    });
+    expect(withOptions).toEqual({ type: "continue", options: { seed: 7, noSymbols: true } });
+    // startLevel/startGold は continue オプションに無い=部分集合なので剥がされる(受理はする)
+    const stripped = clientMessageSchema.parse({
+      type: "continue",
+      options: { seed: 7, startLevel: 6, startGold: 999 }
+    });
+    expect(stripped).toEqual({ type: "continue", options: { seed: 7 } });
+  });
+
   it("moveは4方向のみ受け付ける", () => {
     expect(clientMessageSchema.parse({ type: "move", direction: "up" })).toEqual({
       type: "move",

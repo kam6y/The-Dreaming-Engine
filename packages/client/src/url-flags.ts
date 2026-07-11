@@ -1,6 +1,7 @@
 import type { ClientMessage } from "@dreaming-engine/shared";
 
 type NewGameOptions = NonNullable<Extract<ClientMessage, { type: "new-game" }>["options"]>;
+type ContinueOptions = NonNullable<Extract<ClientMessage, { type: "continue" }>["options"]>;
 
 /**
  * E2E・デバッグ用のURLフラグを new-game のオプションへ変換する。
@@ -32,6 +33,26 @@ export function newGameOptionsFromUrl(): NewGameOptions {
     ...(params.has("noSymbols") ? { noSymbols: true } : {}),
     ...(startLevel !== undefined ? { startLevel } : {}),
     ...(startGold !== undefined ? { startGold } : {})
+  };
+}
+
+/**
+ * E2E・デバッグ用のURLフラグを つづきから(continue)のオプションへ変換する。
+ * - ?seed=N: 敵シンボル/戦闘シードの固定(つづきから後の配置再現用)
+ * - ?noSymbols=1: 敵シンボルの無効化(移動スモークの安定化用)
+ * new-game と違い startLevel/startGold は運ばない(セーブ済みの進行が正)。
+ * seed/noSymbols の解釈は newGameOptionsFromUrl と同一流儀で揃える。
+ */
+export function continueOptionsFromUrl(): ContinueOptions {
+  const params = new URLSearchParams(window.location.search);
+  const seedRaw = params.get("seed");
+  const seed =
+    seedRaw !== null && seedRaw !== "" && Number.isFinite(Number(seedRaw))
+      ? Number(seedRaw)
+      : undefined;
+  return {
+    ...(seed !== undefined ? { seed } : {}),
+    ...(params.has("noSymbols") ? { noSymbols: true } : {})
   };
 }
 

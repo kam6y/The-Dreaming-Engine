@@ -10,7 +10,7 @@ import { fitCover } from "../ui/cover-image.js";
 import { UI_FONT_FAMILY } from "../ui/font.js";
 import { MenuList } from "../ui/menu-list.js";
 import { SettingsOverlay } from "../ui/settings-overlay.js";
-import { newGameOptionsFromUrl, shouldSkipIntro } from "../url-flags.js";
+import { continueOptionsFromUrl, newGameOptionsFromUrl, shouldSkipIntro } from "../url-flags.js";
 
 /**
  * タイトル画面。「新規ゲーム」と「つづきから」のメニューを持つ。
@@ -206,7 +206,7 @@ export class TitleScene extends Phaser.Scene {
       return;
     }
     if (id === "continue") {
-      this.request({ type: "continue" });
+      this.request({ type: "continue", options: continueOptionsFromUrl() });
     }
     if (id === "settings") {
       this.openSettings();

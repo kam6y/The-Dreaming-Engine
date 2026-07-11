@@ -359,7 +359,7 @@ export class GameSession {
       case "new-game":
         return this.newGame(message.options);
       case "continue":
-        return this.continueGame();
+        return this.continueGame(message.options);
       case "move":
         return this.move(message.direction);
       case "interact":
@@ -443,7 +443,10 @@ export class GameSession {
     };
   }
 
-  private async continueGame(): Promise<ServerMessage[]> {
+  private async continueGame(options?: {
+    seed?: number | undefined;
+    noSymbols?: boolean | undefined;
+  }): Promise<ServerMessage[]> {
     const result = await this.saveStore.load();
     if (!result.ok) {
       if (result.reason === "missing") {
@@ -453,8 +456,11 @@ export class GameSession {
     }
     this.state = result.state;
     this.syncQuestSeq();
-    this.noSymbols = this.defaultNoSymbols;
-    this.rng = createRng(this.defaultSeed ?? (this.clock() >>> 0));
+    // E2E/デバッグ用の options(seed / noSymbols)で既定を上書きする。未指定なら従来どおり
+    // 既定シード(GAME_SEED)→clock、既定 noSymbols(GAME_NO_SYMBOLS)を使う。
+    // startLevel/startGold は continue には無い=セーブ済みの進行が正。
+    this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
+    this.rng = createRng(options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0));
     this.resetRuntime();
     this.activeSince = this.clock();
     this.enterCurrentMap();

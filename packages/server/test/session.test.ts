@@ -302,6 +302,31 @@ describe("つづきから", () => {
     expect(view.player.gold).toBe(77);
     expect(view.location.mapId).toBe("field");
   });
+
+  it("continue の options.seed が既定シードを上書きする(敵シンボル配置が指定シードで再現。E2E用)", async () => {
+    // A: 既定シード 1 だが continue で seed=7 を指定 / B: 既定シード 7 で通常 continue。
+    // 既定(1)と指定(7)が異なるため、配置一致は「options.seed が honored された」ときのみ成立する。
+    const a = createSession({ seed: 1, noSymbols: false });
+    const b = createSession({ seed: 7, noSymbols: false });
+    a.store.loadResult = { ok: true, state: fieldState() };
+    b.store.loadResult = { ok: true, state: fieldState() };
+    const viewA = firstSnapshot(
+      await a.session.handle({ type: "continue", options: { seed: 7 } })
+    );
+    const viewB = firstSnapshot(await b.session.handle({ type: "continue" }));
+    expect(viewA.symbols.length).toBeGreaterThanOrEqual(1);
+    expect(viewA.symbols).toEqual(viewB.symbols);
+  });
+
+  it("continue の options.noSymbols が既定を上書きする(シンボル無効化。E2E用)", async () => {
+    // 既定は noSymbols=false(湧く)だが、continue で noSymbols=true を指定して無効化する
+    const { session, store } = createSession({ seed: 7, noSymbols: false });
+    store.loadResult = { ok: true, state: fieldState() };
+    const view = firstSnapshot(
+      await session.handle({ type: "continue", options: { noSymbols: true } })
+    );
+    expect(view.symbols).toEqual([]);
+  });
 });
 
 // ===========================================================================
