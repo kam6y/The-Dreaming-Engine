@@ -35,8 +35,14 @@ export interface EnemyMoveDefinition {
   flavor: string;
   /** 攻撃力にかける倍率(ダメージ式は battle.ts の computeDamage) */
   powerMultiplier: number;
-  /** 命中時に付与する状態異常(決定論的に必ず付与)。なければ攻撃のみ */
+  /** 命中時に付与する状態異常。なければ攻撃のみ */
   inflicts?: StatusId;
+  /**
+   * inflicts の付与確率(0-1。省略時は 1.0=必ず付与。M21)。
+   * 1.0(既定)のときは付与ロールをせず乱数を引かない(既存の毒付与技は省略のまま挙動不変)。
+   * 1.0 未満のときだけ battle.ts が乱数を1つ消費して付与判定する。
+   */
+  inflictChance?: number;
 }
 
 export const ENEMY_MOVES: Record<EnemyMoveId, EnemyMoveDefinition> = {

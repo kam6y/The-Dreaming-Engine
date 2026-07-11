@@ -34,6 +34,12 @@ export interface AttackSkillDefinition {
   power: number;
   /** 命中後、敵が生存していれば付与する状態異常(任意。付与仕様は status.ts の定義に従う) */
   inflicts?: StatusId;
+  /**
+   * inflicts の付与確率(0-1。省略時は 1.0=必ず付与。M21)。
+   * 1.0(既定)のときは付与ロールをせず乱数を引かない(既存の毒付与スキルは省略のまま挙動不変)。
+   * 1.0 未満のときだけ battle.ts が乱数を1つ消費して付与判定する。
+   */
+  inflictChance?: number;
   description: string;
 }
 

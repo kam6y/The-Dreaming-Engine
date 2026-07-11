@@ -1,10 +1,15 @@
 import { z } from "zod";
 
 /**
- * 状態異常の種別。縦切りでは毒のみ(game-design.md「状態異常: 最低1種」)。
- * - poison: 毎ターン(1ラウンド)最大HPの5%(最低1)のダメージ。
+ * 状態異常の種別。
+ * - poison : 毎ラウンド終端に最大HPの5%(最低1)のダメージ。継続3ラウンド(M9)。
+ * - dazzle : 眩惑。付与中、行動主体の攻撃が一定確率で空振りする(命中低下。M21)。
+ * - dread  : 竦み。付与中、行動主体が一定確率で行動不能になる(M21)。
+ *
+ * dazzle/dread は「効果種」を StatusDefinition.actionEffect に持たせる一般形で表現し、
+ * battle.ts は種別を決め打ちしない(STATUS_DEFS の定義から効果・確率・文言を引く)。
  */
-export const statusIdSchema = z.enum(["poison"]);
+export const statusIdSchema = z.enum(["poison", "dazzle", "dread"]);
 export type StatusId = z.infer<typeof statusIdSchema>;
 
 /** 状態異常の付与状態(BattleState 内で各戦闘員が保持する。残りターン数で管理) */
@@ -18,6 +23,15 @@ export type StatusState = z.infer<typeof statusStateSchema>;
 /** 毒の継続ラウンド数(付与・更新時にこの値へリセット) */
 export const POISON_DURATION = 3;
 
+/** 眩惑・竦みの継続ラウンド数(付与・更新時にこの値へリセット。毒より短い。M21) */
+export const DAZZLE_DURATION = 2;
+export const DREAD_DURATION = 2;
+
+/** 眩惑中の攻撃が空振りする確率(0-1。命中低下=accuracy 効果。M21初期値) */
+export const DAZZLE_MISS_CHANCE = 0.25;
+/** 竦み中に行動不能になる確率(0-1。skip 効果。M21初期値) */
+export const DREAD_SKIP_CHANCE = 0.3;
+
 /** 毒の1tickダメージ = 最大HPの5%(最低1)。切り捨て。 */
 export function poisonTickDamage(maxHP: number): number {
   return Math.max(1, Math.floor(maxHP * 0.05));
@@ -25,13 +39,26 @@ export function poisonTickDamage(maxHP: number): number {
 
 /** 状態異常の表示名(UIメッセージ用) */
 export const STATUS_DISPLAY_NAMES: Record<StatusId, string> = {
-  poison: "毒"
+  poison: "毒",
+  dazzle: "眩惑",
+  dread: "竦み"
 };
 
 /**
+ * 状態異常の「行動時効果」種(命中低下・行動不能)。定義側に確率と文言を集約し、
+ * battle.ts はこの一般形を読むだけで種別を決め打ちしない。tickDamage(継続ダメージ)とは
+ * 直交する軸(毒は tickDamage のみ・眩惑/竦みは actionEffect のみ)。
+ * - accuracy: 付与中、行動主体の攻撃行動が missChance で空振りする(ダメージ0・付随状態異常も不発)。
+ * - skip    : 付与中、行動主体が行動開始時に skipChance で行動不能になる(そのラウンドの行動を失う)。
+ */
+export type StatusActionEffect =
+  | { kind: "accuracy"; missChance: number; missMessage: (actorName: string) => string }
+  | { kind: "skip"; skipChance: number; skipMessage: (actorName: string) => string };
+
+/**
  * 状態異常の定義(効果値・継続ラウンド・文言を種別ごとに集約する一般形)。
- * battle.ts は毒を決め打ちせず、この表から duration・tickダメージ・メッセージを引く。
- * 縦切りでは毒のみ(新規の状態異常追加はM9-2の範囲外)。将来種を足す場合はこの表へ1件追加する。
+ * battle.ts は種別を決め打ちせず、この表から duration・tickダメージ・行動時効果・メッセージを引く。
+ * 種を足す場合はこの表へ1件追加する(statusIdSchema・STATUS_DISPLAY_NAMES と同時に)。
  */
 export interface StatusDefinition {
   id: StatusId;
@@ -41,6 +68,11 @@ export interface StatusDefinition {
   duration: number;
   /** 1tickの継続ダメージ(最大HPから算出。0なら継続ダメージなし)。切り捨て・最低1は各定義側で保証 */
   tickDamage: (maxHP: number) => number;
+  /**
+   * 行動時効果(命中低下・行動不能)。なければ行動へ干渉しない(毒はこれを持たない)。
+   * battle.ts はこの有無で乱数消費を判断する(効果を持つ状態が付与された行動主体のときだけ判定)。
+   */
+  actionEffect?: StatusActionEffect;
   /** 付与時メッセージ(対象名を受け取る) */
   inflictMessage: (targetName: string) => string;
   /** tick(継続ダメージ)時メッセージ */
@@ -58,5 +90,33 @@ export const STATUS_DEFS: Record<StatusId, StatusDefinition> = {
     inflictMessage: (name) => `澱んだ靄が${name}の傷に染み入る。(${STATUS_DISPLAY_NAMES.poison})`,
     tickMessage: (name, amount) => `${STATUS_DISPLAY_NAMES.poison}が${name}の身を静かに蝕む。${amount}の痛手。`,
     expireMessage: (name) => `${name}の${STATUS_DISPLAY_NAMES.poison}が引いていった。`
+  },
+  dazzle: {
+    id: "dazzle",
+    displayName: STATUS_DISPLAY_NAMES.dazzle,
+    duration: DAZZLE_DURATION,
+    tickDamage: () => 0, // 継続ダメージなし(効果は命中低下のみ)
+    actionEffect: {
+      kind: "accuracy",
+      missChance: DAZZLE_MISS_CHANCE,
+      missMessage: (name) => `${name}の狙いが逸れ、その一撃は虚しく空を切った。`
+    },
+    inflictMessage: (name) => `揺らめく灯火が${name}の視界を惑わせる。(${STATUS_DISPLAY_NAMES.dazzle})`,
+    tickMessage: (name) => `${name}の視界が、なお惑っている。`, // tickDamage=0 のため通常は発火しない(保険)
+    expireMessage: (name) => `${name}の視界から惑いが晴れた。`
+  },
+  dread: {
+    id: "dread",
+    displayName: STATUS_DISPLAY_NAMES.dread,
+    duration: DREAD_DURATION,
+    tickDamage: () => 0, // 継続ダメージなし(効果は行動不能のみ)
+    actionEffect: {
+      kind: "skip",
+      skipChance: DREAD_SKIP_CHANCE,
+      skipMessage: (name) => `${name}は身が竦み、動けなかった。`
+    },
+    inflictMessage: (name) => `悪夢の気配に${name}の身が竦む。(${STATUS_DISPLAY_NAMES.dread})`,
+    tickMessage: (name) => `${name}は、なお身を強張らせている。`, // tickDamage=0 のため通常は発火しない(保険)
+    expireMessage: (name) => `${name}の身の竦みが、ようやくほどけた。`
   }
 };

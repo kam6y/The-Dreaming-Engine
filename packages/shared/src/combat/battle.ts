@@ -131,6 +131,8 @@ export type BattleEvent =
   | { type: "status-tick"; target: Combatant; status: StatusId; amount: number; remainingHp: number; message: string }
   | { type: "status-cured"; target: Combatant; status: StatusId; message: string }
   | { type: "status-expired"; target: Combatant; status: StatusId; message: string }
+  | { type: "attack-missed"; actor: Combatant; status: StatusId; message: string }
+  | { type: "action-skipped"; actor: Combatant; status: StatusId; message: string }
   | { type: "buff-applied"; target: Combatant; buff: BuffKind; amount: number; remainingTurns: number; message: string }
   | { type: "buff-expired"; target: Combatant; buff: BuffKind; message: string }
   | { type: "phase-change"; enemyId: EnemyId; phaseIndex: number; message: string }
@@ -197,6 +199,8 @@ export const battleEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("status-cured"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
   z.object({ type: z.literal("status-expired"), target: combatantSchema, status: statusIdSchema, message: z.string() }),
+  z.object({ type: z.literal("attack-missed"), actor: combatantSchema, status: statusIdSchema, message: z.string() }),
+  z.object({ type: z.literal("action-skipped"), actor: combatantSchema, status: statusIdSchema, message: z.string() }),
   z.object({
     type: z.literal("buff-applied"),
     target: combatantSchema,
@@ -345,6 +349,63 @@ function playerEffectiveDefense(player: BattlePlayerState): number {
   return player.defense + (player.defenseBuff ? player.defenseBuff.amount : 0);
 }
 
+/**
+ * 行動開始時の行動不能判定(竦み等の skip 効果。M21)。
+ * 行動主体に skip 効果を持つ状態異常が付与されているときだけ乱数を1つ消費する。
+ * 効果を持つ状態が無ければ乱数を引かず false を返す(=状態異常が絡まない戦闘の RNG 列を保存する要)。
+ * 行動不能なら action-skipped イベントを積んで true を返す(呼び出し側はその行動主体の行動を丸ごと失う)。
+ */
+function rollActionIncapacitated(next: BattleState, actor: Combatant, rng: Rng, events: BattleEvent[]): boolean {
+  const unit = actor === "player" ? next.player : next.enemy;
+  const skip = unit.statuses.find((s) => STATUS_DEFS[s.id].actionEffect?.kind === "skip");
+  if (!skip) return false; // 行動不能効果を持つ状態が無い → 乱数を引かない
+  const effect = STATUS_DEFS[skip.id].actionEffect;
+  if (effect?.kind !== "skip") return false; // 型絞り込み(実際には到達しない)
+  if (rng.next() >= effect.skipChance) return false;
+  const name = combatantName(actor, next.enemy.enemyId);
+  events.push({ type: "action-skipped", actor, status: skip.id, message: effect.skipMessage(name) });
+  return true;
+}
+
+/**
+ * 攻撃時の命中判定(眩惑等の accuracy 効果。M21)。攻撃行動専用。
+ * 攻撃主体に accuracy 効果を持つ状態異常が付与されているときだけ乱数を1つ消費する。
+ * 効果を持つ状態が無ければ乱数を引かず false(=命中)を返す(RNG 列を保存する要)。
+ * 空振り時は attack-missed イベントを積んで true を返す(呼び出し側はダメージ・付随状態異常を不発にする)。
+ */
+function rollAttackMiss(next: BattleState, actor: Combatant, rng: Rng, events: BattleEvent[]): boolean {
+  const unit = actor === "player" ? next.player : next.enemy;
+  const dazzle = unit.statuses.find((s) => STATUS_DEFS[s.id].actionEffect?.kind === "accuracy");
+  if (!dazzle) return false; // 命中低下効果を持つ状態が無い → 乱数を引かない
+  const effect = STATUS_DEFS[dazzle.id].actionEffect;
+  if (effect?.kind !== "accuracy") return false; // 型絞り込み(実際には到達しない)
+  if (rng.next() >= effect.missChance) return false;
+  const name = combatantName(actor, next.enemy.enemyId);
+  events.push({ type: "attack-missed", actor, status: dazzle.id, message: effect.missMessage(name) });
+  return true;
+}
+
+/**
+ * 付与確率に従って状態異常を付与する(M21)。chance>=1(既定)なら付与ロールをせず必ず付与する
+ * (乱数を引かない=既存の毒付与技・スキルの挙動を保存する)。chance<1 のときだけ乱数を1つ消費する。
+ */
+function maybeInflict(
+  next: BattleState,
+  target: Combatant,
+  status: StatusId,
+  chance: number,
+  rng: Rng,
+  events: BattleEvent[]
+): void {
+  if (chance >= 1) {
+    inflictStatus(next, target, status, events);
+    return;
+  }
+  if (rng.next() < chance) {
+    inflictStatus(next, target, status, events);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // フェーズ選択(HP割合から、有効な最進行フェーズのインデックスを返す)
 // ---------------------------------------------------------------------------
@@ -383,6 +444,10 @@ export function resolveTurn(state: BattleState, command: BattleCommand): Resolve
   const order = turnOrder(next.player.speed, next.enemy.speed, rng);
   for (const actor of order) {
     if (next.outcome !== "ongoing") break;
+    // 行動不能判定(竦み等の skip 効果)。行動主体に該当状態が付与されているときだけ乱数を消費する。
+    // 行動不能ならその行動主体の行動を丸ごと失う(敵はローテーションを進めない/プレイヤーは
+    // 選択コマンド不発=MP・アイテム消費なし)。付与されていなければ乱数を引かず素通りする。
+    if (rollActionIncapacitated(next, actor, rng, events)) continue;
     if (actor === "player") {
       const fled = executePlayerCommand(next, command, rng, events);
       if (fled) break;
@@ -457,7 +522,10 @@ function executePlayerCommand(next: BattleState, command: BattleCommand, rng: Rn
   switch (command.kind) {
     case "attack": {
       events.push({ type: "action", actor: "player", actionKind: "attack", actionName: "たたかう", message: "旅人は刃を振るった。" });
-      dealDamage(next, "enemy", next.player.attack, next.enemy.defense, 1, rng, events);
+      // 眩惑中は空振りしうる(付与されていなければ乱数を引かず必ず命中扱い)。
+      if (!rollAttackMiss(next, "player", rng, events)) {
+        dealDamage(next, "enemy", next.player.attack, next.enemy.defense, 1, rng, events);
+      }
       return false;
     }
     case "skill": {
@@ -473,10 +541,14 @@ function executePlayerCommand(next: BattleState, command: BattleCommand, rng: Rn
       });
       switch (skill.kind) {
         case "attack":
-          dealDamage(next, "enemy", next.player.attack, next.enemy.defense, skill.power, rng, events);
-          // 命中後、敵が生存していれば付随の状態異常を付与(倒しきった相手には付与しない)
-          if (skill.inflicts && next.enemy.hp > 0) {
-            inflictStatus(next, "enemy", skill.inflicts, events);
+          // 眩惑中は空振りしうる。空振り時はダメージも付随状態異常も不発(MPは消費済み)。
+          if (!rollAttackMiss(next, "player", rng, events)) {
+            dealDamage(next, "enemy", next.player.attack, next.enemy.defense, skill.power, rng, events);
+            // 命中後、敵が生存していれば付随の状態異常を付与(倒しきった相手には付与しない)。
+            // 付与確率は既定1.0(その場合ロールなし=既存挙動不変)。
+            if (skill.inflicts && next.enemy.hp > 0) {
+              maybeInflict(next, "enemy", skill.inflicts, skill.inflictChance ?? 1, rng, events);
+            }
           }
           break;
         case "heal":
@@ -528,10 +600,14 @@ function executeEnemyAction(next: BattleState, rng: Rng, events: BattleEvent[]):
 
   const enemyName = ENEMY_DISPLAY_NAMES[next.enemy.enemyId];
   events.push({ type: "action", actor: "enemy", actionKind: "attack", actionName: move.id, message: `${enemyName}${move.flavor}` });
-  // 被ダメージには実効防御(基礎 + 灯守りの構えのバフ)を用いる
-  dealDamage(next, "player", next.enemy.attack, playerEffectiveDefense(next.player), move.powerMultiplier, rng, events);
-  if (move.inflicts && next.player.hp > 0) {
-    inflictStatus(next, "player", move.inflicts, events);
+  // 眩惑中は空振りしうる。空振り時はダメージも付随状態異常も不発(付与されていなければ乱数を引かない)。
+  if (!rollAttackMiss(next, "enemy", rng, events)) {
+    // 被ダメージには実効防御(基礎 + 灯守りの構えのバフ)を用いる
+    dealDamage(next, "player", next.enemy.attack, playerEffectiveDefense(next.player), move.powerMultiplier, rng, events);
+    // 付与確率は既定1.0(その場合ロールなし=既存の毒付与技の挙動不変)
+    if (move.inflicts && next.player.hp > 0) {
+      maybeInflict(next, "player", move.inflicts, move.inflictChance ?? 1, rng, events);
+    }
   }
 }
 
