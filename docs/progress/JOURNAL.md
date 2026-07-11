@@ -2385,3 +2385,42 @@
   非干渉の見込みだが、「既存E2E緑」を閾値・配置の確定条件とする。mock限定の
   timeOfDay固定オプション(startLevel同流儀)を新設(M23-3のE2Eが"night"で使う)
   (4)viewへtimeOfDay露出。セーブスキーマ変更なし
+
+## [78] 2026-07-13 M23-2: 昼夜サイクルのshared/server実装(実装=subagent委譲・検収=オーケストレーター)
+
+- やったこと(実装・テスト・検証はsubagent、差分検収+check/E2E再実行+コミットは
+  オーケストレーター。subagentは初回APIエラーで中断→SendMessageでコンテキスト保持のまま
+  再開して完遂):
+  - time-of-day.ts(新規): timeOfDaySchema("day"|"night")・NIGHTFALL_STEPS=40・
+    timeOfDayForSteps・TOWN_NIGHT_NPC_OVERRIDES(夜=商人レンドが(7,11)左向き。
+    霧笛亭の建物x3-6側を向く)・npcPlacementsForTime(配置の唯一の正。昼・灯町以外は
+    参照同一で素通し=呼び出し側が参照比較で変化なしを判定可)
+  - session.ts: 非永続ランタイムtimeOfDay/daySteps/timeOfDayPin(modeと同格。
+    セーブスキーマ変更なし)。registerStep=tryMove成立直後のみ加算(衝突・戦闘踏み込み・
+    ボス接触は非加算)。リセット4点=newGame/continueGame(resetRuntime経由)・宿泊・全滅帰還。
+    currentMapForTime=move衝突/正面インタラクション/占有/enterCurrentMapのサンプリングを
+    時間帯適用済みマップへ一元化(絵と当たり判定の乖離防止)。buildViewへtimeOfDay露出。
+    mock限定のtimeOfDay固定オプション(new-gameのみ。continueは常に通常進行)
+  - テスト20件追加=unit 963(shared 9+messages 1+server 10): 夜配置マスの妥当性
+    (歩行可能・非重複+夜の全NPC隣接到達BFS=ソフトロック不能)・閾値境界・
+    夜(7,11)で店が開き昼位置は対象なし・占有の昼夜反転・宿泊/全滅/ロードで昼リセット・
+    live無視+固定ピンの意味論
+- 裁量で決めたこと: timeOfDay固定オプションは「ピン」意味論(指定中は歩数・リセットに
+  勝って固定=E2Eの決定論再現用)/夜座標(7,11)は候補どおり採用(床タイル・非重複を
+  実地検証)/既知の細部=ちょうど40歩目に(7,11)に立っていた場合は商人と一時重なるが
+  ソフトロックしない(発生条件が極端に限定的なためガード非追加)
+- 検証: pnpm check 緑(unit 963)・pnpm test:e2e 18/18緑(subagent実行+オーケストレーター
+  再実行の二重確認)。セーブスキーマ・AI系・docs/spec不変
+- 次にやること: M23-3(クライアント表示・演出+E2E。**UI=オーケストレーター自身**)+
+  M23ゲート(test:e2e:full)+完了時BACKLOGチェック。申し送り:
+  (1)view.timeOfDay: "day"|"night"(必須。view.dayの直後)。NPC描画は
+  exploration-sceneのdrawNpcs(this.map.npcsのfor)をnpcPlacementsForTime(this.map,
+  this.snapshot.timeOfDay)へ差し替え=サーバー判定と一致。**timeOfDay変化時の再描画トリガ**
+  (snapshot受信時に前回値と比較→NPC再描画)を忘れずに
+  (2)夜の帳はupdateErosionOverlay(侵食の帳・深度50)と同型メソッドを並設し、
+  worldLayerへ藍色rect(alpha目安0.16)をsetDepth(40)で追加(侵食の帳の下)。
+  UIレイヤーは別カメラで不変
+  (3)HUDへ時間帯語(「N日目 昼/夜」等。語は裁量)・syncDomStateへdata-time-of-day
+  (4)E2Eは new-game options.timeOfDay="night"(mock限定)で開始→data-time-of-day="night"と
+  商人の夜配置を観測(クライアントの新規開始オプション組み立てへtimeOfDayを追加する
+  URLフラグ配線が必要=?timeOfDay=night等。startLevelの既存流儀参照)

@@ -533,7 +533,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       保存しないもの列挙は変更不要・GAME_STATE_VERSION据え置き)・AI非波及・E2E不干渉
       (昼開始+mock限定`timeOfDay`固定フラグ)・不干渉条件。
       ai-integration.md/ai-guardrails.mdは触らない(AIへ渡す時刻帯=「ゲーム内時間」既存記述は不変)
-- [ ] M23-2: shared/serverの実装(**subagent担当**。UIは書かない):
+- [x] M23-2: shared/serverの実装(**subagent担当**。UIは書かない):
       shared=時間帯型`TimeOfDay`(`"day"|"night"`)・`NIGHTFALL_STEPS`定数・
       `timeOfDayForSteps(steps)`純関数・灯町の夜配置上書きデータ+`npcPlacementsForTime(map,timeOfDay)`
       純関数(灯町のみ夜配置を適用・他マップは素通し)・ユニットテスト(夜配置マスが歩行可能かつ
