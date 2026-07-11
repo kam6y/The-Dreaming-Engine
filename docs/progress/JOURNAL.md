@@ -2289,3 +2289,37 @@
   Phaser非依存)+ユニットテスト。SnapshotViewへはvisitedMapsのみ追加
   (接続グラフ・displayNameはクライアントがMAPSから直接引く)
   (4)UIはM22-3でオーケストレーターが実装するため書かない
+
+## [75] 2026-07-12 M22-2: visitedMaps+接続グラフヘルパー+view露出(実装=subagent委譲・検収=オーケストレーター)
+
+- やったこと(実装・テスト・検証はsubagent、差分検収+check/E2E再実行+コミットはオーケストレーター):
+  - game-state.ts: gameStateSchemaへ visitedMaps=z.array(mapIdSchema).default([])
+    (GAME_STATE_VERSION=1据え置き=旧セーブ互換)。createNewGameStateは["town"]初期化。
+    純ヘルパーrecordVisitedMap(重複なし・既収録なら同一参照=recordNarratedEnemyと同流儀)。
+    advanceDayでは持続(spread保持)
+  - session.ts: 記録をenterCurrentMap一箇所へ集約(マップ入場の唯一の合流点。呼び出し元4経路=
+    newGame/continueGame(ロード時の現在地補完=旧セーブ救済)/move(遷移成立)/全滅帰還。
+    将来の第5経路追加時の注意コメント付き)。buildViewへvisitedMaps露出
+  - map-graph.ts(新規): mapConnectionEdges(maps=ALL_MAPS)→readonly MapEdge[]。
+    全transitionsから無向隣接を導出(往復・重複辺を畳む・自己ループ除外・
+    mapIdSchema列挙順で正規化整列=決定論的)。全7辺の完全グラフを返し、
+    「両端が訪問済みのみ描く」フィルタはクライアント側(M22-3)の責務
+  - SnapshotViewへvisitedMaps追加(viewへの追加はこれのみ。接続グラフ・displayNameは
+    クライアントがMAPS登録簿から直接引く)。sampleView追従(game-client.test/messages.test)
+  - テスト11件追加=unit 942(game-state 4・map-graph 4・session 3):
+    旧セーブ欠落→default+現在地補完・遷移追記/重複なし・advanceDay持続・既知7辺の過不足なし等
+- 裁量で決めたこと: ヘルパーは新規map-graph.tsへ(map.ts肥大回避)/API名mapConnectionEdges・
+  型MapEdge/辺の全順序=mapIdSchema.options列挙順/ロード補完は現在地1枚のみ(旧履歴は復元しない)
+- 検証: pnpm check 緑(unit 942)・pnpm test:e2e 17/17緑(subagent実行+オーケストレーター
+  再実行の二重確認)。セーブversion据え置き・AI系・docs/spec不変
+- 次にやること: M22-3(全体マップオーバーレイ「夢の地図」UI+E2E。**UI=オーケストレーター自身**)+
+  M22ゲート(test:e2e:full)+完了時BACKLOGチェック。申し送り:
+  (1)view.visitedMaps: MapId[](必須)が増えた。現在地は既存のlocation。
+  import { mapConnectionEdges } from "@dreaming-engine/shared"(全7辺を返す=
+  訪問済みフィルタは描画側でview.visitedMapsと突き合わせ)
+  (2)UI骨子=Mキー開閉・Esc閉じ・探索限定(questJournalと同ガード)・ノード配置は
+  world-lore地理感のpresentation定数・現在地強調#c9a25c・未訪問は靄(名伏せ「?」)・
+  常設キーヒントへ「M: 地図」追加・syncDomStateへdata-menu="map"+data-visited-count
+  (3)E2E: town→fieldの遷移でdata-visited-countが増える→Mで開いてdata-menu="map"を観測。
+  旧形式フィクスチャ(visitedMaps欠落)でも現在地1枚補完でcount>=1が保証される
+  (4)shared testファイルはsharedのtypecheck対象外=view形状変更はpnpm check(unit込み)で網羅確認

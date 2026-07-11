@@ -498,7 +498,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       既存MAPS登録簿を直接参照)・セーブ列挙への追記・UI骨子(Mキー・data-menu="map"+
       data-visited-count・探索限定)・不干渉条件。ai-integration.md/ai-guardrails.mdは
       触らない(本UIはAI非依存の描画のみ)
-- [ ] M22-2: shared/serverのデータ拡張(**subagent担当**。UIは書かない):
+- [x] M22-2: shared/serverのデータ拡張(**subagent担当**。UIは書かない):
       GameStateへvisitedMaps(mapId配列・optional+default([])・GAME_STATE_VERSION据え置き)追加=
       新規ゲームはtown初期値・マップ遷移が成立するたび行き先mapIdを追記・つづきから/ロードで
       現在地mapIdを補完(旧セーブ互換)・advanceDayで持続 / sharedにマップ接続グラフの純ヘルパー
