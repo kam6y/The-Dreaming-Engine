@@ -2351,3 +2351,37 @@
   NPC対話specを壊さない設計が骨子の要点)。申し送り: オーバーレイを増やす際は
   exploration-sceneのガード5箇所(update移動・dialog保留・pendingDream・handleInteract・
   相互open)への追加漏れに注意(今回のmapOverlayで全箇所に追加済み=grepの目印になる)
+
+## [77] 2026-07-13 M23-1: 昼夜サイクルと時間帯NPC配置のM23展開+仕様骨子(骨子=subagent委譲・検収=オーケストレーター)
+
+- やったこと(骨子執筆はsubagentへ委譲、検収・コミットはオーケストレーター):
+  - BACKLOG「昼夜サイクルと時間帯によるNPC配置変化」(優先度: 低の最上位)をM23として
+    ROADMAP末尾へ展開(M23-1骨子/M23-2 shared+serverロジック=subagent(2h超なら
+    2a/2bへ分割可)/M23-3 クライアント演出+E2E=オーケストレーター。完了条件付き)
+  - game-design.mdへ「### 昼夜サイクルと時間帯によるNPC配置(拡張: M23)」を純追記:
+    時間帯2段階(昼/夜)・進行は移動成立歩数のみ(NIGHTFALL_STEPS目安40歩)・
+    新規/宿泊/全滅/ロードで昼リセット・NPC配置変化は灯町のみ(夜は商人レンド1人が
+    霧笛亭脇へ移動・他3人据え置き・機能は時間帯で変えない=経済/進行ゲートなし)・
+    配置の唯一の正はshared純関数npcPlacementsForTimeをサーバー(衝突/対話)と
+    クライアント(描画)の両方が通す・夜の藍色の帳(侵食の帳=深度50より下・alpha目安0.16)・
+    HUD時間帯語・E2E不干渉(昼開始+mock限定timeOfDay固定フラグ)・不干渉条件
+- 裁量で決めたこと(subagent提案を検収で採用):
+  - **時間帯はセーブに永続化しない**: セーブは宿泊手順5のみで必ず手順2の日送り(→朝)の後の
+    ため、あらゆるセーブが昼で取られる→ロードは常に昼=専用フィールド不要
+    (GAME_STATE_VERSION据え置き・保存内容列挙も変更不要)。将来朝以外のセーブ点を
+    設ける場合のoptional+default案も骨子に併記
+  - M23の「時間帯」はAIへ渡す時刻帯(ゲーム内時間の固定演出値「宵闇」)とは別概念=
+    <world_state>不変・AI非波及(ai-integration.md/ai-guardrails.md不変)
+  - 命名: TimeOfDay("day"|"night")・npcPlacementsForTime・NIGHTFALL_STEPS・data-time-of-day
+- 検証: pnpm check 緑(unit 942。subagent実行+オーケストレーター再実行の二重確認)。
+  ドキュメントのみの変更
+- 次にやること: M23-2(shared+serverロジック。subagent委譲)。申し送り:
+  (1)buildViewはNPC一覧を送らずクライアントはMAPS登録簿から直接描画している
+  (exploration-scene)→夜配置は必ず共通純関数経由にしないと絵と当たり判定が乖離する。
+  サーバーの移動衝突・正面インタラクション・占有判定を時間帯配置に対して行うこと
+  (2)夜配置マスの検証: マップ定義のsuperRefineは実行時上書きを見ないため、夜位置
+  ((7,11)目安)の歩行可能・占有/遷移/playerStart非重複は専用ユニットテストで担保
+  (3)既存E2EはNPCへ十数歩以内で接触(昼のまま)・移動スモークはNPC非接触=閾値40で
+  非干渉の見込みだが、「既存E2E緑」を閾値・配置の確定条件とする。mock限定の
+  timeOfDay固定オプション(startLevel同流儀)を新設(M23-3のE2Eが"night"で使う)
+  (4)viewへtimeOfDay露出。セーブスキーマ変更なし

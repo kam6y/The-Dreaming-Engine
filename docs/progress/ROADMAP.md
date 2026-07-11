@@ -517,3 +517,48 @@ JOURNALへ「仕様変更提案」として記録する)。
 表示され(未訪問は靄で伏せる)、`visitedMaps`が旧セーブ互換(GAME_STATE_VERSION据え置き)で
 永続化され、既存の移動・戦闘・会話・セーブ・既存E2Eが壊れない。新マップ・新敵・新アセットを
 増やさず、AIツール・防御仕様は不変。`pnpm check`+`pnpm test:e2e`緑(M22完了時は`pnpm test:e2e:full`も)。
+
+## M23: 昼夜サイクルと時間帯によるNPC配置変化(BACKLOG「優先度: 低」1件目の展開。
+## 昼/夜の2時間帯+夜の灯町NPC配置変化。AI非波及・セーブ非永続の最小設計)
+
+- [x] M23-1: 仕様骨子の追記(BACKLOG展開に伴う骨子追記=CLAUDE.mdの例外に該当。
+      骨子執筆=subagent、検収=オーケストレーター)。
+      game-design.md「昼夜サイクルと時間帯によるNPC配置(拡張: M23)」=採用案(時間帯2段階
+      昼/夜・進行は移動歩数のみ(`NIGHTFALL_STEPS`目安40歩)・宿泊/全滅/新規/ロードで昼へ
+      リセット)・NPC配置変化(灯町のみ・夜は商人レンド1人が霧笛亭脇へ移動・他3人据え置き・
+      配置の唯一の正は`shared`の純関数`npcPlacementsForTime`をサーバー衝突/インタラクションと
+      クライアント描画の**両方**が通す・機能は時間帯で変えない・M20 npc_absenceとの整合・
+      ソフトロック不能条件)・見た目(夜の藍色の帳=侵食の帳より下の序列・HUD時間帯語・
+      新規画像アセット不要)・セーブ非永続(セーブは必ず朝ゆえ時間帯は保存不要・保存内容/
+      保存しないもの列挙は変更不要・GAME_STATE_VERSION据え置き)・AI非波及・E2E不干渉
+      (昼開始+mock限定`timeOfDay`固定フラグ)・不干渉条件。
+      ai-integration.md/ai-guardrails.mdは触らない(AIへ渡す時刻帯=「ゲーム内時間」既存記述は不変)
+- [ ] M23-2: shared/serverの実装(**subagent担当**。UIは書かない):
+      shared=時間帯型`TimeOfDay`(`"day"|"night"`)・`NIGHTFALL_STEPS`定数・
+      `timeOfDayForSteps(steps)`純関数・灯町の夜配置上書きデータ+`npcPlacementsForTime(map,timeOfDay)`
+      純関数(灯町のみ夜配置を適用・他マップは素通し)・ユニットテスト(夜配置マスが歩行可能かつ
+      占有/遷移/playerStartと非重複=マップ定義superRefineは実行時上書きを見ないため専用テストで
+      担保・商人のみ移動し他3人不変・閾値境界(歩数<40=昼/=40以上=夜)・素通しマップの不変)。
+      server=GameSessionに非永続ランタイム`timeOfDay`/`daySteps`を保持(`mode`同格・セーブ非対象)・
+      移動成立ごとに`daySteps`加算し`timeOfDay`再計算・新規/ロード/宿泊(手順2の日送り)/全滅帰還で
+      昼へリセット・移動衝突/正面インタラクション/占有判定を`npcPlacementsForTime`の時間帯配置に
+      対して行う・`buildView`へ`timeOfDay`露出・mock限定の`timeOfDay`固定オプション(`startLevel`同流儀)
+      +統合テスト。**セーブスキーマ変更なし**(旧セーブ互換は自明=常に昼で読める)。
+      既存E2E(スモーク+full)を緑に保つことを閾値・配置の確定条件とする。
+      (shared側=型/定数/配置データ/純関数+テストと、server側=ランタイム状態/衝突配線/view露出/
+      統合テストの合算が2時間相当を超える見込みなら、M23-2a(shared)/M23-2b(server)へ分割してよい)
+- [ ] M23-3: クライアント表示・演出(**UI=オーケストレーター**):
+      NPC描画を`npcPlacementsForTime(map, view.timeOfDay)`の配置へ差し替え(サーバーと同一関数)・
+      夜の藍色の帳オーバーレイ(手続き矩形・侵食の帳=深度50より下の序列・alpha目安0.16は目視調整)・
+      HUDに時間帯語を追加・`syncDomState`へ`data-time-of-day`(day/night)追加。
+      新規画像アセットなし+E2Eスモーク1本(mock限定`timeOfDay=night`で開始→`data-time-of-day="night"`と
+      商人の夜配置(位置ずれ)を観測、または昼→夜遷移を観測)。
+      完了時にBACKLOG側へチェック+M23ゲート(test:e2e:full)
+
+完了条件: 探索中に時間帯(昼/夜)が移動歩数で決定論的に進み(宿泊/全滅/新規/ロードで昼へ戻る)、
+夜は灯町で商人の立ち位置が変わり画面に夜の帳が掛かる。時間帯はセーブに永続化せず(常に昼で
+ロード)、NPC配置の正はサーバー・クライアント共通の`shared`純関数に一元化され、宿・店・
+サブクエスト窓口・メインクエスト進行役へは昼夜いずれでも到達・会話できる(ソフトロックしない)。
+既存の移動・戦闘・会話・店・宿・セーブ・M20/M22挙動・既存E2E(スモーク+`test:e2e:full`)が壊れず、
+新マップ・新敵・新規画像アセットを増やさず、AIツール・防御仕様・AIへの時刻帯受け渡しは不変。
+`pnpm check`+`pnpm test:e2e`緑(M23完了時は`pnpm test:e2e:full`も)。
