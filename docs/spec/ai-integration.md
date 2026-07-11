@@ -295,6 +295,99 @@ dungeon_shiftはシンボル出現数への作用として定義する。
 (スロット置き換えの繰り返し)、別NPC宛ては併存。`street_event`=異なる`eventId`は併存、
 同一`eventId`の2件目以降は却下。`dungeon_shift`=承認順に累積適用(クランプ規定どおり)。
 
+### 6b. WorldEvent の型拡張(拡張: M20)
+
+6節の `WorldEvent` union に、BACKLOG「夢シーンの演出強化」の3 kind
+(`market_shift`/`npc_absence`/`dream_erosion`)を**追加**する。既存4 kind
+(`weather`/`npc_rumor`/`street_event`/`dungeon_shift`)の定義・検証・解決規則・
+絶対クランプの原則は**一切変えない**(以下は追加分のみ)。夢シーンのツール許可
+(narrate+trigger_world_event)・処理順序(`game-design.md`「宿泊の処理順序」手順4で適用)・
+一晩最大3件の上限(全 kind 合算で不変)も不変。新3 kind は**すべて決定論**であり、
+AI が選ぶのは種類と定義済み選択肢のみ(効果量・対象は enum/ホワイトリスト。自由数値・自由対象は不可)。
+
+**入力スキーマ(`shared` の `worldEventSchema` の discriminated union へ追記)**:
+
+| kind | 型固有フィールド | 値域(定義済み enum のみ) |
+|---|---|---|
+| `market_shift` | `mode: MarketShiftMode` | 店の買値への一時倍率(下表)。翌日限り |
+| `npc_absence` | `npcId: AbsentNpcId` | 翌日1日だけ不在にする NPC(ホワイトリスト。下記) |
+| `dream_erosion` | `delta: -1\|0\|1` | 世界の侵食度(0-3)の一段階増減。累積・クランプ |
+
+#### market_shift(市場の変化)
+
+- **効果**: 翌朝の店頭の**買値**に一時倍率を掛ける。倍率は `shared` の `MarketShiftMode`
+  enum から選ぶ(自由数値は受け付けない)。初期候補(値は M20-2 で確定):
+
+  | mode | 意味 | 買値倍率 |
+  |---|---|---|
+  | `scarcity` | 品薄 | ×1.2(+20%) |
+  | `surplus` | 供給過多 | ×0.9(−10%) |
+
+- **寿命**: 翌日限り。`world.marketShift`(optional・default `null`)に保持し、
+  日送り(`advanceDay`)で `null` にリセット=`activeStreetEvents` と同じ寿命
+  (`game-design.md`「ゲーム内時間」)。宿泊手順4で適用されるため翌日の1日だけ効く。
+- **同種解決規則**: **後勝ち**(承認された最後の1件のみ有効)。
+- **合成順序(既存の好感度割引との合成。決定論。`shop.ts` で実装)**:
+  `base = buyPriceOf(itemId)` → 好感度割引 `d = discountedBuyPrice`(既存写像)→
+  市場倍率 `m = floor(d × 倍率)` → **絶対クランプ `max(1, m)`(最低1G)**。
+  すなわち割引を先に、市場倍率を後に掛ける。
+- **買い戻し増殖の防止(要注意・防御不変条件)**: `surplus` で買値が下がると
+  「買値 < 売値」となり買い戻しでゴールドが増殖しうる。既存の `adjustedSellPrice` の
+  不変条件(売値 ≤ 割引後買値)を、**market_shift 適用後の実効買値**に対して維持する
+  (実効買値へクランプ)。これは既存防御の延長であり弱めてはならない
+  (`game-design.md`「好感度の段階」売値クランプ)。
+- テキスト系フィールドを持たないため出力壁の対象外。
+
+#### npc_absence(失踪)
+
+- **効果**: 指定 NPC が翌日1日だけマップから姿を消す(会話・店・宿が利用不可=
+  「今日は姿が見えない」の定型表示)。翌日自動復帰(累積しない)。
+- **安全設計(最重要)**: 対象は**消えても進行不能にならない NPC のホワイトリスト**
+  `AbsentNpcId`(`shared` 列挙。`DeliverRecipientId` と同様に実在 `NpcId` の部分集合)に限る。
+  初期ホワイトリスト: `innkeeper`(オルガ)/`merchant`(レンド)/`caretaker`(イルマ)/
+  `artisan`(ガロ)の4名。**除外必須**: `priest`(フィオル=メインクエスト進行役)・
+  `informant`(カイ=サブクエスト窓口)。番人 `warden`(トワ=第2章進行の担い手)も
+  初期候補から除外する(`DeliverRecipientId` が warden を除くのと同じ方針)。
+- **同時不在は1人まで**(後勝ち)。`world.absentNpc`(optional・default `null`)に保持し、
+  日送りでリセット。同時1人ゆえ宿(innkeeper/caretaker)・店(merchant/artisan)は
+  **同時全滅しない**(常に宿1・店1が残り、セーブ/購入経路が絶えず進行不能を作らない)。
+- **deliver 型サブクエストとの相互作用**: 受取 NPC が不在の日は納品できず、クエストは
+  `active` のまま翌日以降へ持ち越す(放棄は従来どおり可)。
+- テキスト系フィールドを持たないため出力壁の対象外。
+
+#### dream_erosion(夢の侵食度)
+
+- **効果**: 世界の「侵食度」(0-3)を `delta: -1|0|1` で一段階増減する。
+- **絶対クランプ 0-3**: `world.dreamErosion`(optional・default `0`)へ**承認順に累積適用**し、
+  結果を 0-3 にクランプ(`dungeon_shift` と同じ累積+絶対クランプ。何晩重ねてもレンジ外に出ない)。
+  **演出のみ**で、戦闘・経済・進行への決定論効果は一切持たせない(バランスへ非干渉)。
+  侵食度は M20-3 でクライアント演出(画面 tint・霧の濃さ等)に用いる(既存 `tileTint` 系の重ね掛けで表現)。
+- **段階名(0=平穏〜3=色濃い侵食。文言は M20-3 の裁量)**: 0=平穏 / 1=兆し / 2=綻び / 3=侵食。
+- テキスト系フィールドを持たないため出力壁の対象外。
+
+**同種解決規則(6節の書式に合わせる。検証層 `validateDreamEvents` のテスト対象)**:
+`market_shift`=後勝ち(1件のみ有効)。`npc_absence`=後勝ち(同時1人)。
+`dream_erosion`=承認順に累積適用(0-3 に絶対クランプ)。
+
+**検証規則(追加方向のみ・既存不変)**:
+- 定義済み enum 外(未知 `mode`・ホワイトリスト外 `npcId`・レンジ外 `delta`)は
+  スキーマ検証/本体検証で却下する。
+- **一晩最大3件は全 kind 合算で不変**(新 kind を混ぜても4件目以降は上限超過で却下)。
+- 出力壁は**テキスト系フィールドを持つ kind のみ**に適用(新3 kind は該当なし。
+  既存 `npc_rumor` の120字・出力壁は不変)。
+
+**旧セーブ互換(GAME_STATE_VERSION 据え置き)**: `world` への追加フィールド
+(`marketShift`/`absentNpc`/`dreamErosion`)はすべて optional + 既定値
+(`null`/`null`/`0`)で補完し後方互換(旧セーブは未保持=非侵食・変化なしで読める)。
+`worldEventSchema` への kind 追加も**上位集合化**であり、旧セーブは既存 kind のみを持つため
+引き続きパースできる。よって `GAME_STATE_VERSION` は **1 のまま据え置き**でよい。
+なお `game-design.md`「セーブ/ロード」保存内容の世界状態列挙へ新3フィールドを足すこと
+(同節の「永続化前提の状態を追加したら列挙も更新」規定)は M20-2 で行う。
+
+**モック応答(MockDreamMaster)**: 夢シーンの定型応答に新 kind の実在値を混ぜた
+バリエーションと、悪意応答モード(ホワイトリスト外 `npcId`・enum 外 `mode`・レンジ外 `delta`・
+新 kind を含む4件目)を追加する(実装は M20-2。検証層の却下を E2E/攻撃テストで通す)。
+
 ## 呼び出しフロー別仕様
 
 | フロー | トリガー | モデル | 区分 | ツール許可 | タイムアウト(初回/全体) |

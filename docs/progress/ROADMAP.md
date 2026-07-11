@@ -416,3 +416,31 @@ JOURNALへ「仕様変更提案」として記録する)。
 完了条件: propose_questで3型(deliver/escort/survey)が発行・受諾・遂行・報告でき、
 防御検証が3型に拡張され(既存要件は不変)、旧セーブと既存E2E(スモーク14本+full)が
 壊れない。`pnpm check`+`pnpm test:e2e`緑(M19完了時は`pnpm test:e2e:full`も)。
+
+## M20: 夢シーンの演出強化(BACKLOG「優先度: 中」4件目の展開。
+## trigger_world_eventへmarket_shift/npc_absence/dream_erosionの3kind追加)
+
+- [x] M20-1: 仕様骨子の追記(BACKLOG展開に伴う骨子追記=CLAUDE.mdの例外に該当。
+      骨子執筆=subagent、検収=オーケストレーター)。
+      ai-integration.md「6b. WorldEventの型拡張」=3kindの定義(すべて決定論=
+      enum/ホワイトリスト/deltaのみ)・同種解決規則・絶対クランプ・旧セーブ互換 /
+      game-design.md「夢の世界変化の拡充」=プレイヤー視点の見え方・寿命・不干渉条件 /
+      ai-guardrails.md=攻撃リグレッション追記(追加方向のみ)
+      (npc_absenceはpriest/informant/warden除外+同時1人=宿・店の同時全滅なし、
+      market_shiftは売値≤実効買値クランプ拡張=買い戻し増殖防止、
+      dream_erosionは0-3累積クランプ・演出のみ。JOURNAL[67])
+- [ ] M20-2: shared/serverの実装(worldEventSchemaへ3kind追加=旧セーブ互換・
+      MarketShiftMode/AbsentNpcId列挙・world状態3フィールド(optional+default)・
+      advanceDayのリセット群拡張(marketShift/absentNpc。dreamErosionは持続)・
+      買値/売値クランプの市場倍率対応・validateDreamEventsの解決規則・
+      applyDreamEvents適用・不在NPCのinteract遮断・モック+悪意応答)
+      +攻撃リグレッション+ユニットテスト(subagent)。
+      game-design.md「セーブ/ロード」保存内容列挙への3フィールド追記を含む
+- [ ] M20-3: クライアント演出(市場の変化の店頭表示・NPC不在の表示・侵食度の
+      画面tint演出。UI=オーケストレーター)+E2Eスモーク。
+      完了時にBACKLOG側へチェック+M20ゲート(test:e2e:full)
+
+完了条件: 夢シーンでmarket_shift/npc_absence/dream_erosionが発行・適用され、
+翌朝の市場・NPCの不在・世界の色に現れ、防御検証が3kindに拡張され(既存要件は不変)、
+旧セーブと既存E2Eが壊れない。`pnpm check`+`pnpm test:e2e`緑(M20完了時は
+`pnpm test:e2e:full`も)。

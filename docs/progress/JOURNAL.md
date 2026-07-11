@@ -1985,3 +1985,40 @@
   展開してから着手。ai-integration.mdの「6. trigger_world_event」(WorldEvent union・
   解決規則・クランプ)とai-guardrails.mdの夢系検証を必ず読み、防御要件は追加方向のみ。
   新kindの累積クランプ・同種解決規則・E2E不干渉(既存dream.spec)が骨子の要点
+
+## [67] 2026-07-11 M20展開+M20-1: 夢の世界変化3kindの仕様骨子(subagent委譲=Opus)
+
+- やったこと(骨子執筆=subagent、検収・ROADMAP展開・コミット=オーケストレーター):
+  - BACKLOG「優先度: 中」4件目「夢シーンの演出強化」をROADMAP M20として展開
+    (M20-1骨子/M20-2 shared+server/M20-3 クライアント演出+E2Eゲートの3分割)
+  - ai-integration.md「6b. WorldEventの型拡張」(+93行): market_shift(買値の
+    一時倍率=enum選択のみ・翌日限り・後勝ち)/npc_absence(翌日1日の不在=
+    ホワイトリスト4名・同時1人・後勝ち)/dream_erosion(侵食度0-3の増減=
+    累積+絶対クランプ・演出のみ)。すべて決定論(AIは種類と定義済み選択肢のみ)
+  - game-design.md「夢の世界変化の拡充」(+27行): プレイヤー視点の見え方・寿命・
+    不干渉条件(既存4kind・第1/2章・E2E不変)
+  - ai-guardrails.md(+8行): 攻撃リグレッション(ホワイトリスト外npc_absence・
+    enum外mode・レンジ外delta・一晩4件目の全kind合算)を追加方向のみで追記
+- 裁量で決めたこと(subagent設計を検収して採用):
+  npc_absenceの除外=priest/informant必須+warden(第2章担い手。DeliverRecipientId
+  の先例に整合)。ホワイトリスト=innkeeper/merchant/caretaker/artisanで同時1人
+  =宿・店が同時全滅しない構造/market_shift=scarcity(×1.2)/surplus(×0.9)の
+  2種初期候補・好感度割引が先で市場倍率が後・最低1Gクランプ/
+  **売値≤買値の既存不変条件をmarket_shift適用後の実効買値へ拡張**(買い戻しの
+  ゴールド増殖防止=既存防御の延長・強化方向)/dream_erosion段階名=
+  平穏/兆し/綻び/侵食・world新フィールド名 marketShift/absentNpc/dreamErosion
+  (optional+default=旧セーブ後方互換・GAME_STATE_VERSION据え置き)
+- 検収の要点: 3ファイルとも純追記(128行・deletions 0)・防御は追加方向のみ・
+  実在確認済み(NpcId・worldStateSchema・validateDreamEventsの解決状態・
+  adjustedSellPriceのクランプ・tileTint)
+- 検証: pnpm check 緑(unit 849。docsのみの変更)
+- 次にやること: M20-2(shared/server実装。subagent委譲)。申し送り:
+  worldEventSchemaへ3ブランチ追加(shared/src/ai/world-event.ts)・
+  MarketShiftMode/AbsentNpcIdはDeliverRecipientIdと同書式+実在性テスト・
+  worldStateSchemaへ3フィールド(optional+default)・advanceDayのリセット群へ
+  marketShift/absentNpc追加(dreamErosionは持続=dungeonSymbolCounts扱い)・
+  **最重要=adjustedSellPriceの売値≤実効買値クランプ**(surplusでの増殖防止を
+  必須テストに)・validateDreamEvents=後勝ち2種+累積1種(dungeon_shiftと同型)・
+  applyDreamEventsへ3ケース・不在NPCのinteract遮断(「今日は姿が見えない」定型)・
+  deliver受取NPC不在時は納品持ち越し・モック+悪意応答4種・
+  game-design.md「セーブ/ロード」保存内容列挙へ3フィールド追記(骨子の積み残し)
