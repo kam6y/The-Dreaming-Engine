@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { achievementIdSchema } from "./achievements.js";
 import { streetEventIdSchema } from "./ai/street-event.js";
 import {
   absentNpcIdSchema,
@@ -213,7 +214,15 @@ export const gameStateSchema = z.object({
    * 追記し、ロード時は現在地を補完する(記録タイミングは server の enterCurrentMap)。
    * 探索進捗のため advanceDay(日送り)では持続する。
    */
-  visitedMaps: z.array(mapIdSchema).default([])
+  visitedMaps: z.array(mapIdSchema).default([]),
+  /**
+   * 解除済み実績「夢の欠片」(M24。game-design.md「実績システム『夢の欠片』(拡張: M24)」)。
+   * 旧セーブは未保持= `default([])` で補完(GAME_STATE_VERSION 据え置き。旧セーブは
+   * 永続状態由来の実績がロード後最初の評価で再解除され、イベント由来は次回発生時に再獲得する)。
+   * 解除は不可逆で、サーバーの単一チョークポイント評価が `∪ 評価結果` で単調更新する
+   * (mergeUnlockedAchievements)。新規ゲームは空。収集進捗のため advanceDay(日送り)では持続する。
+   */
+  unlockedAchievements: z.array(achievementIdSchema).default([])
 });
 export type GameState = z.infer<typeof gameStateSchema>;
 
@@ -244,7 +253,9 @@ export function createNewGameState(): GameState {
     narratedEnemies: [],
     aiDaily: createDefaultAiDailyCounters(),
     // 開始マップ(灯町)を訪問済みで初期化する(location.mapId と同一の単一の正)
-    visitedMaps: [NEW_GAME_START.mapId]
+    visitedMaps: [NEW_GAME_START.mapId],
+    // 実績「夢の欠片」は空から収集する(M24)
+    unlockedAchievements: []
   };
 }
 
@@ -260,7 +271,8 @@ export function createNewGameState(): GameState {
  * - 当日有効な street_event のクリア(「当日有効」のため翌日へ持ち越さない)
  * - market_shift(marketShift)・npc_absence(absentNpc)のリセット(翌日限りのため。M20)
  * 天候・各層敵シンボル数・侵食度(dreamErosion)・好感度・会話記憶・訪問済みマップ
- * (visitedMaps。探索進捗)は持続する(`...state` の spread で保持=明示的なリセット対象外)。
+ * (visitedMaps。探索進捗)・解除済み実績(unlockedAchievements。収集進捗。M24)は
+ * 持続する(`...state` の spread で保持=明示的なリセット対象外)。
  */
 export function advanceDay(state: GameState): GameState {
   return {

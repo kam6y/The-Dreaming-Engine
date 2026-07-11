@@ -152,7 +152,9 @@ function sampleView(): SnapshotView {
     // 世界状態の表示情報(M20-3)。既定=平常(市場なし・全員在席・侵食0)
     world: { marketShift: null, absentNpc: null, dreamErosion: 0 },
     // 訪問済みマップ(M22。view 必須フィールド追従)。開始マップのみ訪問済み
-    visitedMaps: state.visitedMaps
+    visitedMaps: state.visitedMaps,
+    // 解除済み実績(M24。view 必須フィールド追従)。新規ゲームは空
+    unlockedAchievements: state.unlockedAchievements
   };
 }
 

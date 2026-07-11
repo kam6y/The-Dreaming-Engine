@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { achievementIdSchema } from "./achievements.js";
 import { giftableItemIdSchema } from "./ai/giftable.js";
 import { absentNpcIdSchema, marketShiftModeSchema } from "./ai/world-event.js";
 import {
@@ -252,6 +253,14 @@ export const snapshotViewSchema = z.object({
    * (現在地 location は既出)。未訪問マップは靄で伏せる=描画側の判定に使う。
    */
   visitedMaps: z.array(mapIdSchema),
+  /**
+   * 解除済み実績 id(「夢の欠片」。M24)。定義(表示名・フレーバー・総数)はクライアントが
+   * shared の登録簿 `ACHIEVEMENTS` から直接引くため、view へ載せるのは解除 id 配列のみ
+   * (M22 visitedMaps と同じ「view は最小・登録簿は共有」の流儀)。解除瞬間の通知は
+   * 専用メッセージを設けず、クライアントが前回 snapshot との差分で検出する(M24-3 のトースト)。
+   * クライアント未改修でも無視できる純追加フィールド。
+   */
+  unlockedAchievements: z.array(achievementIdSchema),
   /** 有効な対話(店/宿/会話)。無ければ省略 */
   interaction: activeInteractionSchema.optional(),
   /** 戦闘ビュー(mode==="battle" のときのみ) */

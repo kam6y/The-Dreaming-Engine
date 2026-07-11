@@ -26,6 +26,7 @@ import {
   discountedBuyPrice,
   effectiveStats,
   equipItem,
+  evaluateAchievements,
   freeSpace,
   hasNarratedEnemy,
   innFeeFor,
@@ -35,6 +36,7 @@ import {
   isStageAtOrAfter,
   lootForChest,
   lootForGather,
+  mergeUnlockedAchievements,
   neighbor,
   npcPlacementsForTime,
   receiveQuestParcel,
@@ -61,6 +63,7 @@ import {
   unequipItem,
   usedSpace,
   xpToNext,
+  type AchievementEvent,
   type ActiveInteraction,
   type BattleCommand,
   type BattleEvent,
@@ -273,6 +276,14 @@ export class GameSession {
    * live では無視して null のまま=通常進行)。continue では常に null(通常進行)。
    */
   private timeOfDayPin: TimeOfDay | null = null;
+
+  /**
+   * 当該操作で起きた実績の決定論イベント(M24。sub-quest-reported / world-event-applied)。
+   * 当該処理(reportSubQuest 成功・宿泊手順4の世界変化適用)が積み、単一チョークポイント評価
+   * (settleAchievements)が消費してクリアする。`mode` と同格の非永続ランタイム状態
+   * (newGame/continue でもクリアする=resetRuntime)。
+   */
+  private readonly pendingAchievementEvents: AchievementEvent[] = [];
 
   private battle: BattleState | null = null;
 
@@ -507,6 +518,8 @@ export class GameSession {
     this.battleSymbolIndex = null;
     this.activeInteraction = null;
     this.gatheredThisVisit.clear();
+    // 新規/ロードで前ゲームの実績イベントを持ち越さない(M24。非永続ランタイム)
+    this.pendingAchievementEvents.length = 0;
     // 新規/ロードで時間帯は昼へ(M23。固定ピンがあればピンの値=テスト用の決定論再現)
     this.resetTimeOfDay();
   }
@@ -1281,6 +1294,9 @@ export class GameSession {
       inventory: result.inventory,
       player: { ...state.player, gold: state.player.gold + result.goldGained }
     };
+    // 実績イベント(M24): サブクエスト報告完了の成立(first-errand)。評価はここでは行わず、
+    // 直後の snapshot 構築時の単一チョークポイント(settleAchievements)が消費する
+    this.pendingAchievementEvents.push("sub-quest-reported");
     const dialogs: ServerMessage[] = [
       this.dialogMsg(
         NPC_DISPLAY_NAMES.informant,
@@ -1582,11 +1598,20 @@ export class GameSession {
           recentPlay: this.buildRecentPlay(),
           world: this.requireState().world
         });
+        // 実績イベント(M24): 世界変化が1件以上承認・適用されるか(woven-morning)。
+        // 適用前の world との比較が要るため applyApprovedEffects の前に判定して積む
+        if (this.hasAppliedWorldEvents(result.approvedEffects)) {
+          this.pendingAchievementEvents.push("world-event-applied");
+        }
         // 世界変化(dream_world_events)を GameState へ適用(承認分のみ)
         this.applyApprovedEffects(result.approvedEffects);
         dreamMsgs.push(this.aiUtteranceMsg("narrate", result.displayText));
       }
     }
+
+    // 手順4後・手順5前: 実績の評価(M24)。woven-morning 等の解除がそのまま当該セーブに載る
+    // (game-design.md「判定・解除フロー」宿泊時の順序。「宿泊の処理順序」自体は不変)
+    this.settleAchievements();
 
     // 手順5: セーブ(夢・世界変化を含む状態を保存)。AI 失敗時もここは必ず成立し日付は進む
     this.accruePlaytime();
@@ -1619,10 +1644,64 @@ export class GameSession {
   }
 
   // =========================================================================
+  // 実績「夢の欠片」(M24。単一チョークポイント評価)
+  // =========================================================================
+
+  /**
+   * 実績の単一チョークポイント評価(M24。game-design.md「判定・解除フロー」)。
+   * 各クライアント操作の処理で GameState/ランタイムが変化した直後・スナップショット構築の前に
+   * snapshotMsg が必ず呼ぶ(操作→view 送信の共通経路への一点差し込み。移動・戦闘・装備等への
+   * フック散在はしない)。宿泊(rest)のみ、手順4(世界変化適用)の後・手順5(セーブ)の前にも
+   * 明示的に呼ぶ(解除がそのまま当該セーブに載る)。同一操作内の再評価は冪等
+   * (∪ 単調更新+イベントは消費済み)。評価は shared の純関数で**乱数を消費しない**
+   * (シード列・エンカウント・ドロップに影響しない)。解除しても dialog・専用メッセージは
+   * 送らない(通知はクライアントの view 差分トースト=M24-3)。
+   */
+  private settleAchievements(): void {
+    if (this.state === null) return;
+    const state = this.state;
+    const satisfied = evaluateAchievements({
+      state,
+      timeOfDay: this.timeOfDay,
+      events: this.pendingAchievementEvents
+    });
+    // 評価へ渡したイベントは消費する(同一操作内で snapshot が複数回組まれても二重計上しない)
+    this.pendingAchievementEvents.length = 0;
+    const merged = mergeUnlockedAchievements(state.unlockedAchievements, satisfied);
+    if (merged !== state.unlockedAchievements) {
+      this.state = { ...state, unlockedAchievements: merged };
+    }
+  }
+
+  /**
+   * 承認 effect に「1件以上の世界変化の承認・適用」が含まれるか(M24 woven-morning の決定論判定。
+   * AI 応答の内容は条件にしない=事実の有無のみ)。非累積イベント(weather/street_event/
+   * npc_rumor/market_shift/npc_absence)は解決済み `events` に現れるため件数で判定し、
+   * 累積系(dungeon_shift/dream_erosion)は `events` に現れないため適用**前**の world の
+   * 現在値との差で判定する(値が変わらない承認は「適用」に数えない)。
+   */
+  private hasAppliedWorldEvents(effects: readonly StateChangeEffect[]): boolean {
+    const world = this.requireState().world;
+    return effects.some((effect) => {
+      if (effect.kind !== "dream_world_events") return false;
+      if (effect.events.length > 0) return true;
+      if (effect.dreamErosion !== world.dreamErosion) return true;
+      const counts = effect.dungeonSymbolCounts;
+      return (
+        counts[1] !== world.dungeonSymbolCounts[1] ||
+        counts[2] !== world.dungeonSymbolCounts[2] ||
+        counts[3] !== world.dungeonSymbolCounts[3]
+      );
+    });
+  }
+
+  // =========================================================================
   // ビュー構築・メッセージヘルパー
   // =========================================================================
 
   private snapshotMsg(): ServerMessage {
+    // 実績の単一チョークポイント評価(M24)。スナップショット構築の前に解除集合を単調更新する
+    this.settleAchievements();
     return { type: "snapshot", view: this.buildView() };
   }
 
@@ -1823,7 +1902,9 @@ export class GameSession {
         dreamErosion: state.world.dreamErosion
       },
       // 訪問済みマップ(M22。「夢の地図」用)。接続グラフ・displayName はクライアントが MAPS から引く
-      visitedMaps: [...state.visitedMaps]
+      visitedMaps: [...state.visitedMaps],
+      // 解除済み実績(M24。「夢の欠片」)。表示名・フレーバー・総数はクライアントが ACHIEVEMENTS から引く
+      unlockedAchievements: [...state.unlockedAchievements]
     };
 
     return {

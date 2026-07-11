@@ -12,6 +12,7 @@ export * from "./equipment.js";
 export * from "./shop.js";
 export * from "./loot.js";
 export * from "./game-state.js";
+export * from "./achievements.js";
 export * from "./quests.js";
 export * from "./npc.js";
 export * from "./ai/index.js";
