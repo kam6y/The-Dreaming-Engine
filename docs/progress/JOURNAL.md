@@ -2424,3 +2424,31 @@
   (4)E2Eは new-game options.timeOfDay="night"(mock限定)で開始→data-time-of-day="night"と
   商人の夜配置を観測(クライアントの新規開始オプション組み立てへtimeOfDayを追加する
   URLフラグ配線が必要=?timeOfDay=night等。startLevelの既存流儀参照)
+
+## [79] 2026-07-12 M23-3+M23完了: 昼夜サイクルのクライアント表示・演出+E2E(UI=オーケストレーター自身)
+
+- やったこと(M23-3はUIのためオーケストレーター自身が実装):
+  - exploration-scene: drawNpcsを`npcPlacementsForTime(this.map, timeOfDay)`へ差し替え
+    (サーバー衝突/インタラクション判定と同一の純関数=絵と当たり判定の一致)。
+    snapshot受信時に`renderedTimeOfDay`と比較し、変化時のみNPC再描画。
+    夜の帳=`updateNightOverlay()`(藍0x14213d・alpha0.16・worldLayerにdepth40=
+    侵食の帳depth50の下)。HUDを「N日目・昼/夜」表記に。`data-time-of-day`観測点追加
+  - url-flags: `?timeOfDay=day|night`をnew-gameオプションへ配線(startLevel同流儀。
+    mock時のみサーバーが尊重する固定ピン)。continueには載せない(通常進行=常に昼開始)
+  - E2E `day-night.spec.ts` 2本: (1)夜ピン開始→`data-time-of-day="night"`→
+    (8,11)から左向きで夜の商人(7,11)に話しかけ店が開く(`data-interaction="shop"`)=
+    夜配置の描画とサーバー正面判定の一致を実地確認 (2)既定の新規ゲームは昼開始
+  - 目視確認: スクリーンショットで夜の帳・商人の夜位置・HUD「1日目・夜」を確認済み
+- 裁量で決めたこと: HUD時間帯語は「・昼/・夜」区切り(日数の直後)。夜の帳alphaは
+  目視調整の結果0.16をそのまま採用。E2Eの昼→夜40歩遷移はユニットテスト担保に委ね、
+  スモークは固定ピンで配線観測に専念(実行時間の抑制)
+- 検証: pnpm check 緑(unit 963)・pnpm test:e2e 20/20緑(day-night 2本を含む)・
+  **M23ゲート=pnpm test:e2e:full 2/2緑**。セーブスキーマ・AI系・防御仕様は不変
+- M23完了: ROADMAP M23-3チェック+BACKLOG「昼夜サイクルと時間帯によるNPC配置変化」
+  チェック(注記付き)
+- 次にやること: BACKLOG「優先度: 低」次項=**実績システム(夢の欠片収集)**をM24として
+  ROADMAP末尾へ展開してから着手(M24-1=骨子追記から。骨子執筆=subagent委譲、検収=
+  オーケストレーター)。申し送り: (1)実績はセーブ永続が自然=GAME_STATE_VERSIONと
+  後方互換(optional+default)の設計判断を骨子で先に固める (2)「夢の欠片」の
+  ロア整合はworld-lore.mdを必ず参照 (3)通知UI(解除トースト等)はUI=オーケストレーター、
+  判定ロジック(条件評価・進捗カウンタ)はshared純関数+ユニットテスト=subagent
