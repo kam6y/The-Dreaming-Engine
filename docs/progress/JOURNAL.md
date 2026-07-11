@@ -2557,3 +2557,37 @@
   (3)難易度変更のUI(タイトル新規ゲーム時のみか・ゲーム中変更可か)は骨子で決める
   (4)subagentのAPIエラー中断が頻発中(M24-1で1回・M24-2で2回)→中断通知が来たら
   ツリー確認の上SendMessageで再開、進捗があれば検証をオーケストレーターが引き取る
+
+## [83] 2026-07-12 M25展開+M25-1: 難易度設定の仕様骨子(骨子執筆=subagent委譲・検収/ROADMAP展開=オーケストレーター)
+
+- やったこと:
+  - BACKLOG「難易度設定」をROADMAP末尾へM25として展開
+    (M25-1骨子/M25-2 shared+server=subagent/M25-3クライアントUI=オーケストレーター)
+  - game-design.md末尾へ「難易度設定(拡張: M25)」骨子を追記(subagent執筆・検収済み):
+    3段階easy/normal/hard(やさしい/ふつう/むずかしい)・動かすのは**プレイヤー被ダメージ
+    倍率のみ**(0.75/1.0固定/1.4。与ダメ・XP/G・命中・状態異常・経済・敵定義は非依存)・
+    適用点=computeDamage戻り後のdealDamageプレイヤー被弾分岐1点でmax(1, floor(dmg×係数))
+    (RNG非消費=乱数列不変)・係数運搬=createBattle第5引数+BattleState.
+    incomingDamageMultiplier(進行中戦闘は開始時係数で固定)・GameState.difficulty=
+    default("normal")でversion据え置き・選択UI=新規ゲーム時3択(ゲーム中変更は任意=縮退可)・
+    ?difficulty=URLフラグ・view/data-difficulty純追加・AI非波及。
+    「セーブ/ロード」章の保存内容列挙へdifficultyを追記
+  - 検収で骨子のアンカーを全数照合: computeDamage(battle.ts:249。式=max(1,floor(atk×mult×
+    rand(0.9..1.1))−floor(def/2))で戻り値≥1=normal恒等の根拠成立)・createBattle(278。
+    combat-balanceは3引数呼び=第5引数追加で不変)・dealDamage(641)・戦闘入口2箇所
+    (session.ts:663/706)=すべて実在・一致
+- 裁量で決めたこと(subagent提案を検収で採用):
+  - 被ダメ倍率のみの最小案(バランス表・経済・実績M24・状態異常M21を難易度非依存に保つ)
+  - 係数初期値0.75/1.0/1.4(normalは固定・変更禁止と骨子に明記)
+  - **options.difficultyはmock限定にしない**(startLevel等の加速チートと異なり正規の
+    プレイヤー選択のためliveでも尊重。URLフラグはE2E便宜)
+  - subagentが報告をdocs/progress/M25-1-report.mdへ保存した(依頼は最終メッセージ返却)→
+    内容を検収・JOURNALへ収載の上、規約外の場所のためファイルは削除(未追跡のままコミットせず)
+- 検証: pnpm check 緑(unit 997)。ドキュメントのみの変更
+- 次にやること: M25-2(shared+serverロジック。subagent委譲)。申し送り:
+  (1)骨子の係数表・適用点が正(normal恒等=combat-balance.testバイト一致が絶対条件。
+  既存normal閾値を緩める変更は禁止) (2)createBattle第5引数は既定"normal"でテスト3引数呼び
+  不変 (3)easy/hard方向性の新テストは追加可・既存テストは不変 (4)new-game以外にcontinueへは
+  difficultyを足さない(セーブ値が正) (5)M25-3(タイトル3択+URLフラグ+data-difficulty+E2E)は
+  UI=オーケストレーター自身。設定オーバーレイでのゲーム中変更は縮退可(最小=新規時のみ)
+  (6)subagentへ: advisorは使えない・報告は最終メッセージで返す(ファイル保存しない)

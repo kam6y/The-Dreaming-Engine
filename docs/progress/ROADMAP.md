@@ -606,3 +606,45 @@ JOURNALへ「仕様変更提案」として記録する)。
 純関数+登録簿に一元化され、AIツール・防御仕様・`<world_state>`は不変。既存の移動・戦闘・
 会話・店・宿・セーブ・既存E2E(スモーク+`test:e2e:full`)が壊れず、新マップ・新敵・
 新規画像アセットを増やさない。`pnpm check`+`pnpm test:e2e`緑(M24完了時は`pnpm test:e2e:full`も)。
+
+## M25: 難易度設定(BACKLOG「優先度: 低」3件目の展開。
+## やさしい/ふつう/むずかしいの3段階=被ダメージ倍率のみのランタイム乗算層。ふつう=恒等で完全不変)
+
+- [x] M25-1: 仕様骨子の追記(BACKLOG展開に伴う骨子追記=CLAUDE.mdの例外に該当。
+      骨子執筆=subagent、検収=オーケストレーター)。
+      game-design.md「難易度設定(拡張: M25)」=採用案(3段階 easy/normal/hard・
+      動かすのは**プレイヤー被ダメージ倍率のみ**(0.75/1.0固定/1.4)・敵定義/経済/命中/
+      状態異常/XP/ゴールドは難易度非依存)・適用点(computeDamage戻り後にdealDamageの
+      target==="player"分岐でmax(1, floor(dmg×係数))=RNG非消費・normal=恒等写像で
+      combat-balance.testバイト一致保存の根拠明記)・係数運搬(createBattle第5引数+
+      BattleState.incomingDamageMultiplier・進行中戦闘は開始時係数で固定)・セーブ互換
+      (GameState.difficulty=default("normal")・version据え置き・continueはセーブ値が正)・
+      選択UI(新規ゲーム時3択が確定点・difficultyはmock限定にしない(チートでなく正規選択の裁量)・
+      ゲーム中変更set-difficultyは任意=縮退可)・?difficulty=URLフラグ・view純追加・
+      data-difficulty観測点・AI非波及・不干渉条件。「セーブ/ロード」章の保存内容列挙へ追記
+- [ ] M25-2: shared/serverの実装(**subagent担当**。UIは書かない):
+      shared=`difficultySchema`(easy/normal/hard)・`DIFFICULTY_DISPLAY_NAMES`・
+      `DIFFICULTY_COEFFICIENTS`(0.75/1.0/1.4)・`createBattle`第5引数`difficulty`(既定normal)+
+      `BattleState.incomingDamageMultiplier`(既定1.0)・`dealDamage`のプレイヤー被弾分岐1点で
+      `max(1, floor(dmg×係数))`適用(**RNG消費順序・既存式は不変**)。
+      `GameState.difficulty`=`.default("normal")`(version据え置き・advanceDayで持続)。
+      `newGameOptionsSchema.difficulty`(**mock限定にしない**)+`snapshotViewSchema.difficulty`純追加。
+      server=new-gameでGameStateへ反映・戦闘入口2箇所で`createBattle(..., state.difficulty)`。
+      ユニットテスト=easy/hardの被ダメ増減方向・normal恒等・旧セーブ互換(欠落→normal)・
+      最低1ダメージ保証。**既存combat-balance.testのnormal閾値・判定は一切変えない(緩めない)**。
+      既存E2E(スモーク+full)緑を確認
+- [ ] M25-3: クライアントUI(**UI=オーケストレーター**):
+      タイトルの新規ゲームフローへ難易度3択(既定カーソル=ふつう・決定値をoptions.difficultyで送信)・
+      `newGameOptionsFromUrl()`へ`?difficulty=`読み取り・`syncDomState`へ`data-difficulty`・
+      HUD表示は裁量(出す場合は控えめ)。ゲーム中変更(set-difficulty)は実装コストで採否判断
+      (縮退案=新規時のみ確定でメッセージ追加なし)。
+      新規画像アセットなし+E2Eスモーク1本(`?difficulty=hard`→`data-difficulty="hard"`観測)。
+      完了時にBACKLOG側へチェック+M25ゲート(test:e2e:full)
+
+完了条件: 新規ゲーム時に難易度3段階(やさしい/ふつう/むずかしい)を選べ、選択はセーブへ
+後方互換(`default("normal")`・`GAME_STATE_VERSION`据え置き)で永続化され、プレイヤーの
+被ダメージのみが係数(0.75/1.0/1.4)で増減する(最低1ダメージ保証・進行中戦闘は開始時係数)。
+既定「ふつう」は現行挙動と完全一致し、`combat-balance.test`の統計がバイト一致で保存され、
+敵定義・経済・命中・状態異常・XP/ゴールド・クエスト・AIツール・防御仕様は不変。
+既存E2E(スモーク+`test:e2e:full`)が壊れず、新マップ・新敵・新規画像アセットを増やさない。
+`pnpm check`+`pnpm test:e2e`緑(M25完了時は`pnpm test:e2e:full`も)。
