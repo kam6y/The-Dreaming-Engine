@@ -465,7 +465,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       (眩惑=蝋燭喰らい/竦み=軋み人形(いずれもbalance-test対象外)へ主割り当て、
       属性=状態異常種別ごとの耐性(炎氷等のダメージ倍率は対象外=裁量)、
       解除は灯/光アイテム。JOURNAL[70])
-- [ ] M21-2: sharedの状態異常エンジン拡張(status.tsのstatusIdSchema/STATUS_DEFSへ
+- [x] M21-2: sharedの状態異常エンジン拡張(status.tsのstatusIdSchema/STATUS_DEFSへ
       眩惑・竦みを追加=一般形維持・StatusDefinitionへ効果種(命中低下/行動不能)拡張・
       表示名/文言・技への付与確率フィールド(既定1.0=既存不変)・battle.tsの命中判定/
       行動不能判定の分岐(**当該状態の行動時のみRNG消費**=無縁戦闘のRNG列を保存)・

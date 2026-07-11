@@ -2143,3 +2143,41 @@
   (不活性=既存挙動バイト一致をテストで確認)。割り当て・再検証はM21-3
   (3)BattleEventへ空振り・行動不能のイベント型を追加しzodスキーマと双方向整合を
   テストで担保(battleEventSchemaの既存パターン踏襲)
+
+## [71] 2026-07-12 M21-2: 状態異常2種(眩惑/竦み)のsharedエンジン拡張(実装=subagent委譲・検収=オーケストレーター)
+
+- やったこと(実装・テスト・検証はsubagent、差分検収+check/E2E再実行+コミットはオーケストレーター):
+  - status.ts: statusIdSchemaへdazzle/dread追加・定数(持続2/空振り率0.25/行動不能率0.3)・
+    STATUS_DISPLAY_NAMES(眩惑/竦み)・StatusDefinitionへ行動時効果 actionEffect
+    (判別union: accuracy=命中低下/skip=行動不能。確率と文言を定義側へ集約=
+    battle.tsは種別を決め打ちしない一般形)。毒定義は不変
+  - skills.ts/enemies.ts: 技への付与確率 inflictChance?(省略=1.0)を追加
+  - battle.ts: BattleEventへ attack-missed/action-skipped 追加(zodスキーマ追従)。
+    ヘルパー3種=rollActionIncapacitated(竦み)/rollAttackMiss(眩惑)/maybeInflict(付与確率)。
+    resolveTurnの行動ループ先頭で行動不能判定(プレイヤーはコマンド不発=MP/アイテム消費なし・
+    敵はローテーション非前進)。通常攻撃・スキル攻撃・敵行動の3経路に命中判定
+  - RNG保存の実現: actionEffectを持つ状態が行動主体に付与されているときだけrng.next()を
+    消費(毒はactionEffectなし)。maybeInflictはchance>=1で必ず付与=ロールなし
+    (既存付与技はinflictChance未指定)。M21-2時点でどの敵/スキルも新2種を付与しない=
+    既定不活性→無縁戦闘のRNG列がバイト一致
+  - テスト21件追加(status-effects.test.ts新規)=unit 907: 定義5・付与確率1・RNG列不変3
+    (参照Rngとの厳密一致含む)・眩惑2・竦み2・持続/失効2・上書き2・イベント整合4。
+    combat-balance.testの統計値は既存のまま(Lv5勝率85.7%/Lv6 100%等。閾値不変)
+- 裁量で決めたこと: 効果種名accuracy/skip・フィールド名inflictChance・イベント型名
+  attack-missed/action-skipped・文言(付与「揺らめく灯火が…視界を惑わせる。」
+  「悪夢の気配に…身が竦む。」/空振り「…狙いが逸れ、その一撃は虚しく空を切った。」/
+  行動不能「…身が竦み、動けなかった。」)・耐性の型置き場はM21-3へ委譲(スコープ絞り)
+- 検証: pnpm check 緑(unit 907)・pnpm test:e2e 16/16緑(subagent実行+
+  オーケストレーター再実行の二重確認)。AI系・docs/spec不変・ガードレール不変
+- 次にやること: M21-3(耐性システム+割り当て+バランス再検証。subagent委譲)。申し送り:
+  (1)**アイテム使用×竦みの層跨ぎ(重要)**: エンジンは行動不能時applyItemを呼ばないが、
+  インベントリ数量の減算はサーバー側(session.ts)。竦みが到達可能になるM21-3以降、
+  itemコマンドが行動不能で不発の場合にサーバーが数量を減らさないよう
+  action-skippedイベント検出→減算ガードが必要
+  (2)敵は竦み行動不能時にローテーション非前進(判定をexecuteEnemyActionの前に置いた設計)。
+  ボスへ竦み付与する場合の挙動に影響
+  (3)新2種のbehavioralな付与・上書きテストは付与元追加後(蝋燭喰らい=眩惑move/
+  軋み人形=竦みmove)にM21-3で追加(汎用inflictStatus経由の上書きは毒で実証済み)
+  (4)耐性は実効付与確率=inflictChance×(1-耐性)をmaybeInflictへ組込み。プレイヤー耐性は
+  装備由来・敵耐性は敵定義由来・毒耐性0維持。combat-balance.testは空装備計測のため
+  プレイヤー耐性非干渉・ボス等へ付与時のみ全閾値再検証(緩めるの禁止)
