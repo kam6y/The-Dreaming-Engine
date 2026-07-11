@@ -55,7 +55,10 @@
       (ROADMAP M19として展開し完了: deliver/escort/surveyの3型=骨子・shared状態機械・
       server統合(検証層+攻撃リグレッション追加)・ジャーナル報告/放棄UI・連れの灯・
       deliver E2E。JOURNAL[63]-[66])
-- [ ] 夢シーンの演出強化(`trigger_world_event`の型追加: 市場の変化、失踪、夢の侵食度など)
+- [x] 夢シーンの演出強化(`trigger_world_event`の型追加: 市場の変化、失踪、夢の侵食度など)
+      (ROADMAP M20として展開し完了: market_shift(買値倍率・翌日限り)/
+      npc_absence(翌日不在・安全ホワイトリスト)/dream_erosion(侵食度0-3・演出のみ)+
+      防御検証拡張・売値≤実効買値クランプ・クライアント演出・E2E。JOURNAL[67]-[69])
 - [ ] 状態異常・属性の拡充(毒・暗闇・恐怖など+耐性)
 - [ ] ミニマップまたは全体マップUI
 

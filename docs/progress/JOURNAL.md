@@ -2066,3 +2066,44 @@
   不在表示を観測
   (5)live追従(防御外): prompt.tsの夢シーン候補に新kind未提示=提案させるには
   候補追加が別途必要(M20-3内で小タスクとしてsubagent委譲可)
+
+## [69] 2026-07-11 M20-3: 夢の世界変化のクライアント演出+E2E(UI=オーケストレーター。M20完了)
+
+- やったこと(UI実装・E2E・目視=オーケストレーター自身、liveプロンプト候補+
+  SDKスキーマ追従=subagentへ並行委譲):
+  - view最小拡張: SnapshotViewへ world{marketShift/absentNpc/dreamErosion}、
+    shop interactionへ marketShift(売値表示をadjustedSellPriceの第3引数で
+    サーバー請求と同一計算=M20-2申し送りの乖離を解消)
+  - 店頭: 市場の一言(「…今日は品薄で、値が張るようだ。」/「…今日は品が余り、
+    値が緩んでいる。」)をヘッダーに表示。買値はサーバー計算のstockに反映済み
+  - 不在NPC: npcViews(id→描画物Map)を導入しabsentNpcのスプライト+名前を
+    非表示(interact遮断はサーバーが正・見た目のみ)
+  - 侵食の帳: worldLayer上に暗色rect(0x1a1030。alpha 0/0.08/0.16/0.26の4段階)。
+    UIレイヤーは別カメラで不変。演出のみ=バランス非干渉
+  - syncDomStateへ data-dream-erosion / data-absent-npc(E2E観測点)
+  - live追従(subagent): prompt.tsへ<world_event_options>(3kindの入力形・
+    ホワイトリスト。informant/priest/wardenは候補に混入せず)+テスト6件。
+    **live.tsのSDKツールスキーマにmode/deltaが無くliveで新kindの引数が運べない
+    問題をsubagentが発見**→optional追加(緩い受け口+検証層却下の既存流儀を維持。
+    検証層・ガードレール不変)+テスト
+  - E2E 16本目 world-events.spec: フィクスチャでworld状態を直接書く方式
+    (夢AI経由の発火・検証・適用はM20-2のユニット29件で担保済み=番兵注入の
+    配線を増やさない判断)。scarcityの買値20G→24G(gold 30→6)・
+    data-dream-erosion/data-absent-npcを観測(約8.5s)
+  - 実プレイ目視: オルガの不在(スプライト消滅)・侵食度2の帳(画面全体の沈み)・
+    店の市場一言と全品への倍率反映(24G/66G/18G/72G/216G)をスクリーンショット確認
+- 裁量で決めたこと: 侵食の帳はrect+alphaの4段階(tileTint再計算より軽量・
+  戦闘/UIに非干渉)/E2Eはフィクスチャ直書き方式(上記)/市場の一言は
+  ヘッダー行に併記(専用行を増やさない)
+- 修正: messages.test/game-client.testのsampleViewへworld追加(view必須化に追従)
+- M20ゲート: pnpm check 緑(unit 886)・pnpm test:e2e 16/16緑・
+  pnpm test:e2e:full 2/2緑。**M20完了**=BACKLOG「夢シーンの演出強化」にチェック。
+  ガードレール不変(追加のみ)
+- 既知の問題(フレーク・記録): スイート実行でbattle.specが1回失敗→単体・
+  全体再実行とも緑(dev:mock手動起動をkillした直後のE2E実行だったため
+  ポート残留の可能性。JOURNAL[62]の既知フレークと同系統。再発時はスイート間の
+  サーバー終了待ちを検討)
+- 次にやること: BACKLOG「優先度: 中」の次点「状態異常・属性の拡充(毒・暗闇・
+  恐怖など+耐性)」をM21として展開してから着手。game-design.mdの戦闘・状態異常の
+  現行仕様とcombat実装(status.ts・毒の先例=M9)を読み、既存バランステスト
+  (combat-balance.test)の閾値を緩めない方向で骨子を書く

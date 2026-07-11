@@ -439,9 +439,13 @@ JOURNALへ「仕様変更提案」として記録する)。
       (shop関数はoptional第3引数=null時従来完全同値・売値≤実効買値クランプ・
       夢モックは番兵recentPlay方式で既定不変・攻撃ID4種登録・テスト29件=unit 879。
       JOURNAL[68])
-- [ ] M20-3: クライアント演出(市場の変化の店頭表示・NPC不在の表示・侵食度の
+- [x] M20-3: クライアント演出(市場の変化の店頭表示・NPC不在の表示・侵食度の
       画面tint演出。UI=オーケストレーター)+E2Eスモーク。
       完了時にBACKLOG側へチェック+M20ゲート(test:e2e:full)
+      (view.world最小追加+shop interactionへmarketShift=売値の同一計算・
+      市場の一言・不在NPC非表示(npcViews)・侵食の帳(暗色rect 4段階)・
+      world-events.spec=16本目・liveのプロンプト候補とSDKスキーマ追従は
+      subagent委譲。実プレイ目視確認済み。ゲート全緑=M20完了。JOURNAL[69])
 
 完了条件: 夢シーンでmarket_shift/npc_absence/dream_erosionが発行・適用され、
 翌朝の市場・NPCの不在・世界の色に現れ、防御検証が3kindに拡張され(既存要件は不変)、
