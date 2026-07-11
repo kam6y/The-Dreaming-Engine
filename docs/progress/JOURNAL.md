@@ -2219,3 +2219,39 @@
   (3)**test:e2e:fullで要再検証の挙動変化2点**: 戦闘どうぐが実際に消費されるようになった/
   眩惑・竦みが蝋燭喰らい・軋み人形戦で実戦投入(空装備の通しプレイで約25%空振り・
   約30%行動不能を踏む。決着ターンのずれの可能性)
+
+## [73] 2026-07-12 M21-4: 戦闘UIの状態異常バッジ・演出+状態異常E2E(UI=オーケストレーター。M21完了)
+
+- やったこと(UI実装・E2E・目視=オーケストレーター自身、continueへのseed/noSymbols伝搬=
+  subagentへ並行委譲):
+  - バトルUI: 状態異常バッジ(【毒】【眩惑】【竦み】。プレイヤー=パネルのレベル行右端/
+    敵=スプライト下。STATUS_DISPLAY_NAMESの一般形=種別決め打ちなし)。
+    attack-missed=敵スプライトの小さな横揺れ(命中フラッシュ・ヒット音は鳴らさない)/
+    action-skipped=敵側のみ一瞬沈む(alpha)。解除・付与・失効の文言は既存message経路で表示済み
+  - data-battle-modeの鮮度修正(UI): showMessage/executeCommandでもsyncDomState
+    (従来はopenCommandMenuのみの同期でコマンド送信後も古い"command"が残り、
+    E2Eのラウンド待ちが空振り→以降のキーがメッセージ送りに食われる)。
+    data-player-statusを新設(E2E観測点)
+  - continueへのseed/noSymbolsオプション(subagent): continueGameOptionsSchema=
+    newGameOptionsSchema.pick({seed,noSymbols})・サーバーcontinueGame(options)・
+    url-flags.continueOptionsFromUrl()・テスト3件(unit 932)。
+    ?seedの「敵シンボル/戦闘シードの固定」がつづきからにも効くようになった
+    (E2Eのフィクスチャ+つづきから方式で敵シンボル配置を再現可能に)
+  - E2E 17本目 status-effects.spec: フィクスチャ(Lv6・回復薬3+解毒薬1・沈み野の
+    軋み人形の隣=seed42でsampleEnemySymbols再現)+つづきから。軋み人形の
+    poison-bite(2手目・付与確率1.0=決定論)でプレイヤー毒付与→data-player-status反映→
+    解毒薬で解除を観測(約39s)。眩惑/竦みの付与は確率的(0.5/0.4)なので
+    E2E対象外=ユニット41件(M21-2/-3)で担保
+  - 実プレイ目視: 毒付与時のプレイヤーパネル右上の【毒】バッジをスクリーンショット確認
+    (レイアウト崩れなし・琥珀色#c9a25c)
+- 裁量で決めたこと: バッジは【名前】連結の単色テキスト(色#c9a25c=灯の琥珀)/
+  E2Eは毒で配線を観測(確率的な新2種はユニットで担保、という分担)/
+  コマンドメニューのカーソル持続を前提にE2Eの↓回数を設計(初回のみ↓2)
+- M21ゲート: pnpm check 緑(unit 932)・pnpm test:e2e 17/17緑・pnpm test:e2e:full 2/2緑
+  (戦闘どうぐ消費の実装後も通しプレイ緑=申し送りの懸念2点は顕在化せず)。
+  **M21完了**=BACKLOG「状態異常・属性の拡充」にチェック。ガードレール不変
+- 次にやること: BACKLOG「優先度: 中」の次点「ミニマップまたは全体マップUI」をM22として
+  展開してから着手(UI主体なのでオーケストレーター自身の実装比率が高い見込み。
+  マップ定義(shared/maps)の構造とexploration-sceneの描画レイヤ・data属性を先に読む)。
+  申し送り: コマンドメニューのカーソルはラウンド間で持続する(MenuList.indexは
+  リセットされない)=戦闘E2Eを書くときは↓回数に注意
