@@ -53,6 +53,17 @@ const TILE_COLORS: Record<TileType, number> = {
 
 /** NPCのプレースホルダーカラー */
 const NPC_COLOR = 0x8fb0d8;
+
+/**
+ * 世界の侵食度(dream_erosion 0-3)ごとの暗色の帳の濃さ(M20-3。演出のみ)。
+ * 0=平穏(なし)/ 1=兆し / 2=綻び / 3=侵食(色濃い)。
+ */
+const EROSION_OVERLAY_ALPHA: Record<number, number> = {
+  0: 0,
+  1: 0.08,
+  2: 0.16,
+  3: 0.26
+};
 /** オブジェクト種別のプレースホルダーカラー */
 const OBJECT_COLORS: Record<string, number> = {
   sign: 0x9a8f76,
@@ -173,6 +184,15 @@ export class ExplorationScene extends Phaser.Scene {
   /** サブクエスト放棄の確認ダイアログ(表示中は移動・調べるをブロック。M19-4) */
   private questConfirm: ConfirmDialog | null = null;
 
+  /** NPCの描画物(不在(npc_absence)の表示切替のため id で引けるようにする。M20-3) */
+  private npcViews = new Map<
+    string,
+    (Phaser.GameObjects.Image | Phaser.GameObjects.Arc | Phaser.GameObjects.Text)[]
+  >();
+
+  /** 世界の侵食度(dream_erosion)の暗色の帳(0=なし。M20-3) */
+  private erosionOverlay: Phaser.GameObjects.Rectangle | null = null;
+
   /**
    * 護衛(escort)の同行者マーカー「連れの灯」(M19-4)。
    * active な escort サブクエストの間だけプレイヤーの後を漂う暖色の光点
@@ -242,6 +262,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.questJournal = null;
     this.questConfirm = null;
     this.companionLight = null;
+    this.npcViews.clear();
+    this.erosionOverlay = null;
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
@@ -263,6 +285,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateConduitPulse();
     this.createPlayer();
     this.updateCompanion();
+    this.updateErosionOverlay();
     this.setupHud();
     this.setupCamera();
     this.setupInput();
@@ -455,6 +478,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateResolvedObjects();
     this.updateConduitPulse();
     this.updateCompanion();
+    this.updateAbsentNpc();
+    this.updateErosionOverlay();
     this.updateInteraction(view);
     this.shopOverlay?.refresh(view);
     this.inventoryOverlay?.refresh(view);
@@ -1022,26 +1047,70 @@ export class ExplorationScene extends Phaser.Scene {
   private drawNpcs(): void {
     for (const npc of this.map.npcs) {
       const { x, y } = this.tileCenter(npc.position);
+      const views: (Phaser.GameObjects.Image | Phaser.GameObjects.Arc | Phaser.GameObjects.Text)[] = [];
       // NPCスプライト(sprite-<npcId>。M13-3)。未整備なら従来の円プレースホルダー。
       // 向きはマップ定義の facing(=建物を背にした向き。M17)の差分テクスチャで表現
       const sprite = this.mapSprite(this.directionalTextureId(`sprite-${npc.id}`, npc.facing), x, y, 42);
       if (sprite !== null) {
         this.worldLayer.add(sprite);
+        views.push(sprite);
       } else {
-        this.worldLayer.add(
-          this.add.circle(x, y, TILE_SIZE / 2 - 6, NPC_COLOR).setStrokeStyle(2, 0x0b0d12)
-        );
+        const circle = this.add.circle(x, y, TILE_SIZE / 2 - 6, NPC_COLOR).setStrokeStyle(2, 0x0b0d12);
+        this.worldLayer.add(circle);
+        views.push(circle);
       }
-      this.worldLayer.add(
-        this.add
-          .text(x, y - TILE_SIZE + 8, NPC_DISPLAY_NAMES[npc.id], {
-            color: "#a9b0ba",
-            fontFamily: UI_FONT_FAMILY,
-            fontSize: "13px"
-          })
-          .setOrigin(0.5)
-      );
+      const label = this.add
+        .text(x, y - TILE_SIZE + 8, NPC_DISPLAY_NAMES[npc.id], {
+          color: "#a9b0ba",
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: "13px"
+        })
+        .setOrigin(0.5);
+      this.worldLayer.add(label);
+      views.push(label);
+      // 不在(npc_absence。M20-3)の表示切替のため id で引けるように保持する
+      this.npcViews.set(npc.id, views);
     }
+    this.updateAbsentNpc();
+  }
+
+  /**
+   * 不在NPC(npc_absence。M20-3)の反映: world.absentNpc のスプライト・名前を非表示にする。
+   * 翌朝(日送り)の snapshot で自動復帰する(サーバーの advanceDay が正)。
+   * interact の遮断はサーバーが行う(こちらは見た目のみ)。
+   */
+  private updateAbsentNpc(): void {
+    const absent = this.snapshot.world.absentNpc;
+    for (const [npcId, views] of this.npcViews) {
+      const visible = npcId !== absent;
+      for (const view of views) {
+        view.setVisible(visible);
+      }
+    }
+  }
+
+  /**
+   * 世界の侵食度(dream_erosion 0-3。M20-3)の演出: ワールド全体に暗色の帳を重ねる
+   * (演出のみ=戦闘・経済・進行へは非干渉: ai-integration.md「6b」)。
+   * 段階が深まるほど帳が濃くなる(0=なし)。UI レイヤーには掛からない。
+   */
+  private updateErosionOverlay(): void {
+    const level = this.snapshot.world.dreamErosion;
+    const alpha = EROSION_OVERLAY_ALPHA[level] ?? 0;
+    if (alpha <= 0) {
+      this.erosionOverlay?.destroy();
+      this.erosionOverlay = null;
+      return;
+    }
+    if (this.erosionOverlay === null) {
+      this.erosionOverlay = this.add
+        .rectangle(0, 0, this.map.width * TILE_SIZE, this.map.height * TILE_SIZE, 0x1a1030, alpha)
+        .setOrigin(0, 0)
+        .setDepth(50); // キャラクターより手前=世界全体の色みが沈む(UIは別カメラで不変)
+      this.worldLayer.add(this.erosionOverlay);
+      return;
+    }
+    this.erosionOverlay.setFillStyle(0x1a1030, alpha);
   }
 
   private drawBoss(): void {
@@ -1408,6 +1477,9 @@ export class ExplorationScene extends Phaser.Scene {
     game.dataset["questCount"] = String(view.subQuests.length);
     // E2E 用: メインクエスト段階(第2章スモークが段階遷移を観測する。M18-3)
     game.dataset["mainQuestStage"] = view.mainQuestStage;
+    // E2E 用: 世界の侵食度・不在NPC(M20-3 の演出スモークが観測する)
+    game.dataset["dreamErosion"] = String(view.world.dreamErosion);
+    game.dataset["absentNpc"] = view.world.absentNpc ?? "none";
     // E2E 用: 地の文/NPC ダイアログの開閉(dialog-only 応答は snapshot を伴わないため
     // これで開閉を観測して移動可否の回帰を決定論的にテストする)
     game.dataset["dialog"] = this.dialog.isOpen ? "open" : "closed";

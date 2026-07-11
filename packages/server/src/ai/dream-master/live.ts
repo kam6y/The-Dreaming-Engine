@@ -180,6 +180,8 @@ export function buildFlowTools(allowed: readonly ToolName[], record: Recorder) {
         "trigger_world_event",
         "翌朝の世界変化を1件起こす(夢シーン専用)。{ event: { kind, ... } }。1夜3件まで。",
         {
+          // kind は緩い string(enum にしない)。M20 新kind(market_shift/npc_absence/dream_erosion)も
+          // ここを通り、実在性・ホワイトリスト・値域の厳密検証は検証層が行う(既存流儀)。
           event: z.object({
             kind: z.string(),
             value: z.string().optional(),
@@ -187,7 +189,11 @@ export function buildFlowTools(allowed: readonly ToolName[], record: Recorder) {
             rumor: z.string().optional(),
             eventId: z.string().optional(),
             layer: z.number().optional(),
-            symbolCountDelta: z.number().optional()
+            symbolCountDelta: z.number().optional(),
+            // M20 追加: market_shift の mode / dream_erosion の delta(緩い受け口。
+            // npc_absence の npcId は既存 npcId フィールドで運ぶ)
+            mode: z.string().optional(),
+            delta: z.number().optional()
           })
         },
         makeHandler("trigger_world_event", record)

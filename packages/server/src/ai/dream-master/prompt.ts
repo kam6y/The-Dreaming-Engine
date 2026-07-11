@@ -1,4 +1,5 @@
 import {
+  ABSENT_NPC_IDS,
   affinityTier,
   affinityTierDefinition,
   DEFAULT_NPC_TOPICS,
@@ -173,6 +174,27 @@ function formatWorldState(world: WorldState): string {
   return `天候: ${world.weather}\n当日の街頭演出: ${streets}\nダンジョン各層の敵勢力: ${dungeon}`;
 }
 
+/**
+ * M20 追加の世界変化3種(market_shift / npc_absence / dream_erosion)の入力形と選択肢
+ * (<world_event_options>。夢シーンで trigger_world_event が受け付ける新 kind を live AI へ提示)。
+ * 各 kind の型固有フィールド名と定義済み enum / ホワイトリスト値(実在値)を列挙する。
+ * 既存4 kind(weather/npc_rumor/street_event/dungeon_shift)の記述・<task> 文言・一晩最大3件の
+ * 上限(全 kind 合算で不変)には触れず、本タグは新3 kind の候補提示のみを担う(追加のみ:
+ * ai-integration.md「6b」)。すべてサーバー管理の固定定数(shared の列挙 + NPC_DISPLAY_NAMES)で
+ * あり出所が可変のテキストではないため neutralizeTags は通さない(formatQuestTargets と同じ流儀)。
+ */
+function formatWorldEventOptions(): string {
+  const absence = ABSENT_NPC_IDS.map((id) => `${NPC_DISPLAY_NAMES[id]}(${id})`).join("、");
+  return (
+    `市場変化(market_shift): mode=scarcity(品薄=翌日の店の買値+2割)/` +
+    `surplus(供給過多=翌日の店の買値1割引)。翌日限りで後勝ち。\n` +
+    `NPC不在(npc_absence): npcId=${absence} のいずれか1人を翌日1日だけ不在にする。` +
+    `宿と店が同時全滅しないよう同時不在は1人まで。進行の担い手であるカイ・フィオル・トワは対象外` +
+    `(指定不可)。\n` +
+    `夢の侵食(dream_erosion): delta=-1|0|1(世界の侵食度0-3を一段階増減。演出のみで均衡に非干渉)`
+  );
+}
+
 /** DreamMasterContext からユーザーメッセージ本文を組み立てる */
 function buildUserPrompt(context: DreamMasterContext): string {
   switch (context.flow) {
@@ -237,6 +259,9 @@ function buildUserPrompt(context: DreamMasterContext): string {
       if (context.activeSubQuests !== undefined && context.activeSubQuests.length > 0) {
         parts.push(tag("quest_journal", formatSubQuests(context.activeSubQuests)));
       }
+      // M20: 新 kind(market_shift/npc_absence/dream_erosion)の入力形と選択肢を提示する
+      // (既存4 kind・<task> 文言・一晩最大3件の上限は不変。追加のみ)。
+      parts.push(tag("world_event_options", formatWorldEventOptions()));
       parts.push(
         tag(
           "task",

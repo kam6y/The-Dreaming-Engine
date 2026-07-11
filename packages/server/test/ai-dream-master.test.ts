@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
+  ABSENT_NPC_IDS,
   createDefaultAiDailyCounters,
   DELIVER_PARCEL_IDS,
   DELIVER_RECIPIENT_IDS,
@@ -159,6 +160,49 @@ describe("buildPrompt questGeneration の <quest_targets>", () => {
   it("escort/survey は count=1固定である旨が明示される", () => {
     expect(userPrompt).toContain("escort/survey は1固定");
     expect(userPrompt).toContain("count≠1 は却下");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPrompt: dream フローの <world_event_options> に M20 新kindの候補が並ぶ(M20-3)
+// live AI が market_shift/npc_absence/dream_erosion を trigger_world_event で提案できるよう、
+// 型別フィールド名と定義済み enum / ホワイトリスト値を列挙する(既存4kindの記述は不変・追加のみ)。
+// ---------------------------------------------------------------------------
+
+describe("buildPrompt dream の <world_event_options>(M20 新kind)", () => {
+  const { userPrompt } = buildPrompt(dreamCtx);
+
+  it("新kindの候補タグと3 kind名が提示される", () => {
+    expect(userPrompt).toContain("<world_event_options>");
+    expect(userPrompt).toContain("market_shift");
+    expect(userPrompt).toContain("npc_absence");
+    expect(userPrompt).toContain("dream_erosion");
+  });
+
+  it("market_shift の mode enum(scarcity/surplus)が示される", () => {
+    expect(userPrompt).toContain("mode=scarcity");
+    expect(userPrompt).toContain("surplus");
+  });
+
+  it("npc_absence の対象がホワイトリスト実在IDで列挙される", () => {
+    for (const id of ABSENT_NPC_IDS) expect(userPrompt).toContain(`(${id})`);
+  });
+
+  it("進行の担い手 informant/priest/warden は npc_absence 候補に現れない", () => {
+    // 除外3名は候補フォーマット(名前(id))で現れないこと(表示名での注記は候補ではない)
+    expect(userPrompt).not.toContain("(informant)");
+    expect(userPrompt).not.toContain("(priest)");
+    expect(userPrompt).not.toContain("(warden)");
+  });
+
+  it("dream_erosion の delta 値域(-1|0|1)と侵食度0-3が示される", () => {
+    expect(userPrompt).toContain("delta=-1|0|1");
+    expect(userPrompt).toContain("侵食度0-3");
+  });
+
+  it("既存の夢タスク(最大3件・narrate)は不変(追加のみ・回帰防止)", () => {
+    expect(userPrompt).toContain("trigger_world_event で最大3件まで");
+    expect(userPrompt).toContain("90-200字で narrate");
   });
 });
 

@@ -857,7 +857,9 @@ export class GameSession {
       npcName: NPC_DISPLAY_NAMES[npcId],
       stock: shopStockEntries(npcId, affinity, marketShift),
       // 売値表示をクライアントがサーバーと同一計算するための店主好感度(M11-3。フィールド名は既存互換)
-      merchantAffinity: affinity
+      merchantAffinity: affinity,
+      // 当日の市場の変化(M20-3)。クライアントの売値表示・市場の一言に使う(請求と同一計算)
+      marketShift
     };
     const greeting = SHOP_GREETINGS[npcId] ?? "「……ゆっくり見ておいき」";
     return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[npcId], greeting)];
@@ -1706,7 +1708,13 @@ export class GameSession {
       inventoryUsed: usedSpace(state.inventory),
       symbols: this.symbols.map((s) => ({ position: { ...s.position }, enemyId: s.enemyId, facing: s.facing })),
       resolvedObjectIds: this.resolvedObjectIdsForCurrentMap(),
-      subQuests: this.buildSubQuestViews()
+      subQuests: this.buildSubQuestViews(),
+      // 世界状態の表示情報(M20-3)。市場の一言・不在NPCの非表示・侵食度tintに使う最小限のみ
+      world: {
+        marketShift: state.world.marketShift,
+        absentNpc: state.world.absentNpc,
+        dreamErosion: state.world.dreamErosion
+      }
     };
 
     return {

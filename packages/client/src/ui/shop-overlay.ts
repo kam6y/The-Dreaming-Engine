@@ -156,8 +156,15 @@ export class ShopOverlay {
 
   private updateHeader(): void {
     const view = this.snapshot;
+    // 市場の変化(M20-3)の一言。買値はサーバー計算の stock に反映済みで、ここは気配の表示のみ
+    const market =
+      this.options.interaction.marketShift === "scarcity"
+        ? "    …今日は品薄で、値が張るようだ。"
+        : this.options.interaction.marketShift === "surplus"
+          ? "    …今日は品が余り、値が緩んでいる。"
+          : "";
     this.headerText.setText(
-      `所持金 ${view.player.gold}G    持ち物 ${view.inventoryUsed}/${view.inventoryCapacity}`
+      `所持金 ${view.player.gold}G    持ち物 ${view.inventoryUsed}/${view.inventoryCapacity}${market}`
     );
   }
 
@@ -249,10 +256,12 @@ export class ShopOverlay {
 
   private buildSellItems(): { id: string; label: string; disabled?: boolean }[] {
     // クエスト用アイテムは別枠(questItems)のためここには現れない=売却対象は inventory 全件。
-    // 売値は店主の好感度込みでサーバーの請求と同一計算(interaction.merchantAffinity。M11-3)
+    // 売値は店主の好感度+当日の market_shift 込みでサーバーの請求と同一計算
+    // (interaction.merchantAffinity / interaction.marketShift。M11-3 / M20-3。
+    // surplus 時の売値クランプは market_shift 適用後の実効買値が基準=乖離させない)
     return this.snapshot.inventory.map((stack) => ({
       id: stack.itemId,
-      label: `${ITEMS[stack.itemId].name}${itemShortLabel(stack.itemId)} ×${stack.count}  売値${adjustedSellPrice(stack.itemId, this.options.interaction.merchantAffinity)}G`
+      label: `${ITEMS[stack.itemId].name}${itemShortLabel(stack.itemId)} ×${stack.count}  売値${adjustedSellPrice(stack.itemId, this.options.interaction.merchantAffinity, this.options.interaction.marketShift)}G`
     }));
   }
 }

@@ -146,7 +146,9 @@ function sampleView(): SnapshotView {
     inventoryUsed: 2,
     symbols: [{ position: { x: 5, y: 5 }, enemyId: "mist-wolf", facing: "left" }],
     resolvedObjectIds: [],
-    subQuests: []
+    subQuests: [],
+    // 世界状態の表示情報(M20-3)。既定=平常(市場なし・全員在席・侵食0)
+    world: { marketShift: null, absentNpc: null, dreamErosion: 0 }
   };
 }
 

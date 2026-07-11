@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { giftableItemIdSchema } from "./ai/giftable.js";
+import { absentNpcIdSchema, marketShiftModeSchema } from "./ai/world-event.js";
 import {
   battleCommandSchema,
   battleEventSchema,
@@ -136,7 +137,13 @@ export const activeInteractionSchema = z.discriminatedUnion("kind", [
      * サーバーの請求と同一計算するために渡す(UI に数値そのものは表示しない)。
      * 開店中は好感度が変わらない(adjust_affinity は会話中のみ)ため開店時の値で一貫する。
      */
-    merchantAffinity: z.number().int().min(0).max(100)
+    merchantAffinity: z.number().int().min(0).max(100),
+    /**
+     * 当日の市場の変化(M20-3。null=平常)。クライアントが売値表示を
+     * adjustedSellPrice の第3引数へ渡してサーバーの請求と同一計算するために渡す
+     * (surplus 時の売値クランプは market_shift 適用後の実効買値が基準。ai-integration.md「6b」)。
+     */
+    marketShift: marketShiftModeSchema.nullable()
   }),
   z.object({
     kind: z.literal("inn"),
@@ -182,6 +189,21 @@ export const subQuestViewSchema = z.object({
 });
 export type SubQuestView = z.infer<typeof subQuestViewSchema>;
 
+/**
+ * 世界状態の表示情報(M20-3)。クライアント演出(市場の一言・不在NPCの非表示・
+ * 侵食度の画面tint)に必要な最小限のみを露出する(天候等の既存4kindは従来どおり
+ * dialog/描画データ経由で、view には載せない)。
+ */
+export const viewWorldSchema = z.object({
+  /** 当日の市場の変化(null=平常)。店の買値はサーバー計算(stock)に反映済み。表示の一言に使う */
+  marketShift: marketShiftModeSchema.nullable(),
+  /** 当日不在の NPC(null=全員在席)。クライアントは該当スプライトを非表示にする */
+  absentNpc: absentNpcIdSchema.nullable(),
+  /** 世界の侵食度(0-3。演出のみ=画面 tint の濃さ) */
+  dreamErosion: z.number().int().min(0).max(3)
+});
+export type ViewWorld = z.infer<typeof viewWorldSchema>;
+
 export const snapshotViewSchema = z.object({
   /** 探索 or 戦闘 */
   mode: z.enum(["exploration", "battle"]),
@@ -214,6 +236,8 @@ export const snapshotViewSchema = z.object({
   resolvedObjectIds: z.array(z.string()),
   /** 受注中サブクエスト(クエストジャーナル)。無くても空配列で常に含める */
   subQuests: z.array(subQuestViewSchema),
+  /** 世界状態の表示情報(市場・不在・侵食度。M20-3) */
+  world: viewWorldSchema,
   /** 有効な対話(店/宿/会話)。無ければ省略 */
   interaction: activeInteractionSchema.optional(),
   /** 戦闘ビュー(mode==="battle" のときのみ) */

@@ -141,6 +141,38 @@ describe("buildFlowTools: フロー許可ツールのみを構築し、生 inten
       { toolName: "give_item", rawInput: { itemId: "old-key", quantity: 9, reason: "x" } }
     ]);
   });
+
+  it("trigger_world_event の SDKスキーマは M20 新kindのフィールド(mode/delta)を受け付ける(M20-3)", async () => {
+    // SDKスキーマは「緩い受け口」であり厳密検証は検証層の責務(既存流儀)。
+    // ここでは live AI が market_shift の mode / dream_erosion の delta を運べる口が
+    // スキーマに存在することと、kind が enum でなく string(新kind名も通る)ことを確認する。
+    const recorded: { toolName: string; rawInput: unknown }[] = [];
+    const tools = buildFlowTools(FLOW_TOOL_ALLOWLIST.dream, (call) => recorded.push(call));
+
+    type ToolDef = {
+      name: string;
+      inputSchema: { event: { shape: Record<string, unknown> } };
+      handler: (args: unknown, extra: unknown) => Promise<{ content: { type: string; text: string }[] }>;
+    };
+    const worldEvent = (tools as unknown as ToolDef[]).find((t) => t.name === "trigger_world_event");
+    if (worldEvent === undefined) throw new Error("trigger_world_event ツールが構築されていない");
+
+    // event オブジェクトのフィールドに M20 新kind用の mode/delta がある(既存フィールドは不変)
+    const keys = Object.keys(worldEvent.inputSchema.event.shape);
+    for (const key of ["kind", "value", "npcId", "rumor", "eventId", "layer", "symbolCountDelta", "mode", "delta"]) {
+      expect(keys, `event.${key} がスキーマにあること`).toContain(key);
+    }
+
+    // ハンドラは新kindの生 intent も素通しで記録するだけ(検証・適用はしない)
+    await worldEvent.handler({ event: { kind: "market_shift", mode: "scarcity" } }, undefined);
+    await worldEvent.handler({ event: { kind: "dream_erosion", delta: 1 } }, undefined);
+    await worldEvent.handler({ event: { kind: "npc_absence", npcId: "innkeeper" } }, undefined);
+    expect(recorded).toEqual([
+      { toolName: "trigger_world_event", rawInput: { event: { kind: "market_shift", mode: "scarcity" } } },
+      { toolName: "trigger_world_event", rawInput: { event: { kind: "dream_erosion", delta: 1 } } },
+      { toolName: "trigger_world_event", rawInput: { event: { kind: "npc_absence", npcId: "innkeeper" } } }
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
