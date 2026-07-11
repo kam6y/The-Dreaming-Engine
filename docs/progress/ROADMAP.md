@@ -485,3 +485,35 @@ JOURNALへ「仕様変更提案」として記録する)。
 完了条件: 眩惑・竦みの2種が戦闘で付与・作用・解除でき、状態異常耐性(属性)が装備・敵定義に反映され、
 既存の毒仕様・スキル・装備・敵の挙動とcombat-balance.testの全閾値が不変、旧セーブと既存E2Eが
 壊れない。AIツール・防御仕様は不変。`pnpm check`+`pnpm test:e2e`緑(M21完了時は`pnpm test:e2e:full`も)。
+
+## M22: ミニマップまたは全体マップUI(BACKLOG「優先度: 中」6件目の展開。
+## 全体マップオーバーレイ「夢の地図」=訪問済みマップの接続グラフ)
+
+- [x] M22-1: 仕様骨子の追記(BACKLOG展開に伴う骨子追記=CLAUDE.mdの例外に該当。
+      骨子執筆=subagent、検収=オーケストレーター)。
+      game-design.md「全体マップUI『夢の地図』(拡張: M22)」=採用案(全体マップoverlayのみ・
+      常時ミニマップ見送り・現在マップのタイル俯瞰は対象外)・表示内容(接続グラフ/訪問済みのみ
+      表示/未訪問は靄/8マップのノード配置目安)・データ設計(visitedMaps=optional+default・
+      version据え置き・接続グラフの共有純ヘルパー・viewはvisitedMapsのみ追加=クライアントは
+      既存MAPS登録簿を直接参照)・セーブ列挙への追記・UI骨子(Mキー・data-menu="map"+
+      data-visited-count・探索限定)・不干渉条件。ai-integration.md/ai-guardrails.mdは
+      触らない(本UIはAI非依存の描画のみ)
+- [ ] M22-2: shared/serverのデータ拡張(**subagent担当**。UIは書かない):
+      GameStateへvisitedMaps(mapId配列・optional+default([])・GAME_STATE_VERSION据え置き)追加=
+      新規ゲームはtown初期値・マップ遷移が成立するたび行き先mapIdを追記・つづきから/ロードで
+      現在地mapIdを補完(旧セーブ互換)・advanceDayで持続 / sharedにマップ接続グラフの純ヘルパー
+      (全transitionから無向の隣接を導出・重複辺を畳む・Phaser非依存)/ SnapshotViewへ
+      visitedMaps露出(接続グラフとdisplayNameはクライアントがMAPSから直接引くためviewに増やすのは
+      これのみ)。旧セーブ互換(visitedMaps欠落→現在地補完)・遷移記録・接続グラフ・advanceDay持続の
+      ユニットテスト。game-design.md保存内容列挙はM22-1で追記済み
+- [ ] M22-3: クライアントUI=全体マップオーバーレイ「夢の地図」(**UI=オーケストレーター**):
+      Mキーで開閉・Escで閉じる(既存overlayのガードと同流儀=探索限定・他overlay/会話/店/宿/夢中は
+      不可)・接続グラフ描画・ノード配置定数(world-lore地理感)・現在地強調・訪問済みのみ表示/
+      未訪問は靄・常設キーヒントに「M: 地図」追加・syncDomStateへdata-menu="map"+data-visited-count。
+      新規画像アセットなし(手続き描画)+E2Eスモーク1本(マップ移動で訪問数が増える→オーバーレイに
+      反映を観測)。完了時にBACKLOG側へチェック+M22ゲート(test:e2e:full)
+
+完了条件: 探索中に`M`で全体マップ「夢の地図」を開閉でき、訪問済みマップの接続グラフと現在地が
+表示され(未訪問は靄で伏せる)、`visitedMaps`が旧セーブ互換(GAME_STATE_VERSION据え置き)で
+永続化され、既存の移動・戦闘・会話・セーブ・既存E2Eが壊れない。新マップ・新敵・新アセットを
+増やさず、AIツール・防御仕様は不変。`pnpm check`+`pnpm test:e2e`緑(M22完了時は`pnpm test:e2e:full`も)。

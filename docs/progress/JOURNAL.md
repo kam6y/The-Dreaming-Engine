@@ -2255,3 +2255,37 @@
   マップ定義(shared/maps)の構造とexploration-sceneの描画レイヤ・data属性を先に読む)。
   申し送り: コマンドメニューのカーソルはラウンド間で持続する(MenuList.indexは
   リセットされない)=戦闘E2Eを書くときは↓回数に注意
+
+## [74] 2026-07-12 M22-1: 全体マップUI「夢の地図」のM22展開+仕様骨子(骨子=subagent委譲・検収=オーケストレーター)
+
+- やったこと(骨子執筆はsubagentへ委譲、検収・コミットはオーケストレーター):
+  - BACKLOG「ミニマップまたは全体マップUI」をM22としてROADMAP末尾へ展開
+    (M22-1骨子/M22-2 shared・serverデータ拡張=subagent/M22-3 オーバーレイUI+E2E=
+    オーケストレーター。完了条件付き)
+  - game-design.mdへ「### 全体マップUI『夢の地図』(拡張: M22)」を純追記:
+    採用案(Mキーで開く全体マップオーバーレイのみ。常時ミニマップ見送り・タイル俯瞰は対象外)・
+    表示内容(8マップの接続グラフ・訪問済みのみ表示・未訪問は靄・現在地強調#c9a25c)・
+    データ設計(visitedMaps=optional+default([])・version据え置き・接続グラフはsharedの
+    純ヘルパーで全transitionsから無向導出・viewへはvisitedMapsのみ追加)・
+    セーブ列挙へvisitedMaps追記(当該節の指示に基づく義務的更新)・UI骨子
+    (data-menu="map"+data-visited-count・探索限定)・不干渉条件
+- 裁量で決めたこと: UI名称「夢の地図」/開閉キーM(未使用確認済み)/未訪問=靄(名伏せ・「?」)/
+  接続グラフは無向/ノード配置はworld-lore地理感のpresentation定数(厳密座標はM22-3裁量)/
+  「または」項目のため全体マップ片方のみ採用(縦切りの精神)
+- 仕様変更提案(subagent発見・非ブロッキング): mapIdSchemaの実体は8マップだが、
+  既存記述の複数箇所(game-design.md 197/231/427行・ai-integration.md 236行・ROADMAP 362行)が
+  「既存11マップ」と旧計数のまま(第2エリア展開時の計画数と実装数の乖離と推測)。
+  既存行の編集は人間のみ可のため未修正。「11マップ」→「8マップ」への整合を人間の判断に委ねる
+  (新設のM22骨子では数を断定せず8マップを表で列挙して回避)
+- 検証: pnpm check 緑(unit 932。subagent実行+オーケストレーター再実行の二重確認)。
+  ドキュメントのみの変更(AI系不変)
+- 次にやること: M22-2(shared/serverのデータ拡張。subagent委譲)。申し送り:
+  (1)visitedMapsはz.array(mapIdSchema).default([])でGameStateへ・GAME_STATE_VERSION=1据え置き・
+  createNewGameStateは["town"]初期化
+  (2)遷移記録の差し込み先=サーバーのマップ遷移成立ハンドラ(mapId変化時に未収録なら追記)。
+  continue/ロード経路でlocation.mapIdを補完(旧セーブの現在地を必ず訪問済みに)。
+  advanceDayでは持続(spread保持)
+  (3)接続グラフ純ヘルパーはsharedへ(全マップのtransitionsから無向隣接・重複辺畳み・
+  Phaser非依存)+ユニットテスト。SnapshotViewへはvisitedMapsのみ追加
+  (接続グラフ・displayNameはクライアントがMAPSから直接引く)
+  (4)UIはM22-3でオーケストレーターが実装するため書かない
