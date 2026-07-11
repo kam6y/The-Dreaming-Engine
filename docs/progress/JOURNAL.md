@@ -2323,3 +2323,31 @@
   (3)E2E: town→fieldの遷移でdata-visited-countが増える→Mで開いてdata-menu="map"を観測。
   旧形式フィクスチャ(visitedMaps欠落)でも現在地1枚補完でcount>=1が保証される
   (4)shared testファイルはsharedのtypecheck対象外=view形状変更はpnpm check(unit込み)で網羅確認
+
+## [76] 2026-07-12 M22-3: 全体マップオーバーレイ「夢の地図」UI+E2E(UI=オーケストレーター。M22完了)
+
+- やったこと(UI実装・E2E・目視=すべてオーケストレーター自身。subagent委譲なし):
+  - ui/map-overlay.ts(新規): パネル640x420・タイトル「夢の地図」。ノード配置は
+    world-lore地理感のpresentation定数(灯町中央・忘れ野北・裂け目3層は東列・
+    沈み野/琥珀郷/灯還りの坑は西列)。訪問済み=名前入り矩形/未訪問=靄の矩形+「?」
+    (名を伏せる)/現在地=琥珀#c9a25cの強調枠+「▼ いまここ」。
+    辺はmapConnectionEdges()を両端訪問済みでフィルタして描画(未踏の先は見えない)。
+    閲覧のみ=操作キーなし(M/Escの開閉はシーン側)
+  - exploration-scene: keydown-Mトグル・openMapOverlay(questJournalと同一ガード)/
+    closeMapOverlay・handleEscapeで閉じる・update/handleInteract/openQuestJournal/
+    pendingDreamの各ガードへmapOverlay追加・常設キーヒントへ「M: 地図」・
+    syncDomStateへdata-menu="map"+data-visited-count
+  - E2E 18本目 world-map.spec: 新規ゲーム(seed42・noSymbols)で開始時count=1→
+    Mで開く(data-menu="map")→Escで閉じる→忘れ野へ遷移でcount=2→Mトグル再確認(約15-21s)
+  - 実プレイ目視: スクリーンショットで確認(忘れ野=現在地の琥珀枠+▼いまここ・
+    灯町との辺・未訪問6マップの「?」靄・キーヒント更新。レイアウト崩れなし)
+- 裁量で決めたこと: ノード150x36・辺は0x6b6350のライン・現在地マーカー「▼ いまここ」/
+  E2EはUI観測点(data属性)のみで見た目はスクリーンショット目視で担保(既存流儀)
+- M22ゲート: pnpm check 緑(unit 942)・pnpm test:e2e 18/18緑・pnpm test:e2e:full 2/2緑。
+  **M22完了**=BACKLOG「ミニマップまたは全体マップUI」にチェック。ガードレール不変
+- 次にやること: BACKLOG「優先度: 中」の次点「昼夜サイクルと時間帯によるNPC配置変化」を
+  M23として展開してから着手(game-design.mdのゲーム内時間・NPC配置・宿泊/advanceDayの
+  現行仕様と、M20の世界変化(翌朝リセット系)の設計を先に読む。既存E2Eの動線・
+  NPC対話specを壊さない設計が骨子の要点)。申し送り: オーバーレイを増やす際は
+  exploration-sceneのガード5箇所(update移動・dialog保留・pendingDream・handleInteract・
+  相互open)への追加漏れに注意(今回のmapOverlayで全箇所に追加済み=grepの目印になる)

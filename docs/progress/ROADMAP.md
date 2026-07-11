@@ -506,7 +506,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       visitedMaps露出(接続グラフとdisplayNameはクライアントがMAPSから直接引くためviewに増やすのは
       これのみ)。旧セーブ互換(visitedMaps欠落→現在地補完)・遷移記録・接続グラフ・advanceDay持続の
       ユニットテスト。game-design.md保存内容列挙はM22-1で追記済み
-- [ ] M22-3: クライアントUI=全体マップオーバーレイ「夢の地図」(**UI=オーケストレーター**):
+- [x] M22-3: クライアントUI=全体マップオーバーレイ「夢の地図」(**UI=オーケストレーター**):
       Mキーで開閉・Escで閉じる(既存overlayのガードと同流儀=探索限定・他overlay/会話/店/宿/夢中は
       不可)・接続グラフ描画・ノード配置定数(world-lore地理感)・現在地強調・訪問済みのみ表示/
       未訪問は靄・常設キーヒントに「M: 地図」追加・syncDomStateへdata-menu="map"+data-visited-count。
