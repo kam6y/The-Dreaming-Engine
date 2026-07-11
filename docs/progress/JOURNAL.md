@@ -2523,3 +2523,37 @@
   (4)data属性: data-achievements-unlocked(解除数)/data-achievement-last(直近id or "none")/
   data-menu="achievements"
   (5)E2E案: 装備2点(既存equipment.spec流儀)でtraveler-outfitted解除→カウント/last観測→K開閉
+
+## [82] 2026-07-12 M24-3+M24完了: 実績「夢の欠片」のクライアントUI+E2E(UI=オーケストレーター自身)
+
+- やったこと(M24-3はUIのためオーケストレーター自身が実装):
+  - achievement-toast.ts(新規): AchievementToaster=非モーダルの解除トースト。
+    上部中央・琥珀枠「― 夢の欠片 ―/表示名」・フェードイン250ms/保持2200ms/
+    フェードアウト450ms・複数解除はキューで順送り・キー処理/当たり判定なし
+  - achievements-overlay.ts(新規): AchievementsOverlay=Kで開閉する一覧(640x420・
+    2列x6行・解除済み=表示名(琥珀)+フレーバー/未解除=靄の「……」(名・条件とも伏せる)・
+    ヘッダ「欠片 n/12」・フッタ「K / Esc でとじる」)
+  - exploration-scene: knownAchievements=シーン開始時snapshotで初期化(初回一斉発火の抑制)
+    →handleSnapshotの差分でenqueue。Kキー開閉・Escで閉じる・既存オーバーレイと相互排他の
+    ガード6箇所(update保留/pendingDream/移動ブロック/journal/map/interact)・
+    キーヒント「K: 欠片」・data-achievements-unlocked/data-achievement-last/
+    data-menu="achievements"(lastはview配列の末尾=サーバーの解除順を利用)
+  - E2E achievements.spec.ts 1本: 装備2点(片刃60G+外套50G)購入→武器のみ装備で
+    解除0のまま→両スロットで旅支度解除(0→1・last=traveler-outfitted)→K開閉→移動可
+  - 目視確認: スクリーンショットでトースト(もちもの表示中でも非モーダル表示)と
+    一覧(欠片1/12・靄・キーヒント)を確認済み
+- 裁量で決めたこと: トーストの表示時間(250/2200/450ms)と文言「― 夢の欠片 ―」。
+  data-achievement-lastはクライアント状態でなくview.unlockedAchievements末尾から導出
+  (シーン再起動に依存しない決定論)。マップ遷移中の解除はシーン再開時の初期化で
+  トースト抑制される(仕様の初回抑制規則の帰結。一覧では見える)
+- 検証: pnpm check 緑(unit 997)・pnpm test:e2e 21/21緑(achievements 1本を含む)・
+  **M24ゲート=pnpm test:e2e:full 2/2緑**。防御仕様・AI系・セーブスキーマは不変
+- M24完了: ROADMAP M24-3チェック+BACKLOG「実績システム(夢の欠片収集)」チェック(注記付き)
+- 次にやること: BACKLOG「優先度: 低」次項=**難易度設定**をM25として展開してから着手
+  (M25-1=骨子追記から。骨子執筆=subagent委譲・検収=オーケストレーター)。申し送り:
+  (1)難易度は戦闘バランス(combat-balance.testの統計閾値)に直結する=既存「ふつう」を
+  既定値として不変に保ち、難易度係数は乗算層で足す設計を第一候補に検討させる
+  (2)セーブへの難易度保存の後方互換(optional+default("normal")等)とversion据え置き可否
+  (3)難易度変更のUI(タイトル新規ゲーム時のみか・ゲーム中変更可か)は骨子で決める
+  (4)subagentのAPIエラー中断が頻発中(M24-1で1回・M24-2で2回)→中断通知が来たら
+  ツリー確認の上SendMessageで再開、進捗があれば検証をオーケストレーターが引き取る
