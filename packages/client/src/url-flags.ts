@@ -1,3 +1,4 @@
+import { timeOfDaySchema } from "@dreaming-engine/shared";
 import type { ClientMessage } from "@dreaming-engine/shared";
 
 type NewGameOptions = NonNullable<Extract<ClientMessage, { type: "new-game" }>["options"]>;
@@ -9,6 +10,7 @@ type ContinueOptions = NonNullable<Extract<ClientMessage, { type: "continue" }>[
  * - ?noSymbols=1: 敵シンボルの無効化(移動スモークの安定化用)
  * - ?startLevel=N: 開始レベルの加速(通しプレイ E2E 用。サーバーは mock 時のみ尊重)
  * - ?startGold=N: 開始ゴールドの加速(装備購入スモーク用。サーバーは mock 時のみ尊重)
+ * - ?timeOfDay=day|night: 時間帯の固定ピン(M23。夜スモーク用。サーバーは mock 時のみ尊重)
  * サーバー正本化後もフラグの入口はURLのまま維持する(既存E2Eとの互換)。
  */
 export function newGameOptionsFromUrl(): NewGameOptions {
@@ -28,11 +30,13 @@ export function newGameOptionsFromUrl(): NewGameOptions {
     startGoldRaw !== null && startGoldRaw !== "" && Number.isInteger(Number(startGoldRaw))
       ? Number(startGoldRaw)
       : undefined;
+  const timeOfDayParsed = timeOfDaySchema.safeParse(params.get("timeOfDay"));
   return {
     ...(seed !== undefined ? { seed } : {}),
     ...(params.has("noSymbols") ? { noSymbols: true } : {}),
     ...(startLevel !== undefined ? { startLevel } : {}),
-    ...(startGold !== undefined ? { startGold } : {})
+    ...(startGold !== undefined ? { startGold } : {}),
+    ...(timeOfDayParsed.success ? { timeOfDay: timeOfDayParsed.data } : {})
   };
 }
 

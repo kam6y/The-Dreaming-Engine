@@ -8,6 +8,7 @@ import {
   MAPS,
   midBossDefeatFlag,
   NPC_DISPLAY_NAMES,
+  npcPlacementsForTime,
   samePosition,
   tileTypeAt,
   type ActiveInteraction,
@@ -17,7 +18,8 @@ import {
   type MapDefinition,
   type Position,
   type SnapshotView,
-  type TileType
+  type TileType,
+  type TimeOfDay
 } from "@dreaming-engine/shared";
 
 import type { AiUtteranceEvent } from "../net/game-client.js";
@@ -197,6 +199,12 @@ export class ExplorationScene extends Phaser.Scene {
   /** 世界の侵食度(dream_erosion)の暗色の帳(0=なし。M20-3) */
   private erosionOverlay: Phaser.GameObjects.Rectangle | null = null;
 
+  /** 夜の帳(M23-3。timeOfDay=night でワールドに掛かる藍色の暗幕。侵食の帳より下の序列) */
+  private nightOverlay: Phaser.GameObjects.Rectangle | null = null;
+
+  /** 描画済みNPC配置の時間帯(M23-3。snapshotのtimeOfDayと食い違ったらNPCを再描画する) */
+  private renderedTimeOfDay: TimeOfDay = "day";
+
   /**
    * 護衛(escort)の同行者マーカー「連れの灯」(M19-4)。
    * active な escort サブクエストの間だけプレイヤーの後を漂う暖色の光点
@@ -269,6 +277,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.companionLight = null;
     this.npcViews.clear();
     this.erosionOverlay = null;
+    this.nightOverlay = null;
+    this.renderedTimeOfDay = snapshot.timeOfDay;
     this.objectViews.clear();
     this.symbolViews = [];
     this.symbolsKey = "";
@@ -291,6 +301,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.createPlayer();
     this.updateCompanion();
     this.updateErosionOverlay();
+    this.updateNightOverlay();
     this.setupHud();
     this.setupCamera();
     this.setupInput();
@@ -487,6 +498,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.updateCompanion();
     this.updateAbsentNpc();
     this.updateErosionOverlay();
+    this.updateTimeOfDay();
     this.updateInteraction(view);
     this.shopOverlay?.refresh(view);
     this.inventoryOverlay?.refresh(view);
@@ -1093,7 +1105,9 @@ export class ExplorationScene extends Phaser.Scene {
   }
 
   private drawNpcs(): void {
-    for (const npc of this.map.npcs) {
+    // 配置の唯一の正=npcPlacementsForTime(M23-3)。サーバーの移動衝突・正面インタラクションと
+    // 同一の純関数を通すことで、絵と当たり判定の乖離を防ぐ(夜は灯町の商人が酒場脇へ)
+    for (const npc of npcPlacementsForTime(this.map, this.snapshot.timeOfDay)) {
       const { x, y } = this.tileCenter(npc.position);
       const views: (Phaser.GameObjects.Image | Phaser.GameObjects.Arc | Phaser.GameObjects.Text)[] = [];
       // NPCスプライト(sprite-<npcId>。M13-3)。未整備なら従来の円プレースホルダー。
@@ -1159,6 +1173,44 @@ export class ExplorationScene extends Phaser.Scene {
       return;
     }
     this.erosionOverlay.setFillStyle(0x1a1030, alpha);
+  }
+
+  /**
+   * 時間帯(昼/夜。M23-3)の変化をNPC配置と夜の帳へ反映する(snapshot受信時に呼ぶ)。
+   * 時間帯が変わったらNPCを描き直す(配置の正はサーバー判定と同一の npcPlacementsForTime)。
+   */
+  private updateTimeOfDay(): void {
+    if (this.snapshot.timeOfDay !== this.renderedTimeOfDay) {
+      this.renderedTimeOfDay = this.snapshot.timeOfDay;
+      for (const views of this.npcViews.values()) {
+        for (const view of views) {
+          view.destroy();
+        }
+      }
+      this.npcViews.clear();
+      this.drawNpcs();
+    }
+    this.updateNightOverlay();
+  }
+
+  /**
+   * 夜の帳(M23-3)の演出: 夜はワールド全体に藍色の薄い暗幕を重ねる(演出のみ=非干渉)。
+   * 侵食の帳(dream_erosion・深度50)より下(深度40)に置き、夜の上へ夢の綻びが
+   * さらに重なる序列とする。UIレイヤーは別カメラで不変。
+   */
+  private updateNightOverlay(): void {
+    if (this.snapshot.timeOfDay !== "night") {
+      this.nightOverlay?.destroy();
+      this.nightOverlay = null;
+      return;
+    }
+    if (this.nightOverlay === null) {
+      this.nightOverlay = this.add
+        .rectangle(0, 0, this.map.width * TILE_SIZE, this.map.height * TILE_SIZE, 0x14213d, 0.16)
+        .setOrigin(0, 0)
+        .setDepth(40);
+      this.worldLayer.add(this.nightOverlay);
+    }
   }
 
   private drawBoss(): void {
@@ -1373,8 +1425,10 @@ export class ExplorationScene extends Phaser.Scene {
 
   private updateHud(): void {
     const p = this.snapshot.player;
+    // 時間帯の語(M23-3。昼/夜。時間帯はサーバーのランタイム状態=view.timeOfDayが正)
+    const timeLabel = this.snapshot.timeOfDay === "night" ? "夜" : "昼";
     this.hudStatusText.setText(
-      `${this.snapshot.day}日目  Lv${p.level}  HP ${p.hp}/${p.maxHp}  MP ${p.mp}/${p.maxMp}  ${p.gold}G`
+      `${this.snapshot.day}日目・${timeLabel}  Lv${p.level}  HP ${p.hp}/${p.maxHp}  MP ${p.mp}/${p.maxMp}  ${p.gold}G`
     );
   }
 
@@ -1523,6 +1577,8 @@ export class ExplorationScene extends Phaser.Scene {
     game.dataset["playerY"] = String(view.location.position.y);
     game.dataset["symbolCount"] = String(view.symbols.length);
     game.dataset["day"] = String(view.day);
+    // E2E 用: 時間帯(昼/夜。M23-3。夜スモークと将来specの昼固定確認の観測点)
+    game.dataset["timeOfDay"] = view.timeOfDay;
     game.dataset["gold"] = String(view.player.gold);
     game.dataset["level"] = String(view.player.level);
     game.dataset["hp"] = String(view.player.hp);
