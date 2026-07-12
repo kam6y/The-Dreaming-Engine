@@ -235,4 +235,22 @@ describe("サーバー→クライアント メッセージ(M3)", () => {
     });
     expect(() => serverMessageSchema.parse({ type: "error", message: "" })).toThrow();
   });
+
+  describe("対話ストリーミングメッセージ(オーナー指示 2026-07-12)", () => {
+    it("ai-stream-start をパースできる(npcId は省略可)", () => {
+      expect(serverMessageSchema.parse({ type: "ai-stream-start", npcId: "informant" })).toEqual({
+        type: "ai-stream-start",
+        npcId: "informant"
+      });
+      expect(serverMessageSchema.parse({ type: "ai-stream-start" })).toEqual({ type: "ai-stream-start" });
+    });
+
+    it("ai-stream-delta をパースできる(空文字は拒否)", () => {
+      expect(serverMessageSchema.parse({ type: "ai-stream-delta", text: "「よく" })).toEqual({
+        type: "ai-stream-delta",
+        text: "「よく"
+      });
+      expect(() => serverMessageSchema.parse({ type: "ai-stream-delta", text: "" })).toThrow();
+    });
+  });
 });

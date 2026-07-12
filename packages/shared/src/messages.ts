@@ -502,7 +502,8 @@ export const serverBattleEventsMessageSchema = z.object({
 /**
  * 検証済みの AI 発話/ナレーション(探索の dialog キューとは別チャンネル)。
  * クライアントの TypewriterText がこの**検証済み全文**を疑似ストリーミング表示する
- * (未検証テキストは送らない: ai-guardrails.md 第4層)。
+ * (未検証テキストは送らない: ai-guardrails.md 第4層)。対話ストリーミング(ai-stream-start/delta)の
+ * end/abort も兼ねる(受信時にストリームバッファを本文で置換する)。
  * - channel: speak(NPC 発話)/ narrate(情景・夢・戦果)
  * - npcId: 発話 NPC(speak 時)。narrate や地の文では省略
  */
@@ -523,6 +524,26 @@ export const serverSleepStartMessageSchema = z.object({
   type: z.literal("sleep-start")
 });
 
+/**
+ * 対話AI応答のストリーミング先行表示(オーナー指示 2026-07-12。設計書
+ * docs/superpowers/specs/2026-07-12-dialog-streaming-design.md)。
+ * conversation/questGeneration の speak 生成中に、**未検証の増分テキスト**を
+ * 画面表示専用に先行送出するチャンネル。最終正文は従来どおり ai-utterance が運び、
+ * ストリームの end/abort を兼ねる(成功=検証済み全文/失敗=定型フォールバック文で置換)。
+ * 表示の最終状態は常に検証済み全文または定型文であり、未検証テキストは残存しない。
+ */
+export const serverAiStreamStartMessageSchema = z.object({
+  type: z.literal("ai-stream-start"),
+  /** 発話中の NPC(会話相手)。クライアントは表示中のストリームバッファをクリアする */
+  npcId: npcIdSchema.optional()
+});
+
+/** ストリームの増分テキスト(未検証。表示専用) */
+export const serverAiStreamDeltaMessageSchema = z.object({
+  type: z.literal("ai-stream-delta"),
+  text: z.string().min(1)
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
   serverStateMessageSchema,
   serverPongMessageSchema,
@@ -532,7 +553,9 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   serverDialogMessageSchema,
   serverBattleEventsMessageSchema,
   serverAiUtteranceMessageSchema,
-  serverSleepStartMessageSchema
+  serverSleepStartMessageSchema,
+  serverAiStreamStartMessageSchema,
+  serverAiStreamDeltaMessageSchema
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
