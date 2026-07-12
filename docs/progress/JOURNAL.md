@@ -2699,3 +2699,43 @@
   壊さない(防御アサートは緩めない) (3)ヒットでDreamMaster.runを再呼び出ししないことを
   モック呼び出し回数でテスト (4)M26-3(2フェーズ化+入眠演出=UI)はオーケストレーター自身。
   リスク時はcache-onlyへ縮退可 (5)subagentへの定型注意=advisor不使用・報告はメッセージ返却
+
+## [87] 2026-07-12 M26-2: 表示専用AIターンのメモ化キャッシュ(実装=subagent委譲・検収/二重確認=オーケストレーター)
+
+- やったこと(実装・テストはsubagent。APIエラー中断2回をSendMessageで再開して完遂。
+  差分検収+check/E2E再実行の二重確認+コミットはオーケストレーター):
+  - turn-cache.ts(新規): cacheKeyForContext=対象2フロー(battleResult=enemyId/
+    会話開始挨拶=NPC+好感度+話題+記憶要約+受注クエスト集合(id昇順+JSON直列化)の
+    U+241F連結)のみ鍵導出・他フローはnull。TurnCache=フロー別Map(挿入順LRU・
+    上限32件/フロー・hit/miss/storeカウンタ)。メモリのみ・非永続・I/Oなし
+  - turn-executor: isDegraded()早期リターンの**後**にルックアップ(縮退中は引かない)。
+    ヒット=DreamMaster.run不呼び出し・セッション総数不消費・失敗非計上・cacheHit:true。
+    finalizeOutcome直後に記憶条件(aiInvoked・非フォールバック・非失敗・summaryなし・
+    approvedEffects空・表示テキスト非空)で格納。リトライ・検証・縮退はバイト不変
+  - gatekeeper/audit-log: ai_cache_hit監査行(ai_callと排他・フロー種別+contextHash+
+    AI枠不消費注記のみ・生テキストなし・maskDeep無条件適用)
+  - config: cache.enabled(既定true。schemaに.default付き=旧設定ファイル互換)
+  - テスト+23=unit 1034(鍵導出5・TurnCache5・executor統合11・監査2)
+- 裁量で決めたこと(subagent提案を検収で採用):
+  - LRU上限=フロー別32件(全8敵種・NPC7人の文脈変動を収容しつつ有界)
+  - AiTurnResult.cacheHit?をoptional追加(既存生成箇所は無変更の後方互換)
+  - ヒット時responseText=null・toolCallRecords=[](監査の生テキスト非重複)
+  - 既存テスト「onDayAdvancedはセッション上限縮退を解除しない」のみcache.enabled=falseで
+    挙動固定(同一挨拶2回の設計がヒットに肩代わりされ上限へ到達しなくなるため。
+    骨子「モック・テスト」節の明示許可に基づく。**アサートは一字も不変**)
+- 検証: pnpm check 緑(unit 1034)・pnpm test:e2e 24/24緑(subagent実行+オーケストレーター
+  再実行の二重確認)。攻撃テストA・防御アサート無修正のまま緑。docs/spec不変
+- 次にやること: **M26-3(夢シーンの先行生成=オーバーラップ。server+client 2フェーズ化。
+  UI=オーケストレーター自身)**+M26ゲート(test:e2e:full)+完了時BACKLOGチェック。
+  **M26完了をもってloopを停止する(ユーザー指示 2026-07-12)**。申し送り:
+  (1)宿泊はsession.ts約1596行〜=onDayAdvanced()→gatekeeper.dreamScene({persistent,
+  recentPlay,world})をawait→hasAppliedWorldEvents判定→applyApprovedEffects→セーブの順で
+  現在は全メッセージ一括返却。2フェーズ化=日送り直後に入眠メッセージpush→awaitを演出と
+  重ねる→完了後に夢の顕現+世界変化+セーブ
+  (2)会話開始挨拶が同形の「即時snapshot返却+完了ハンドラでpush」パターンを実装済み
+  (session.ts 1086-1102・gameGeneration世代ガード付き)=雛形に流用可
+  (3)不変条件: <recent_play>/<world_state>は日送り後構築(バイト一致)・手順3→4→5の順序・
+  クールダウン/wasFree/縮退はdreamScene内で従来どおり・AI失敗でもセーブ必ず成立・
+  WS切断/リセット競合はgameGenerationガード
+  (4)dreamフローはキャッシュ非対象(鍵導出null)=M26-2との相互作用なし
+  (5)リスクが出ればcache-onlyへ縮退可(プリフェッチ見送り・BACKLOG差し戻し。骨子どおり)
