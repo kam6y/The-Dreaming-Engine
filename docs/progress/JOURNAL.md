@@ -2817,3 +2817,64 @@
 - 次にやること: JOURNAL[88]の継続項目のまま(BACKLOG未着手項目・pnpm test:ai-liveの
   人間確認待ち)。本件の実プレイでの見え方確認(雑魚が見えない状態での接触戦闘の体感)は
   人間確認待ち
+
+## [90] 2026-07-12 対話AI応答のストリーミング化=ストリーム+事後検証・撤回(オーナー指示)
+
+- やったこと:
+  - オーナー指示「対話するAI生成は事後検証を外してストリーミング化し待ち時間を無くしたい」
+    →ヒアリングで「検証は外さずストリーム表示+事後検証・撤回」方式・対象=会話(conversation)+
+    サブクエスト生成(questGeneration)のspeakに確定
+  - 設計書 docs/superpowers/specs/2026-07-12-dialog-streaming-design.md・実装計画
+    docs/superpowers/plans/2026-07-12-dialog-streaming.md(subagent-driven実行、全11タスク+
+    最終ブランチレビューfix1件)
+  - shared: ai-stream-start{npcId?}/ai-stream-delta{text}をServerMessageに追加。
+    従来のai-utteranceがストリームのend/abortを兼務(成功=検証済み全文へ差し替え/
+    失敗=定型フォールバック文へ差し替え=撤回)
+  - server: speak-stream.ts(増分JSONテキストパーサ=SpeakStreamParser。チャンク境界の
+    エスケープ分割は既知の保留事項)/DreamMasterRunOptions.onSpeakDelta/
+    LiveDreamMasterがincludePartialMessagesで対話2フロー+コールバック設定時のみ増分発火/
+    MockDreamMasterは決定論2チャンク発火/turn-executorにSpeakStreamSink配線
+    (試行毎に最初の増分直前でattempt-start送出・streamedフラグ記録・検証やリトライの
+    意味論は不変)/gatekeeperはsinkを素通しし監査ai_call行にstreamed・retractedを記録/
+    session.tsのbuildSpeakStreamSink(世代印+同一NPC会話ガード)から挨拶・自由入力・
+    クエスト生成の3呼び出し点へpush配線
+  - client: game-clientにai-stream-start/ai-stream-deltaイベントを追加。
+    conversation-overlayにbeginStream/appendStream(ストリーム中はタイプライター演出を
+    使わず生テキストをそのまま追記)+playUtteranceでの最終正文置換(撤回時は表示が
+    定型文へ差し替わる)。exploration-sceneにstreamingSpeakバッファ(overlay未生成の
+    タイミングで増分が届いた場合の待避)
+  - docs: ai-guardrails.md第4層に対話ストリーミングの例外規定を追記(オーナー指示
+    2026-07-12による改定と明記。必須4条件=完了時に出力壁を全文へ従来どおり実行/
+    却下・失敗時は定型文へ撤回=未検証テキストを残さない/未検証テキストはいかなる経路にも
+    非永続化/監査ログにstreamed・retractedを記録)。ai-integration.mdに新節
+    「対話応答のストリーミング表示」を追加しspeak効果欄にも注記
+  - 攻撃テストA追加(マニフェスト登録): ATK-stream-retract-display(撤回ターンで表示が
+    定型文へ差し替わる)/ATK-stream-no-persist(未検証テキストが会話記憶・キャッシュ・
+    セーブに残らない)
+  - 最終ブランチレビュー(With fixes)で1件fix: 挨拶生成の例外経路(fire-and-forgetの
+    catch節)でも定型文のai-utteranceをpushし、未検証テキストが画面に残存する経路を防止
+    (テスト補強込み)
+  - 防御は1つも削除していない(表示タイミングのみ変更)。第5層(非永続化)・オール・オア・
+    ナッシング・縮退・レート/上限・キャッシュ適格性はバイト不変。guardrails改定はガイド
+    追記のみでオーナー指示に基づく
+- 検証: pnpm check緑(typecheck/lint/build/シークレットスキャン含めすべて通過。
+  unit 1076件全緑)。pnpm test:e2e 24/24緑(8.8m、フレークなし。実装中の直近の
+  Task 10実行時にworld-events.spec.tsが1回フレークしたが単独再実行で緑=[89]と同種の
+  環境要因と判断、本検証(Task 12)は24/24クリーン)
+- 裁量で決めたこと:
+  - end/abort専用の新メッセージは設けずai-utteranceに兼務させた(設計時の4種→2種への
+    精緻化。設計書に注記済み)
+  - Mockの発火は決定論2チャンク(E2Eの再現性を優先)
+  - Task 9(clientイベント追加)をTask 1直後に前倒し実行(Task 1のスキーマ追加で
+    clientの網羅switchが型エラーとなりpnpm checkが赤化したための回復目的)
+- 既知の問題:
+  - packages/server/src/ai/audit-log.tsに既存の生NULバイトリテラル(境界イベントの
+    キー区切り。本件より前から存在)があり、gitがbinary扱い(`file`コマンドで`data`判定)
+    となりdiffレビューの可視性が落ちる。エスケープ表記化のfollow-up choreを推奨
+    (挙動は不変のまま)
+- 次にやること: ROADMAP/BACKLOGとも本件による変更不要を確認済み(マイルストーン外の
+  オーナー指示。BACKLOGの「AI応答のキャッシュ・プリフェッチによる体感レイテンシ改善」は
+  別メカニズム=M26で完了済のため注記なし)。JOURNAL[88]の継続項目(BACKLOG未着手項目)は
+  そのまま
+- 人間確認待ち: AI_MODE=liveでの体感短縮の確認(モックはレイテンシゼロで観測不能)・
+  実プレイでのストリーム表示の見え方確認(pnpm test:ai-live含む)
