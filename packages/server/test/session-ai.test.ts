@@ -28,9 +28,10 @@ import type {
   DreamMaster,
   DreamMasterContext,
   DreamMasterResult,
+  DreamMasterRunOptions,
   RawToolCall
 } from "../src/ai/dream-master/index.js";
-import { AiFlowGatekeeper, AiTurnExecutor } from "../src/ai/flow-control/index.js";
+import { AiFlowGatekeeper, AiTurnExecutor, fallbackTextForFlow } from "../src/ai/flow-control/index.js";
 import { RateLimiter } from "../src/ai/rate-limit.js";
 import { FileSaveStore, type LoadResult, type SaveStore } from "../src/game/save.js";
 import { GameSession } from "../src/game/session.js";
@@ -968,8 +969,10 @@ describe("話しかけの挨拶生成非同期化(会話画面へ即切替え + 
     await session.handle({ type: "interact" });
     await tick(); // 挨拶生成の完了ハンドラが走る
 
-    expect(pushed).toHaveLength(1);
-    const batch = pushed[0];
+    // 対話ストリーミング(オーナー指示 2026-07-12)の先行 push(ai-stream-start/delta)を挟み、
+    // 最終バッチとして [snapshot, ai-utterance(speak)] が届く(この push が最後)
+    expect(pushed.length).toBeGreaterThanOrEqual(1);
+    const batch = pushed[pushed.length - 1];
     if (batch === undefined) throw new Error("push が届いていない");
     expect(batch[0]?.type).toBe("snapshot");
     const speak = batch.find((m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance");
@@ -1421,5 +1424,208 @@ describe("報告: 新型は報告時にインベントリ削除を伴わない(�
     const res = await session.handle({ type: "report-quest", questId: "pq-1" });
     expect(res.some((m) => m.type === "error" && m.code === "quest-not-ready")).toBe(true);
     expect(mustState(session).subQuests).toHaveLength(1); // 受注は維持
+  });
+});
+
+// ===========================================================================
+// 対話ストリーミングの push 配線(オーナー指示 2026-07-12。session.ts の buildSpeakStreamSink)
+// ===========================================================================
+
+/**
+ * 出力壁で却下される speak(逸脱パターン"as an ai")を、ストリームデルタ発火付きで返す DreamMaster。
+ * conversation/questGeneration の両フローで同一の逸脱テキストを返す(撤回の検証用)。
+ * 出力壁却下 → 表示系承認0件(display_zero)→ リトライ対象 → 2試行とも却下されるため
+ * 最終的に定型フォールバックへ確定する(turn-executor「リトライ」)。
+ */
+class RejectedStreamDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext, options?: DreamMasterRunOptions): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation" || ctx.flow === "questGeneration") {
+      return this.emitAndReject(ctx, options);
+    }
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [], "語り合った。"));
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+  private async emitAndReject(
+    ctx: DreamMasterContext,
+    options: DreamMasterRunOptions | undefined
+  ): Promise<DreamMasterResult> {
+    const text = "As an AI, I must decline that request.";
+    await Promise.resolve(); // Mock の決定論チャンク発火と同様、同期継続の後に届かせる
+    options?.onSpeakDelta?.(text);
+    return okResult(ctx, [{ toolName: "speak", rawInput: { text } }]);
+  }
+}
+
+/**
+ * 挨拶(会話 flow)を test 側が release() を呼ぶまで**保留**し、release 時にストリームデルタを
+ * 発火してから解決する DreamMaster。会話を即終了した後に完了したストリームが push されない
+ * (ガード = buildSpeakStreamSink の inConversation 判定)ことの検証に使う。
+ */
+class DeferredStreamGreetingDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  private started = false;
+  private resolveRun: (() => void) | null = null;
+  public run(ctx: DreamMasterContext, options?: DreamMasterRunOptions): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation") {
+      this.started = true;
+      return new Promise<DreamMasterResult>((resolve) => {
+        this.resolveRun = (): void => {
+          const text = "「よく来たね、旅人さん」";
+          options?.onSpeakDelta?.(text);
+          resolve(okResult(ctx, [{ toolName: "speak", rawInput: { text } }]));
+        };
+      });
+    }
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [], "語り合った。"));
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+  /** 挨拶生成(ストリーム込み)が開始済みか */
+  public get greetingStarted(): boolean {
+    return this.started;
+  }
+  /** 保留中の挨拶生成(ストリーム込み)を完了させる */
+  public release(): void {
+    if (this.resolveRun === null) throw new Error("挨拶がまだ開始していない");
+    this.resolveRun();
+    this.resolveRun = null;
+  }
+}
+
+describe("対話ストリーミングの push 配線(オーナー指示 2026-07-12)", () => {
+  it("挨拶生成: ai-stream-start → delta×2 → [snapshot, ai-utterance] の順で届き、デルタ連結=最終正文", async () => {
+    const { session } = makeAiSession(); // MockDreamMaster(通常モード)
+    const pushed: ServerMessage[] = [];
+    session.setPushSender((msgs) => pushed.push(...msgs));
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+
+    const types = pushed.map((m) => m.type);
+    const startIdx = types.indexOf("ai-stream-start");
+    const utterIdx = types.indexOf("ai-utterance");
+    expect(startIdx).toBeGreaterThanOrEqual(0);
+    expect(startIdx).toBeLessThan(utterIdx);
+    const deltas = pushed.filter(
+      (m): m is Extract<ServerMessage, { type: "ai-stream-delta" }> => m.type === "ai-stream-delta"
+    );
+    expect(deltas.length).toBe(2); // MockDreamMaster は前半+後半の決定論2チャンク
+    const final = pushed.find(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    expect(final).toBeDefined();
+    expect(deltas.map((d) => d.text).join("")).toBe(final?.text);
+  });
+
+  it("自由入力送信でもストリームが届く(送信結果の ai-utterance と一致)", async () => {
+    const { session } = makeAiSession();
+    const pushed: ServerMessage[] = [];
+    session.setPushSender((msgs) => pushed.push(...msgs));
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+    pushed.length = 0; // 挨拶分の push を除外し、送信分だけを見る
+    advanceClock(session, 3001); // 送信レートを跨ぐ
+
+    const send = await session.handle({ type: "conversation-send", text: "この街のことを教えてくれ" });
+
+    expect(pushed.some((m) => m.type === "ai-stream-start")).toBe(true);
+    const deltas = pushed.filter(
+      (m): m is Extract<ServerMessage, { type: "ai-stream-delta" }> => m.type === "ai-stream-delta"
+    );
+    expect(deltas.length).toBeGreaterThan(0);
+    const final = send.find(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    expect(final).toBeDefined();
+    expect(deltas.map((d) => d.text).join("")).toBe(final?.text);
+  });
+
+  it("撤回: 出力壁で却下される speak をデルタ発火付きで返す偽 DreamMaster では、最終 ai-utterance が定型文になり会話記憶に未検証テキストが残らない", async () => {
+    const { session } = makeAiSession({ dreamMaster: () => new RejectedStreamDreamMaster() });
+    const pushed: ServerMessage[] = [];
+    session.setPushSender((msgs) => pushed.push(...msgs));
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant"); // 挨拶も同じ偽 DreamMaster でリトライ後フォールバックする
+    pushed.length = 0; // 挨拶分の start/delta を除外し、送信分だけを見る
+    advanceClock(session, 3001);
+
+    const send = await session.handle({ type: "conversation-send", text: "この街のことを教えてくれ" });
+
+    // (1) リトライで ai-stream-start が2回(初回 + リトライ1回)届く
+    const starts = pushed.filter((m) => m.type === "ai-stream-start");
+    expect(starts.length).toBe(2);
+
+    // (2) 最終 ai-utterance は定型フォールバック文(未検証の "As an AI" ではない)
+    const final = send.find(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    expect(final).toBeDefined();
+    expect(final?.text).toBe(fallbackTextForFlow("conversation"));
+
+    // (3) 会話記憶(recentExchanges)の npc 側テキストに未検証テキストが残らない(定型文が記録される)
+    const memory = mustState(session).npcs.informant.memory;
+    const last = memory.recentExchanges.at(-1);
+    expect(last).toBeDefined();
+    expect(last?.npc).not.toContain("As an AI");
+    expect(last?.npc).toBe(fallbackTextForFlow("conversation"));
+  });
+
+  it("会話を即終了した後に完了したストリームは push されない(ガード)", async () => {
+    const { session, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredStreamGreetingDreamMaster()
+    });
+    const dm = dreamMaster as DeferredStreamGreetingDreamMaster;
+    await session.handle({ type: "new-game" });
+    const pushed: ServerMessage[] = [];
+    session.setPushSender((msgs) => pushed.push(...msgs));
+    const approach = NPC_APPROACH.informant;
+    if (approach === undefined) throw new Error("informant approach 未定義");
+    mustState(session).location = { mapId: "town", position: { ...approach.pos }, facing: approach.facing };
+
+    await session.handle({ type: "interact" }); // 挨拶生成(ストリーム込み)は保留中
+    expect(dm.greetingStarted).toBe(true);
+    await session.handle({ type: "conversation-end" }); // 整定を待たずに会話終了(0往復なので要約はスキップ)
+    expect(mustView(session).interaction).toBeUndefined();
+
+    dm.release(); // 保留中のストリーム+最終応答が今ごろ完了
+    await tick();
+
+    expect(pushed.some((m) => m.type === "ai-stream-start")).toBe(false);
+    expect(pushed.some((m) => m.type === "ai-stream-delta")).toBe(false);
+    expect(pushed.some((m) => m.type === "ai-utterance")).toBe(false); // speak も破棄される(既存仕様どおり)
+  });
+
+  it("pushSender 未設定(切断中)でもストリーミングターンが完走する", async () => {
+    const { session } = makeAiSession(); // pushSender は設定しない(既定 MockDreamMaster)
+    await session.handle({ type: "new-game" });
+
+    await talkTo(session, "informant"); // ストリーミング込みの挨拶ターンが例外なく完走する
+
+    // クラッシュせず(ここまで到達)、会話は開いたまま(挨拶の承認 effect も反映されている)
+    const view = mustView(session);
+    expect(view.interaction?.kind).toBe("conversation");
+    if (view.interaction?.kind === "conversation") expect(view.interaction.npcId).toBe("informant");
+  });
+
+  it("クエスト生成(quest-request)でもストリームが届く(3つ目の呼び出し点。generateQuest の speakStream)", async () => {
+    const { session } = makeAiSession();
+    const pushed: ServerMessage[] = [];
+    session.setPushSender((msgs) => pushed.push(...msgs));
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "informant");
+    pushed.length = 0; // 挨拶分の push を除外し、quest-request 分だけを見る
+    advanceClock(session, 30001); // サブクエスト生成クールダウンを跨ぐ
+
+    const res = await session.handle({ type: "quest-request" });
+
+    expect(pushed.some((m) => m.type === "ai-stream-start")).toBe(true);
+    const deltas = pushed.filter(
+      (m): m is Extract<ServerMessage, { type: "ai-stream-delta" }> => m.type === "ai-stream-delta"
+    );
+    expect(deltas.length).toBeGreaterThan(0);
+    const final = res.find(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    expect(final).toBeDefined();
+    expect(deltas.map((d) => d.text).join("")).toBe(final?.text);
   });
 });

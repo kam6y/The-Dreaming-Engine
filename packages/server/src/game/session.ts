@@ -95,7 +95,7 @@ import {
   type ViewItemStack
 } from "@dreaming-engine/shared";
 
-import type { AiFlowGatekeeper } from "../ai/flow-control/index.js";
+import type { AiFlowGatekeeper, SpeakStreamSink } from "../ai/flow-control/index.js";
 import type { StateChangeEffect } from "../ai/flow-control/turn-executor.js";
 import type { AiMode } from "../ai/mode.js";
 import type { PersistentStateContext } from "../ai/tool-validation/types.js";
@@ -1081,7 +1081,8 @@ export class GameSession {
         affinityAtOpen: npc.affinity,
         persistent: this.buildPersistentContext(),
         ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
-        ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {})
+        ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {}),
+        speakStream: this.buildSpeakStreamSink(npcId, generation)
       })
       .then((result) => {
         if (this.gameGeneration !== generation || this.state === null) return; // リセット/ロード後: 破棄
@@ -1111,6 +1112,8 @@ export class GameSession {
     }
     const gk = this.requireGatekeeper();
     const npcId = this.activeInteraction.npcId;
+    // 完了(sendConversation の await)後にゲームがリセット/ロードされていても sink が誤爆しないための世代印
+    const generation = this.gameGeneration;
     const utterance = sanitizePlayerInput(rawText, this.playerInputMaxLength);
     const npc = this.requireState().npcs[npcId];
     const result = await gk.sendConversation({
@@ -1118,7 +1121,8 @@ export class GameSession {
       utterance,
       persistent: this.buildPersistentContext(),
       ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
-      ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {})
+      ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {}),
+      speakStream: this.buildSpeakStreamSink(npcId, generation)
     });
     // 承認 effect(give_item/adjust_affinity 等)を GameState へ適用(永続カウンタを閉じる)
     this.applyApprovedEffects(result.approvedEffects);
@@ -1245,11 +1249,14 @@ export class GameSession {
       return this.errorMsgs("no-quests-here", "その相手に頼める仕事はなさそうだ。");
     }
     const gk = this.requireGatekeeper();
+    // 完了(generateQuest の await)後にゲームがリセット/ロードされていても sink が誤爆しないための世代印
+    const generation = this.gameGeneration;
     const topic = this.requireState().npcs.informant.topic;
     const result = await gk.generateQuest({
       npcId,
       persistent: this.buildPersistentContext(),
-      ...(topic.length > 0 ? { topic } : {})
+      ...(topic.length > 0 ? { topic } : {}),
+      speakStream: this.buildSpeakStreamSink(npcId, generation)
     });
     // propose_quest の承認で aiDaily の発行数カウンタを閉じる(提案自体はセッションが保持)
     this.applyApprovedEffects(result.approvedEffects);
@@ -1833,6 +1840,30 @@ export class GameSession {
     return npcId === undefined
       ? { type: "ai-utterance", channel, text }
       : { type: "ai-utterance", channel, npcId, text };
+  }
+
+  /**
+   * 対話ストリーミングの sink を組む(オーナー指示 2026-07-12。設計書
+   * docs/superpowers/specs/2026-07-12-dialog-streaming-design.md)。
+   * 未検証増分の**画面表示専用**の先行 push。世代印・同一NPC会話継続のガードを通る間だけ送る。
+   * 最終正文/定型文は従来どおり ai-utterance が運ぶ(ストリームの end/abort を兼ねる)。
+   * ai-stream-start は各試行の最初のデルタ直前に届く(turn-executor が制御)=
+   * リトライ時はクライアントが表示バッファをクリアして再開する。
+   */
+  private buildSpeakStreamSink(npcId: NpcId, generation: number): SpeakStreamSink {
+    const inConversation = (): boolean =>
+      this.gameGeneration === generation &&
+      this.state !== null &&
+      this.activeInteraction?.kind === "conversation" &&
+      this.activeInteraction.npcId === npcId;
+    return {
+      onAttemptStart: (): void => {
+        if (inConversation()) this.push([{ type: "ai-stream-start", npcId }]);
+      },
+      onDelta: (delta): void => {
+        if (inConversation()) this.push([{ type: "ai-stream-delta", text: delta }]);
+      }
+    };
   }
 
   /** 対話を解除する。会話中なら gatekeeper のセッションも破棄する(要約はしない=歩き去り等) */
