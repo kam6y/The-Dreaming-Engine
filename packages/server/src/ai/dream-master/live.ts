@@ -13,6 +13,7 @@ import type { AiConfig } from "../config.js";
 import { FLOW_TOOL_ALLOWLIST, type ToolFlow, type ToolName } from "../tool-validation/types.js";
 import { resolveFlowSpec } from "./flow-spec.js";
 import { buildPrompt } from "./prompt.js";
+import { SpeakStreamParser } from "./speak-stream.js";
 import type {
   DreamMaster,
   DreamMasterContext,
@@ -212,6 +213,8 @@ export interface SdkMessageLike {
   readonly type: string;
   readonly subtype?: string;
   readonly result?: string;
+  /** type:"stream_event" のときの生イベント(対話ストリーミング。SpeakStreamParser.handle へ渡す) */
+  readonly event?: unknown;
 }
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -235,6 +238,8 @@ export interface DrainDeps {
   /** 呼び出し側の任意キャンセル(全体タイムアウト等)。abort されたら timeout_total 扱い */
   readonly signal?: AbortSignal;
   readonly timers?: StreamTimers;
+  /** stream_event メッセージを受けるたびに呼ばれるフック(対話ストリーミング表示専用) */
+  readonly onStreamEvent?: (message: SdkMessageLike) => void;
 }
 
 export type DrainResult =
@@ -286,6 +291,13 @@ export function drainStream(stream: AsyncIterable<SdkMessageLike>, deps: DrainDe
           if (!firstReceived) {
             firstReceived = true;
             timers.clear(firstTimer);
+          }
+          if (message.type === "stream_event") {
+            try {
+              deps.onStreamEvent?.(message);
+            } catch {
+              // 表示専用の先行経路の例外で drain を壊さない(最終正文が置換するため無害)
+            }
           }
           if (message.type === "result") {
             if (message.subtype === "success") {
@@ -360,6 +372,12 @@ export class LiveDreamMaster implements DreamMaster {
       tools: buildFlowTools(spec.allowedTools, (call) => recorded.push(call))
     });
 
+    // 対話ストリーミング(オーナー指示 2026-07-12): conversation/questGeneration かつ
+    // onSpeakDelta 指定時のみ購読する(他フロー・未指定時は従来どおり includePartialMessages を渡さない)。
+    const onSpeakDelta = runOptions?.onSpeakDelta;
+    const streaming =
+      onSpeakDelta !== undefined && (flow === "conversation" || flow === "questGeneration");
+
     const abortController = new AbortController();
     const options: Options = {
       mcpServers: { [DREAM_SERVER_NAME]: dreamServer },
@@ -374,6 +392,7 @@ export class LiveDreamMaster implements DreamMaster {
       permissionMode: "default",
       persistSession: false,
       ...(spec.thinkingDisabled ? { thinking: { type: "disabled" as const } } : {}),
+      ...(streaming ? { includePartialMessages: true } : {}),
       env: this.authEnv,
       abortController
     };
@@ -385,12 +404,16 @@ export class LiveDreamMaster implements DreamMaster {
       return { ok: false, flow, failure: "api_error", meta };
     }
 
+    // streaming 時のみ speak 入力 text の増分を SpeakStreamParser 経由で onSpeakDelta へ流す
+    // (表示専用の先行経路。検証・最終正文の確定はターン完了後)。
+    const parser = streaming && onSpeakDelta !== undefined ? new SpeakStreamParser(mcpToolName("speak"), onSpeakDelta) : null;
     const drainDeps: DrainDeps = {
       firstTokenMs: spec.timeout.firstTokenSeconds * 1000,
       totalMs: spec.timeout.totalSeconds * 1000,
       abortController,
       ...(runOptions?.signal !== undefined ? { signal: runOptions.signal } : {}),
-      ...(this.timers !== undefined ? { timers: this.timers } : {})
+      ...(this.timers !== undefined ? { timers: this.timers } : {}),
+      ...(parser !== null ? { onStreamEvent: (m: SdkMessageLike) => parser.handle(m.event) } : {})
     };
 
     const drain = await drainStream(stream, drainDeps);

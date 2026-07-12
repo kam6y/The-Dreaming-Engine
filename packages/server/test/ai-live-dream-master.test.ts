@@ -22,7 +22,8 @@ import {
   type DreamMasterContext,
   type DrainDeps,
   type QueryFn,
-  type SdkMessageLike
+  type SdkMessageLike,
+  type StreamTimers
 } from "../src/ai/dream-master/index.js";
 import { FLOW_TOOL_ALLOWLIST, TOOL_FLOWS } from "../src/ai/tool-validation/types.js";
 
@@ -586,6 +587,142 @@ describe("LiveDreamMaster.run: 結線(実AI不使用)", () => {
 // ---------------------------------------------------------------------------
 // task タグのツール必須拘束(ツール外テキストは破棄される旨を明示)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 対話ストリーミング: onSpeakDelta と includePartialMessages の結線(オーナー指示 2026-07-12)
+// ---------------------------------------------------------------------------
+
+describe("対話ストリーミング(オーナー指示 2026-07-12)", () => {
+  /** stream_event → result(success) の順で流す偽ストリーム(options を捕捉する) */
+  function makeStreamingQuery(events: unknown[], captured: { options?: Options }): QueryFn {
+    return (params) => {
+      captured.options = params.options;
+      return (async function* (): AsyncGenerator<SdkMessageLike> {
+        for (const event of events) {
+          yield { type: "stream_event", event } as SdkMessageLike;
+        }
+        yield { type: "result", subtype: "success", result: "" } as SdkMessageLike;
+      })();
+    };
+  }
+
+  const speakEvents: unknown[] = [
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", name: mcpToolName("speak") } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"text": "やあ、' } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '旅人"}' } },
+    { type: "content_block_stop", index: 0 }
+  ];
+
+  it("conversation + onSpeakDelta で includePartialMessages が設定され、text 増分が発火する", async () => {
+    const captured: { options?: Options } = {};
+    const dm = new LiveDreamMaster({
+      config,
+      env: liveEnv,
+      query: makeStreamingQuery(speakEvents, captured)
+    });
+    const got: string[] = [];
+    const result = await dm.run(
+      { flow: "conversation", partnerNpcId: "informant", playerUtterance: "" },
+      { onSpeakDelta: (d) => got.push(d) }
+    );
+    expect(result.ok).toBe(true);
+    expect(got.join("")).toBe("やあ、旅人");
+    expect(captured.options?.includePartialMessages).toBe(true);
+  });
+
+  it("battleResult では onSpeakDelta があってもストリームを購読しない", async () => {
+    const captured: { options?: Options } = {};
+    const dm = new LiveDreamMaster({
+      config,
+      env: liveEnv,
+      query: makeStreamingQuery(speakEvents, captured)
+    });
+    const got: string[] = [];
+    const result = await dm.run({ flow: "battleResult", enemyId: "mist-wolf" }, { onSpeakDelta: (d) => got.push(d) });
+    expect(result.ok).toBe(true);
+    expect(got).toEqual([]);
+    expect(captured.options?.includePartialMessages).toBeUndefined();
+  });
+
+  it("onSpeakDelta 未指定なら includePartialMessages を設定しない(従来挙動)", async () => {
+    const captured: { options?: Options } = {};
+    const dm = new LiveDreamMaster({
+      config,
+      env: liveEnv,
+      query: makeStreamingQuery(speakEvents, captured)
+    });
+    const result = await dm.run({ flow: "conversation", partnerNpcId: "informant", playerUtterance: "" });
+    expect(result.ok).toBe(true);
+    expect(captured.options?.includePartialMessages).toBeUndefined();
+  });
+
+  it("onSpeakDelta が例外を投げても run は成功する(表示専用経路の隔離)", async () => {
+    const dm = new LiveDreamMaster({
+      config,
+      env: liveEnv,
+      query: makeStreamingQuery(speakEvents, {})
+    });
+    const result = await dm.run(
+      { flow: "conversation", partnerNpcId: "informant", playerUtterance: "" },
+      {
+        onSpeakDelta: () => {
+          throw new Error("表示側の例外");
+        }
+      }
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("全体タイムアウトでストリーム途中でも失敗として確定する(デルタは途中まで届いてよい)", async () => {
+    // drainStream のタイマ注入(StreamTimers フェイク)流儀を LiveDreamMaster レベルへ流用する:
+    // set() の呼び出し順を捕捉しておき(drainStream は firstTimer→totalTimer の順で登録する)、
+    // 2件目の登録(totalTimer)だけを手動発火して全体タイムアウトを確定させる。
+    const registered: { fn: () => void; cleared: boolean }[] = [];
+    const timers: StreamTimers = {
+      set: (fn) => {
+        const handle = registered.length;
+        registered.push({ fn, cleared: false });
+        return handle as unknown as ReturnType<typeof setTimeout>;
+      },
+      clear: (handle) => {
+        const entry = registered[handle as unknown as number];
+        if (entry !== undefined) entry.cleared = true;
+      }
+    };
+
+    // stream_event を2件 yield した後、result を返さず待ち続ける(実クロックの長時間遅延だが、
+    // 全体タイムアウトの abort で早期に打ち切られるため実待ちは発生しない)。
+    const query: QueryFn = (params) => {
+      const signal = params.options.abortController?.signal ?? new AbortController().signal;
+      return fakeStream(
+        [
+          { msg: { type: "stream_event", event: speakEvents[0] } as SdkMessageLike, delayMs: 1 },
+          { msg: { type: "stream_event", event: speakEvents[1] } as SdkMessageLike, delayMs: 1 },
+          { msg: successMsg, delayMs: 60_000 }
+        ],
+        signal
+      );
+    };
+
+    const dm = new LiveDreamMaster({ config, env: liveEnv, query, timers });
+    const got: string[] = [];
+    const runPromise = dm.run(
+      { flow: "conversation", partnerNpcId: "informant", playerUtterance: "" },
+      { onSpeakDelta: (d) => got.push(d) }
+    );
+
+    // 2件の stream_event が実クロックで処理されるのを待ってから、全体タイマ(2件目の登録)を手動発火する
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const totalEntry = registered[1];
+    if (totalEntry === undefined || totalEntry.cleared) throw new Error("全体タイマが登録・未解除であること");
+    totalEntry.fn();
+
+    const result = await runPromise;
+    expect(result).toMatchObject({ ok: false, failure: "timeout_total" });
+    // デルタは途中まで届いてよい(最終正文はターン側が定型文で確定するため厳密一致は要求しない)
+    expect(got.join("")).toBe("やあ、旅人".slice(0, got.join("").length));
+  });
+});
 
 describe("buildPrompt: task タグのツール必須拘束", () => {
   it("会話 task は speak 必須とツール外テキスト破棄を明示する", () => {

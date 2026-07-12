@@ -160,6 +160,13 @@ export type DreamMasterResult = DreamMasterSuccess | DreamMasterFailure;
  */
 export interface DreamMasterRunOptions {
   readonly signal?: AbortSignal;
+  /**
+   * speak ツール入力 text の増分コールバック(対話ストリーミング表示。オーナー指示 2026-07-12)。
+   * **未検証の生テキスト増分**が渡る(画面表示専用の先行経路)。検証・最終正文の確定は
+   * 従来どおりターン完了後(turn-executor)。Live は conversation/questGeneration のみ発火、
+   * Mock は同2フローで決定論チャンクを発火、他フロー・未指定時は従来どおり。
+   */
+  readonly onSpeakDelta?: (delta: string) => void;
 }
 
 /**
