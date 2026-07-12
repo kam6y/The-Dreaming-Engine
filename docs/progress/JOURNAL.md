@@ -2739,3 +2739,56 @@
   WS切断/リセット競合はgameGenerationガード
   (4)dreamフローはキャッシュ非対象(鍵導出null)=M26-2との相互作用なし
   (5)リスクが出ればcache-onlyへ縮退可(プリフェッチ見送り・BACKLOG差し戻し。骨子どおり)
+
+## [88] 2026-07-12 M26-3: 夢シーンの先行生成=宿泊2フェーズ化+入眠演出(UI含むためオーケストレーター自身が実装)。M26完了→loop停止
+
+- やったこと(server+client+テスト。UIを含むマイルストーンのため全編オーケストレーター自身):
+  - shared: serverSleepStartMessageSchema(`{type:"sleep-start"}`=入眠の合図)を追加
+  - server(session.ts rest): 宿泊を2フェーズ化。手順0-2(徴収・全回復・日送り・時間帯リセット・
+    縮退解除フック)→宿overlayクローズ+締め台詞を構築し、有料+AI時は
+    [snapshot, dialog(締め台詞), sleep-start]をpushで先行送出→gatekeeper.dreamScene()の
+    awaitをクライアント入眠演出と重ねる→完了後に世界変化適用(手順4)→実績評価→
+    セーブ(手順5)→[snapshot, narrate]を返却(夢の顕現)。
+    AI無効(gatekeeperなし)・宿泊費不足(wasFree)は従来どおり単相一括返却。
+    dreamScene周りにtry/catchを追加し、万一の例外でも定型の顕現+セーブを必ず成立させる
+    (従来は例外でセーブ未達の可能性があった=強化方向)
+  - 不変条件の保持: server.tsの直列チェーンがrest解決まで次操作を処理しない=入眠中に
+    別操作が状態を書き換えることは構造的に不可能。<recent_play>/<world_state>は従来どおり
+    日送り後構築(バイト一致)。手順3→4→5の順序不変。クールダウン/wasFree/縮退は
+    dreamScene内で従来どおり。dreamフローはキャッシュ非対象(M26-2と相互作用なし)。
+    プロンプト・ツール定義・防御はバイト不変
+  - client: game-clientにsleep-startイベント追加(網羅switchにcase追加)。
+    exploration-sceneに入眠演出=pendingSleep(締め台詞の表示完了待ち。pendingInn/
+    pendingDreamと同じ先行ダイアログ待ちの流儀)→sleepVeil(暗幕フェードイン+
+    「眠りにつく……」明滅)。表示中は移動・調べる・Esc・Q/M/Kをブロック。
+    夢の顕現(narrate)で暗幕を夢overlayへ引き継いで閉じる。data-sleep属性(open/closed)追加
+  - テスト+5=unit 1039(Deferred夢: 入眠合図[snapshot,dialog,sleep-start]が夢完了前に届き
+    世界変化・セーブは完了後(手順順序の直接検証)/夢生成例外でも定型顕現+セーブ成立/
+    wasFree単相=sleep-start非送出+AI不呼び出し/pushSender未設定(切断中)でも完走/
+    client sleep-start dispatch)
+- 裁量で決めたこと:
+  - 2フェーズをrest()ハンドラ内で完結(push→await→return)させ、挨拶型の完了ハンドラ+
+    世代ガード方式は採らず=直列チェーン占有によりセーブ成立・適用順序が構造的に保証され、
+    リセット/切断競合の挙動も従来と同一(gameGeneration不要)
+  - wasFree・AI無効は単相のまま(隠すべきAI待ちが無く2フェーズの利得ゼロ。
+    既存テストのメッセージ形も保存)
+  - 入眠演出(暗幕)中に届いたdialog(市場の一言等)は保留し目覚め後に表示
+    (夢overlay中の保留と同じ流儀。顕現と同着の場合の表示順は「夢→市場の一言」になるが
+    演出上自然と判断)
+  - モック等の低レイテンシで顕現が締め台詞の消化前に届いた場合は暗転を挟まず直接夢overlayへ
+    (ちらつき防止。E2Eの決定論も保つ)
+  - 暗幕はプレースホルダー描画(単色矩形+テキスト明滅。新アセットなし=codex委譲対象外)
+- 検証: pnpm check緑(unit 1039=+5)・pnpm test:e2e 24/24緑(10.7m。宿泊を通る
+  dream/save-load/world-events/quest-types含む)・M26ゲート=pnpm test:e2e:full緑。
+  ai-guardrails.md無変更・攻撃テストA/防御アサート無修正
+- M26完了: ROADMAP M26-3チェック(完了条件成立=表示専用応答の即返し+夢AI待ちの
+  演出オーバーラップ・コスト不変・防御バイト不変)。BACKLOG
+  「AI応答のキャッシュ・プリフェッチによる体感レイテンシ改善」チェック(M26展開・完了の注記)
+- **loop停止(ユーザー指示 2026-07-12「M26が完了したらloopを止めて」)**: 本エントリを
+  もって自律ループを停止する。リポジトリは緑(check+スモーク+full)・作業ツリーはクリーン
+- 次にやること(次回セッション/人間の判断向け):
+  - BACKLOG未着手(優先度低・上から順): ボス戦中の要所台詞のAI生成(ai-integration.mdへ
+    フロー定義追記から)/セーブスロット複数化/未組み込み立ち絵の活用/日本語フォント導入/
+    自然進行バランス実測(Haiku subagentプレイ代替)
+  - 人間確認待ち(継続): pnpm test:ai-live での実AI疎通確認(M26のキャッシュ・2フェーズは
+    モックで検証済み。live での体感短縮の確認は人間実行のみ)
