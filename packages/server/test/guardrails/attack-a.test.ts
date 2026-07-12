@@ -602,7 +602,16 @@ describe("対話ストリーミングの撤回(オーナー指示 2026-07-12)", 
   it("[ATK-stream-no-persist] 撤回ターンの未検証テキストが会話記憶・キャッシュ・セーブに残らない", async () => {
     const rig = setupRig();
     await rig.session.handle({ type: "new-game" });
-    await approachAndInteract(rig.session, "informant");
+
+    // (2) executor.getCacheStats().stores が増えない(フォールバックターンは記憶されない)。
+    // メモ化キャッシュの対象は battleResult と「会話の開始挨拶(playerUtterance:""のターン)」
+    // のみ(turn-cache.ts)。自由入力の送信(conversation-send)は鍵を持たず元々キャッシュ対象外
+    // なので、撤回ターンを実際に検出できるのは**挨拶**(informant への interact)の前後比較のみ
+    // (送信の前後比較では検出できない=常に自明に等しいため無意味な検査になる)。
+    const storesBeforeGreeting = rig.executor.getCacheStats().stores;
+    await approachAndInteract(rig.session, "informant"); // 挨拶も同じ偽 DreamMaster でリトライ後フォールバックする
+    expect(rig.executor.getCacheStats().stores).toBe(storesBeforeGreeting);
+
     rig.advance(3001);
     await rig.session.handle({ type: "conversation-send", text: "この街のことを教えてくれ" });
 
@@ -610,11 +619,8 @@ describe("対話ストリーミングの撤回(オーナー指示 2026-07-12)", 
     const memoryAfterSend = mustStreamAttackState(rig.session).npcs.informant.memory;
     expect(memoryAfterSend.recentExchanges.some((e) => e.npc.includes(DEVIANT_STREAM_TEXT))).toBe(false);
 
-    // (2) executor.getCacheStats().stores が増えない(フォールバックターンは記憶されない)
-    const storesBeforeEnd = rig.executor.getCacheStats().stores;
     await rig.session.handle({ type: "conversation-end" }); // 要約(非汚染テキスト)を fire-and-forget で開始
     await streamAttackTick(); // 非同期要約の完了ハンドラを待つ
-    expect(rig.executor.getCacheStats().stores).toBe(storesBeforeEnd);
 
     // 要約後の会話記憶にも逸脱テキストが残らない(要約自体は非汚染テキストで成功する)
     const memoryAfterEnd = mustStreamAttackState(rig.session).npcs.informant.memory;
