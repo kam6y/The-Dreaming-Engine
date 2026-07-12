@@ -2792,3 +2792,28 @@
     自然進行バランス実測(Haiku subagentプレイ代替)
   - 人間確認待ち(継続): pnpm test:ai-live での実AI疎通確認(M26のキャッシュ・2フェーズは
     モックで検証済み。live での体感短縮の確認は人間実行のみ)
+
+## [89] 2026-07-12 雑魚敵シンボルのマップ非表示=透明化(オーナー指示)
+
+- やったこと:
+  - オーナー指示「マップ上に敵を表示しないようにしたい」を実装(ヒアリングで
+    「雑魚のみ非表示・ボス/中ボスは表示・接触戦闘は残す=透明化」に確定)
+  - client(exploration-scene.ts): updateEnemySymbols()本体・呼び出し2箇所・
+    symbolViews/symbolsKeyフィールドを削除し、雑魚シンボルを描画しない。
+    SYMBOL_COLORS・directionalTextureId・mapSpriteは中ボス/NPC/プレイヤー描画で
+    使用するため残置。drawBoss()/drawMidBoss()は不変
+  - server/shared: 無変更(雑魚シンボルの存在・徘徊・接触戦闘・リスポーン・
+    huntカウント・snapshotのsymbols・data-symbol-count属性は従来どおり)
+  - docs: game-design.md「マップ構成」に不可視の注記を追加(オーナー指示による仕様変更)。
+    設計書=docs/superpowers/specs/2026-07-12-hide-mob-symbols-design.md、
+    実装計画=docs/superpowers/plans/2026-07-12-hide-mob-symbols.md
+- 検証: pnpm check緑・pnpm test:e2eスモーク24/24緑(8.5m。battle/skill等はマップデータ+
+  固定シードの座標計算で接触し data-symbol-count(snapshot由来)を読む=描画非依存を実証)
+- 裁量で決めたこと: 表示切替フラグは設けず恒久削除(YAGNI。戻す場合はgit履歴から復元)
+- 既知の問題: E2Eスモークの初回実行が23/24失敗(1.7分で即死。変更と無関係なtitle.spec.tsまで
+  失敗)。同一コードで単体・全件とも再実行は緑のため変更起因ではなく環境要因と判断
+  (ローカルはreuseExistingServer有効=実行時の残存プロセスが疑わしいが、詳細ログを
+  失い特定には至らず。再発時はフルログを保存して調査すること)
+- 次にやること: JOURNAL[88]の継続項目のまま(BACKLOG未着手項目・pnpm test:ai-liveの
+  人間確認待ち)。本件の実プレイでの見え方確認(雑魚が見えない状態での接触戦闘の体感)は
+  人間確認待ち
