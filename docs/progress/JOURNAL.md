@@ -2629,3 +2629,39 @@
   (4)ゲーム中変更は縮退可(新規時のみ確定=set-difficultyメッセージ追加なしが最小)
   (5)E2E: ?difficulty=hard→data-difficulty="hard"観測の1本
   (6)client typecheck単体実行時はsharedを先にビルドする(pnpm checkは順序内包)
+
+## [85] 2026-07-12 M25-3+M25完了: 難易度3択UI+E2E(UI=オーケストレーター自身)
+
+- やったこと(M25-3はUIのためオーケストレーター自身が実装):
+  - title-scene: 新規ゲーム(上書き確認のyes後を含む)へ難易度3択
+    「挑む夢の重さを選ぶ」を1ステップ追加(MenuList・既定カーソル=ふつう
+    (DIFFICULTY_ORDER.indexOf(DEFAULT_DIFFICULTY))・Escでタイトルメニューへ戻る・
+    決定値をoptions.difficultyで送信=URLフラグより優先)。
+    タイトルsyncDomStateへdata-menu="difficulty"(閉時は残留値ごと削除)
+  - **skipIntro時は3択をスキップ**: 全E2Eの新規ゲーム開始は「Enter→即探索待ち」手順のため、
+    無条件のステップ追加は多数のspecを壊す。skipIntro有無を調査し
+    (skipIntroなしの5spec=title(開始なし)+つづきから方式4本=いずれもnew-game不使用)、
+    ?skipIntro=1(テスト専用)のときのみ3択を飛ばしURLの?difficulty=(未指定=normal)で
+    即開始する設計を採用。実プレイヤー(skipIntroなし)は必ず3択を通る
+  - url-flags: ?difficulty=をnew-gameオプションへ(safeParse流儀・正規選択=liveでも尊重)。
+    exploration syncDomStateへdata-difficulty
+  - E2E difficulty.spec 3本: URLフラグhard/既定normal/3択経由hard(実プレイヤー経路=
+    残存セーブ削除で開始保証・オープニングをSpace送り)。単体3/3緑・目視で3択の見た目確認済み
+  - **回帰の検出と修正**: M25ゲート1回目でplaythrough.full第1テスト
+    (オープニング=skipIntroなしのnew-game)が3択で停止して赤→第1テストへ
+    「data-menu=difficulty待ち→Enter(ふつう決定)」を追加(新UIステップへのspec追従)。
+    同回のachievements.spec失敗はスイート所要28分(平常13分)の高負荷実行による
+    フレークと判断(単体2.0分で緑・修正後の再ゲートでも緑)
+- 裁量で決めたこと: 3択見出し「挑む夢の重さを選ぶ」。HUDへの難易度表示は見送り
+  (骨子で任意。既定プレイの見た目を変えない最小)。ゲーム中変更(set-difficulty)は
+  縮退案どおり見送り=新規時のみ確定(骨子が明示的に許容)
+- 検証: pnpm check 緑(unit 1011)・pnpm test:e2e 24/24緑(difficulty 3本を含む・13.5分=平常)・
+  **M25ゲート=pnpm test:e2e:full 2/2緑**。既存specの変更はfull第1テストの3択追従のみ
+- M25完了: ROADMAP M25-3チェック+BACKLOG「難易度設定」チェック(注記付き)
+- 次にやること: BACKLOG「優先度: 低」次項=**AI応答のキャッシュ・プリフェッチによる
+  体感レイテンシ改善**をM26として展開してから着手(M26-1=骨子追記から。骨子執筆=subagent委譲)。
+  申し送り: (1)AI系の変更になるためai-integration.mdの熟読必須・**ai-guardrails.mdの防御を
+  弱める変更は絶対禁止**(キャッシュは防御検証済みの結果のみを対象にする等の設計判断を骨子で固める)
+  (2)モック開発の原則(AI_MODE=mock)のままキャッシュ層をテスト可能にする設計
+  (3)E2Eバックグラウンドタスクが2回連続でkillされた(空出力1回・check後1回)→
+  再実行で回収できたが、ゲート実行は1コマンド=1タスクに分けると回収が容易

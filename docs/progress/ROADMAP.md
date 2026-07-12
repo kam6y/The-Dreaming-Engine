@@ -633,7 +633,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       ユニットテスト=easy/hardの被ダメ増減方向・normal恒等・旧セーブ互換(欠落→normal)・
       最低1ダメージ保証。**既存combat-balance.testのnormal閾値・判定は一切変えない(緩めない)**。
       既存E2E(スモーク+full)緑を確認
-- [ ] M25-3: クライアントUI(**UI=オーケストレーター**):
+- [x] M25-3: クライアントUI(**UI=オーケストレーター**):
       タイトルの新規ゲームフローへ難易度3択(既定カーソル=ふつう・決定値をoptions.difficultyで送信)・
       `newGameOptionsFromUrl()`へ`?difficulty=`読み取り・`syncDomState`へ`data-difficulty`・
       HUD表示は裁量(出す場合は控えめ)。ゲーム中変更(set-difficulty)は実装コストで採否判断
