@@ -1,6 +1,13 @@
 import Phaser from "phaser";
 
-import { GAME_TITLE, type ClientMessage } from "@dreaming-engine/shared";
+import {
+  DEFAULT_DIFFICULTY,
+  DIFFICULTY_DISPLAY_NAMES,
+  DIFFICULTY_ORDER,
+  GAME_TITLE,
+  difficultySchema,
+  type ClientMessage
+} from "@dreaming-engine/shared";
 
 import { requestBgm } from "../audio.js";
 import { clearDialogQueue } from "../dialog-queue.js";
@@ -17,6 +24,9 @@ import { continueOptionsFromUrl, newGameOptionsFromUrl, shouldSkipIntro } from "
  * - 「つづきから」はサーバーの hello(セーブ有無)で有効化する
  * - 既存セーブがあるときの「新規ゲーム」は上書き確認を挟む(実際の上書きは
  *   新規開始後の最初の宿泊セーブ時: game-design.md「セーブ/ロード」)
+ * - 新規ゲームは難易度3択(やさしい/ふつう/むずかしい。M25)を1ステップ挟む。
+ *   ?skipIntro=1(テスト専用の手順スキップ)のときは選択を飛ばし、URLの ?difficulty=
+ *   (未指定なら normal)で開始する(既存E2Eの開始手順を変えないための決定論経路)
  * - 探索への遷移は自分が要求した new-game / continue への snapshot でのみ行う
  *   (再接続時の再同期 snapshot では遷移しない)
  * スケールモードRESIZEのため、リサイズ時に中央へ再配置する。
@@ -45,6 +55,12 @@ export class TitleScene extends Phaser.Scene {
 
   /** 音量・ミュートの設定オーバーレイ(「設定」で開閉。M12-3) */
   private settings: SettingsOverlay | null = null;
+
+  /** 難易度3択メニュー(新規ゲームの1ステップ。Esc でタイトルへ戻る。M25-3) */
+  private difficultyMenu: MenuList | null = null;
+
+  /** 難易度選択の見出し(メニューと同時に出し入れする) */
+  private difficultyPrompt: Phaser.GameObjects.Text | null = null;
 
   /** 接続確立前に選択された場合に接続後へ持ち越す送信待ちメッセージ */
   private pendingMessage: ClientMessage | null = null;
@@ -77,6 +93,8 @@ export class TitleScene extends Phaser.Scene {
     this.uiLayer = this.add.container(0, 0).setDepth(10);
     this.confirm = null;
     this.settings = null;
+    this.difficultyMenu = null;
+    this.difficultyPrompt = null;
     this.pendingMessage = null;
     this.requested = false;
 
@@ -188,6 +206,7 @@ export class TitleScene extends Phaser.Scene {
       if (
         this.confirm === null &&
         this.settings === null &&
+        this.difficultyMenu === null &&
         !this.requested &&
         this.pendingMessage === null
       ) {
@@ -202,7 +221,7 @@ export class TitleScene extends Phaser.Scene {
         this.openOverwriteConfirm();
         return;
       }
-      this.request({ type: "new-game", options: newGameOptionsFromUrl() });
+      this.proceedNewGame();
       return;
     }
     if (id === "continue") {
@@ -238,12 +257,67 @@ export class TitleScene extends Phaser.Scene {
       onResult: (yes) => {
         this.confirm = null;
         if (yes) {
-          this.request({ type: "new-game", options: newGameOptionsFromUrl() });
+          this.proceedNewGame();
         } else {
           this.menu?.activate();
         }
       }
     });
+  }
+
+  /**
+   * 新規ゲームへ進む(M25-3)。通常は難易度3択を1ステップ挟む。
+   * ?skipIntro=1(テスト専用の手順スキップ)のときは選択を飛ばし、URLの ?difficulty=
+   * (未指定なら normal)で即開始する(既存E2Eの「新規ゲーム→即探索待ち」手順を壊さない。
+   * skipIntro 無しの実プレイでは必ず3択を通る)。
+   */
+  private proceedNewGame(): void {
+    if (shouldSkipIntro()) {
+      this.request({ type: "new-game", options: newGameOptionsFromUrl() });
+      return;
+    }
+    this.openDifficultySelect();
+  }
+
+  /** 難易度3択(M25-3)。既定カーソル=ふつう。Esc でタイトルメニューへ戻る */
+  private openDifficultySelect(): void {
+    this.menu?.deactivate();
+    this.difficultyPrompt = this.add
+      .text(0, 0, "挑む夢の重さを選ぶ", {
+        color: "#d8c98f",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "18px"
+      })
+      .setOrigin(0.5);
+    this.uiLayer.add(this.difficultyPrompt);
+    this.difficultyMenu = new MenuList(this, this.uiLayer, {
+      items: DIFFICULTY_ORDER.map((id) => ({ id, label: DIFFICULTY_DISPLAY_NAMES[id] })),
+      x: 0,
+      y: 0,
+      width: 240,
+      initialIndex: DIFFICULTY_ORDER.indexOf(DEFAULT_DIFFICULTY),
+      onSelect: (id) => {
+        const parsed = difficultySchema.parse(id);
+        this.closeDifficultySelect();
+        // 選択値が正(URLの ?difficulty= より優先)。それ以外のURLフラグは従来どおり運ぶ
+        this.request({ type: "new-game", options: { ...newGameOptionsFromUrl(), difficulty: parsed } });
+      },
+      onCancel: () => {
+        this.closeDifficultySelect();
+        this.menu?.activate();
+      }
+    });
+    this.layout();
+    this.difficultyMenu.activate();
+    this.syncDomState(); // data-menu=difficulty を反映
+  }
+
+  private closeDifficultySelect(): void {
+    this.difficultyMenu?.destroy();
+    this.difficultyMenu = null;
+    this.difficultyPrompt?.destroy();
+    this.difficultyPrompt = null;
+    this.syncDomState(); // data-menu を消す
   }
 
   /** new-game / continue をサーバーへ要求し、snapshot での遷移を待つ */
@@ -284,6 +358,8 @@ export class TitleScene extends Phaser.Scene {
     this.subtitleText.setPosition(centerX, centerY - 36);
     this.statusText.setPosition(centerX, centerY + 24);
     this.menu?.setPosition(centerX - 120, centerY + 48);
+    this.difficultyPrompt?.setPosition(centerX, centerY + 24);
+    this.difficultyMenu?.setPosition(centerX - 120, centerY + 48);
     this.keyHelpText.setPosition(centerX, this.scale.height - 16);
   }
 
@@ -295,6 +371,12 @@ export class TitleScene extends Phaser.Scene {
     }
     game.dataset["scene"] = "title";
     game.dataset["hasSave"] = getGameClient().hasSave === true ? "1" : "0";
+    // E2E 用: 難易度3択の開閉(M25-3。開いていないときは前シーンの残留値ごと消す)
+    if (this.difficultyMenu !== null) {
+      game.dataset["menu"] = "difficulty";
+    } else {
+      delete game.dataset["menu"];
+    }
     delete game.dataset["mapId"];
     delete game.dataset["playerX"];
     delete game.dataset["playerY"];

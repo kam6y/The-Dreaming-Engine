@@ -1,4 +1,4 @@
-import { timeOfDaySchema } from "@dreaming-engine/shared";
+import { difficultySchema, timeOfDaySchema } from "@dreaming-engine/shared";
 import type { ClientMessage } from "@dreaming-engine/shared";
 
 type NewGameOptions = NonNullable<Extract<ClientMessage, { type: "new-game" }>["options"]>;
@@ -11,6 +11,9 @@ type ContinueOptions = NonNullable<Extract<ClientMessage, { type: "continue" }>[
  * - ?startLevel=N: 開始レベルの加速(通しプレイ E2E 用。サーバーは mock 時のみ尊重)
  * - ?startGold=N: 開始ゴールドの加速(装備購入スモーク用。サーバーは mock 時のみ尊重)
  * - ?timeOfDay=day|night: 時間帯の固定ピン(M23。夜スモーク用。サーバーは mock 時のみ尊重)
+ * - ?difficulty=easy|normal|hard: 難易度(M25)。加速チートと異なり正規のプレイヤー選択の
+ *   別入口のため live でも尊重される。?skipIntro=1 と併用時は難易度選択ステップを飛ばして
+ *   この値(未指定なら normal)で開始する(E2E の決定論再現用)
  * サーバー正本化後もフラグの入口はURLのまま維持する(既存E2Eとの互換)。
  */
 export function newGameOptionsFromUrl(): NewGameOptions {
@@ -31,12 +34,14 @@ export function newGameOptionsFromUrl(): NewGameOptions {
       ? Number(startGoldRaw)
       : undefined;
   const timeOfDayParsed = timeOfDaySchema.safeParse(params.get("timeOfDay"));
+  const difficultyParsed = difficultySchema.safeParse(params.get("difficulty"));
   return {
     ...(seed !== undefined ? { seed } : {}),
     ...(params.has("noSymbols") ? { noSymbols: true } : {}),
     ...(startLevel !== undefined ? { startLevel } : {}),
     ...(startGold !== undefined ? { startGold } : {}),
-    ...(timeOfDayParsed.success ? { timeOfDay: timeOfDayParsed.data } : {})
+    ...(timeOfDayParsed.success ? { timeOfDay: timeOfDayParsed.data } : {}),
+    ...(difficultyParsed.success ? { difficulty: difficultyParsed.data } : {})
   };
 }
 

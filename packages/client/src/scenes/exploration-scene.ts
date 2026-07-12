@@ -1710,6 +1710,8 @@ export class ExplorationScene extends Phaser.Scene {
     // E2E 用: 実績「夢の欠片」の解除数と直近解除 id(サーバーの解除順が末尾に来る。M24-3)
     game.dataset["achievementsUnlocked"] = String(view.unlockedAchievements.length);
     game.dataset["achievementLast"] = view.unlockedAchievements.at(-1) ?? "none";
+    // E2E 用: 難易度(M25-3。?difficulty= 指定・3択の決定値がサーバー正本で反映される)
+    game.dataset["difficulty"] = view.difficulty;
     delete game.dataset["battleEnemy"];
   }
 }

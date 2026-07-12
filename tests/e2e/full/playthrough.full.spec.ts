@@ -99,6 +99,11 @@ test.describe("通しプレイ(新規→ボス撃破→エンディング)", () 
     // skipIntro なし: 新規ゲームはオープニング(op-1/op-2)を経由する
     await startNewGame(page, "/?seed=42");
 
+    // 難易度3択(M25-3)=skipIntro なしの実プレイ経路は3択を通る。
+    // 既定カーソル「ふつう」をそのまま決定して進む(通しプレイの難易度は normal のまま)
+    await expect.poll(() => readAttr(page, "data-menu"), { timeout: 5_000 }).toBe("difficulty");
+    await page.keyboard.press("Enter");
+
     // 新規ゲーム要求 → snapshot 受信で title がオープニングを開始する
     await expect.poll(() => readAttr(page, "data-scene"), { timeout: 10_000 }).toBe("opening");
 
