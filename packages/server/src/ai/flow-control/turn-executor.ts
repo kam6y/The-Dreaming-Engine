@@ -7,6 +7,7 @@ import type {
   DreamMasterContext,
   DreamMasterFailureKind,
   DreamMasterResult,
+  DreamMasterRunOptions,
   DreamMasterSuccess
 } from "../dream-master/types.js";
 import { checkDisplayText } from "../output-wall.js";
@@ -94,6 +95,8 @@ export interface AiTurnResult {
   readonly model: string | null;
   /** 監査ログ用: 各ツール呼び出しと検証結果 */
   readonly toolCallRecords: readonly ToolCallRecord[];
+  /** 対話ストリーミングで未検証増分を1件以上先行転送したか(監査の streamed/retracted 用) */
+  readonly streamed?: boolean;
 }
 
 /**
@@ -129,6 +132,16 @@ type TurnOutcome =
       readonly records: readonly ToolCallRecord[];
     };
 
+/**
+ * 対話ストリーミングの受け口(セッション層が実装。オーナー指示 2026-07-12)。
+ * ターン実行器は各試行の最初のデルタ直前に onAttemptStart を呼ぶ
+ * (リトライ時に再度呼ばれる=クライアントは表示バッファをクリアして再開する)。
+ */
+export interface SpeakStreamSink {
+  onAttemptStart(): void;
+  onDelta(delta: string): void;
+}
+
 /** executeTurn の入力 */
 export interface AiTurnInput {
   /** DreamMaster 呼び出し用コンテキスト(flow を含む) */
@@ -137,6 +150,8 @@ export interface AiTurnInput {
   readonly persistent: PersistentStateContext;
   /** 会話セッション(会話・questGeneration のみ。dream/battleResult/summary は null) */
   readonly session: ConversationSession | null;
+  /** 対話ストリーミングの受け口(未指定なら従来どおり非ストリーミング) */
+  readonly speakStream?: SpeakStreamSink;
 }
 
 export interface AiTurnExecutorOptions {
@@ -283,17 +298,39 @@ export class AiTurnExecutor {
     // 成功したが表示系0件、は display_approved_zero で確定し3回目を呼ばない: サブスク枠保護)。
     // 表示系0件の初回試行は副作用(検証カウンタ・失敗カウント・セッションcommit)を確定させず、
     // リトライは新しい turnState で再検証する(初回の副作用が漏れて二重適用にならない)。
+    // 対話ストリーミング(オーナー指示 2026-07-12)。sink 未指定なら runOptions は undefined
+    // のままで従来どおり(Live/Mock とも onSpeakDelta を渡さない呼び出しと等価)。
+    // 各試行の最初の未検証デルタ直前に onAttemptStart を呼ぶ(リトライで再度呼ばれ得る=
+    // クライアントは表示バッファをクリアして再開する)。空デルタは転送しない。
+    let streamed = false;
+    const sink = input.speakStream;
     for (let attempt = 0; attempt <= RETRY_LIMIT_PER_TRIGGER; attempt += 1) {
-      const invoked = await this.invokeWithLimit(input.dmContext);
+      let attemptStarted = false;
+      const runOptions: DreamMasterRunOptions | undefined =
+        sink === undefined
+          ? undefined
+          : {
+              onSpeakDelta: (delta): void => {
+                if (delta.length === 0) return;
+                if (!attemptStarted) {
+                  attemptStarted = true;
+                  sink.onAttemptStart();
+                }
+                streamed = true;
+                sink.onDelta(delta);
+              }
+            };
+      const invoked = await this.invokeWithLimit(input.dmContext, runOptions);
       if (invoked.blocked) {
         // セッション総数上限で遮断(AIを呼ばないブロック=失敗に数えない)。
         // 初回(attempt=0)はまだ1度も呼んでいない。リトライ(attempt>0)は初回で呼んでいる
-        return this.fallbackResult(flow, {
+        const blockedResult = this.fallbackResult(flow, {
           failedTurn: false,
           failureKind: null,
           degradationActivated: invoked.justActivated ? "session_limit" : null,
           aiInvoked: attempt > 0
         });
+        return streamed ? { ...blockedResult, streamed: true } : blockedResult;
       }
       const outcome = this.evaluateResult(flow, input, invoked.result);
       const retryable = outcome.kind === "dm_failure" || outcome.kind === "display_zero";
@@ -301,7 +338,8 @@ export class AiTurnExecutor {
         // 副作用を確定させず次の試行へ(検証カウンタ・失敗カウント・セッションcommitは未確定)
         continue;
       }
-      const result = this.finalizeOutcome(flow, outcome);
+      const finalized = this.finalizeOutcome(flow, outcome);
+      const result = streamed ? { ...finalized, streamed: true } : finalized;
       // メモ化キャッシュ(DreamMaster.run 直後の格納)。**状態変更 effect を1件も含まない
       // 成功ターン**(フォールバック/縮退/却下でない・出力壁通過済み)だけを記憶する。
       if (cacheKey !== null) this.maybeStoreTurn(cacheKey, result);
@@ -404,7 +442,8 @@ export class AiTurnExecutor {
   // -------------------------------------------------------------------------
 
   private async invokeWithLimit(
-    ctx: DreamMasterContext
+    ctx: DreamMasterContext,
+    runOptions?: DreamMasterRunOptions
   ): Promise<
     | { readonly blocked: true; readonly justActivated: boolean }
     | { readonly blocked: false; readonly result: DreamMasterResult }
@@ -416,7 +455,7 @@ export class AiTurnExecutor {
     }
     // 呼ぶ前にカウンタ +1(AI_MODE 非依存。モックでも数える)
     this.sessionCallCount += 1;
-    const result = await this.dreamMaster.run(ctx);
+    const result = await this.dreamMaster.run(ctx, runOptions);
     return { blocked: false, result };
   }
 

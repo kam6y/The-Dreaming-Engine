@@ -19,7 +19,8 @@ import type {
 import {
   AiTurnExecutor,
   ConversationSession,
-  type AiTurnInput
+  type AiTurnInput,
+  type SpeakStreamSink
 } from "../src/ai/flow-control/index.js";
 import type { PersistentStateContext, ToolFlow } from "../src/ai/tool-validation/index.js";
 
@@ -500,5 +501,149 @@ describe("AiTurnExecutor セッション総数上限", () => {
     // 通常縮退の解除ではセッション上限縮退は解けない
     expect(executor.clearNormalDegradation()).toBe(false);
     expect(executor.isSessionLimitDegraded()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 対話ストリーミングの sink 配線(オーナー指示 2026-07-12)
+// ---------------------------------------------------------------------------
+
+describe("対話ストリーミングの sink 配線(オーナー指示 2026-07-12)", () => {
+  /** run 時に onSpeakDelta へ chunks を発火してから結果を返す偽 DreamMaster */
+  function streamingDm(chunks: string[], results: DreamMasterResult[]): DreamMaster {
+    let call = 0;
+    return {
+      mode: "mock",
+      run: async (_ctx, options) => {
+        for (const chunk of chunks) {
+          await Promise.resolve();
+          options?.onSpeakDelta?.(chunk);
+        }
+        const result = results[Math.min(call, results.length - 1)]!;
+        call += 1;
+        return result;
+      }
+    };
+  }
+
+  function sinkRecorder(): { sink: SpeakStreamSink; starts: number; deltas: string[] } {
+    const rec = { starts: 0, deltas: [] as string[] } as { sink: SpeakStreamSink; starts: number; deltas: string[] };
+    rec.sink = {
+      onAttemptStart: () => {
+        rec.starts += 1;
+      },
+      onDelta: (d) => {
+        rec.deltas.push(d);
+      }
+    };
+    return rec;
+  }
+
+  /** 会話フローの speak 成功結果(既存 speakSuccess ヘルパーの流儀に合わせる) */
+  function okConversationResult(text: string): DreamMasterResult {
+    return speakSuccess("conversation", text);
+  }
+
+  it("成功ターン: onAttemptStart 1回→デルタ転送、result.streamed=true", async () => {
+    const ok = okConversationResult('「ようこそ」');
+    const executor = newExecutor(streamingDm(["「よう", "こそ」"], [ok]));
+    const rec = sinkRecorder();
+    const result = await executor.executeTurn({ ...conversationInput("innkeeper"), speakStream: rec.sink });
+    expect(rec.starts).toBe(1);
+    expect(rec.deltas.join("")).toBe("「ようこそ」");
+    expect(result.streamed).toBe(true);
+    expect(result.usedFallback).toBe(false);
+  });
+
+  it("リトライ: 各試行の最初のデルタで onAttemptStart が呼び直される(計2回)", async () => {
+    const fail: DreamMasterResult = { ok: false, flow: "conversation", failure: "api_error", meta: META };
+    const ok = okConversationResult('「ようこそ」');
+    const executor = newExecutor(streamingDm(["半端"], [fail, ok]));
+    const rec = sinkRecorder();
+    const result = await executor.executeTurn({ ...conversationInput("innkeeper"), speakStream: rec.sink });
+    expect(rec.starts).toBe(2);
+    expect(result.streamed).toBe(true);
+  });
+
+  it("ストリーム後に出力壁却下(display_zero 確定)→ usedFallback=true かつ streamed=true", async () => {
+    const bad = okConversationResult("As an AI language model, I cannot."); // 出力壁で却下される speak
+    const executor = newExecutor(streamingDm(["As an AI"], [bad, bad]));
+    const rec = sinkRecorder();
+    const result = await executor.executeTurn({ ...conversationInput("innkeeper"), speakStream: rec.sink });
+    expect(result.usedFallback).toBe(true);
+    expect(result.failureKind).toBe("display_approved_zero");
+    expect(result.streamed).toBe(true);
+  });
+
+  it("空デルタは転送しない・sink 未指定でも従来どおり動く", async () => {
+    const ok = okConversationResult('「ようこそ」');
+    const executor = newExecutor(streamingDm(["", "「ようこそ」"], [ok]));
+    const rec = sinkRecorder();
+    const result = await executor.executeTurn({ ...conversationInput("innkeeper"), speakStream: rec.sink });
+    expect(rec.deltas).toEqual(['「ようこそ」']);
+    expect(result.streamed).toBe(true);
+    // sink 未指定
+    const executor2 = newExecutor(streamingDm([], [ok]));
+    const result2 = await executor2.executeTurn(conversationInput("innkeeper"));
+    expect(result2.streamed).not.toBe(true);
+  });
+
+  it("キャッシュヒット・縮退中は sink に触れない", async () => {
+    // キャッシュヒット: 戦果描写を先に記憶させ、2回目のヒットで sink に触れないことを確認
+    // (ai-turn-cache.test.ts のキャッシュ統合テストの構築流儀を流用)。
+    // run 自体は options?.onSpeakDelta があれば必ず発火させる(sink が本当に「run が
+    // 呼ばれない」ことで守られているかを検証する。DM がデルタを出さないだけで
+    // starts=0 になる偽陰性テストにしない)。
+    const battleDm: DreamMaster = {
+      mode: "mock",
+      run: async (ctx, options) => {
+        options?.onSpeakDelta?.("霧狼は灰色の霧へと崩れ落ちた。");
+        return {
+          ok: true,
+          flow: ctx.flow,
+          toolCalls: [{ toolName: "narrate", rawInput: { text: "霧狼は灰色の霧へと崩れ落ちた。" } }],
+          text: null,
+          meta: META
+        };
+      }
+    };
+    const cacheExecutor = newExecutor(battleDm);
+    const battleTurnInput: AiTurnInput = {
+      dmContext: { flow: "battleResult", enemyId: "mist-wolf" },
+      persistent: persistentBase(),
+      session: null
+    };
+    const first = await cacheExecutor.executeTurn(battleTurnInput);
+    expect(first.aiInvoked).toBe(true);
+
+    const cacheRec = sinkRecorder();
+    const hit = await cacheExecutor.executeTurn({ ...battleTurnInput, speakStream: cacheRec.sink });
+    expect(hit.cacheHit).toBe(true);
+    expect(cacheRec.starts).toBe(0);
+    expect(cacheRec.deltas).toEqual([]);
+
+    // 縮退: 3連続失敗させてから sink を渡しても発火しない(既存の縮退テストの構築流儀を流用)。
+    // こちらも run が呼ばれれば必ずデルタを出す偽DreamMasterにする
+    const failDm: DreamMaster = {
+      mode: "mock",
+      run: async (ctx, options) => {
+        options?.onSpeakDelta?.("半端");
+        return { ok: false, flow: ctx.flow, failure: "api_error", meta: META };
+      }
+    };
+    const degradeExecutor = newExecutor(failDm);
+    for (let i = 0; i < 3; i += 1) {
+      await degradeExecutor.executeTurn(conversationInput("innkeeper"));
+    }
+    expect(degradeExecutor.isNormalDegraded()).toBe(true);
+
+    const degradeRec = sinkRecorder();
+    const degraded = await degradeExecutor.executeTurn({
+      ...conversationInput("innkeeper"),
+      speakStream: degradeRec.sink
+    });
+    expect(degraded.usedFallback).toBe(true);
+    expect(degradeRec.starts).toBe(0);
+    expect(degradeRec.deltas).toEqual([]);
   });
 });
