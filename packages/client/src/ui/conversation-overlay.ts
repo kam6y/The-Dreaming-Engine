@@ -112,6 +112,12 @@ export class ConversationOverlay {
   /** 送信後、NPC の応答(ai-utterance)を待っている間は再送・メニューを止める */
   private awaiting = false;
 
+  /**
+   * 対話ストリーミングの増分バッファ(未検証テキスト。オーナー指示 2026-07-12)。
+   * null=ストリーム非進行。playUtterance(最終正文)が届くとクリアされ、setImmediately で置換される
+   */
+  private streamBuffer: string | null = null;
+
   private destroyed = false;
 
   public constructor(
@@ -223,6 +229,28 @@ export class ConversationOverlay {
   }
 
   /**
+   * 対話ストリーミングの開始(ai-stream-start。オーナー指示 2026-07-12)。
+   * 表示中のバッファをクリアし、応答待ちのまま増分表示モードへ入る
+   * (リトライ時は再度呼ばれ「消えて再開」になる)。表示されるのは未検証テキストであり、
+   * 最終正文(検証済み全文/定型文)は playUtterance が必ず置換する。
+   */
+  public beginStream(): void {
+    if (this.destroyed) return;
+    this.awaiting = true;
+    this.hintText.setText("");
+    this.streamBuffer = "";
+    this.utterance.setImmediately("");
+  }
+
+  /** ストリーム増分の追記表示(ai-stream-delta)。start 前に届いたら begin から始める */
+  public appendStream(delta: string): void {
+    if (this.destroyed) return;
+    if (this.streamBuffer === null) this.beginStream();
+    this.streamBuffer = (this.streamBuffer ?? "") + delta;
+    this.utterance.setImmediately(this.streamBuffer);
+  }
+
+  /**
    * 検証済み NPC 発話を再生する(scene が ai-utterance(speak)受信時に呼ぶ)。
    * 応答待ちを解除し、メニューを組み直す(受諾/辞退の可否が変わり得るため)。
    */
@@ -232,12 +260,14 @@ export class ConversationOverlay {
     }
     this.awaiting = false;
     this.hintText.setText("");
-    this.utterance.play(text);
-    // 応答が届いたのでアクションメニューを組み直す(受諾/辞退の可否が変わり得る。
-    // 直前の snapshot refresh で this.interaction は更新済み)
-    if (this.input === null) {
-      this.rebuildMenu();
+    if (this.streamBuffer !== null) {
+      // ストリーム済み: 最終正文(検証済み全文または定型文)で即置換(タイプライター不使用)
+      this.streamBuffer = null;
+      this.utterance.setImmediately(text);
+    } else {
+      this.utterance.play(text);
     }
+    if (this.input === null) this.rebuildMenu();
   }
 
   /** interaction / snapshot 更新の反映(options・提案の変化) */

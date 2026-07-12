@@ -177,6 +177,13 @@ export class ExplorationScene extends Phaser.Scene {
    */
   private stashedSpeak: string | null = null;
 
+  /**
+   * 対話ストリームの受信バッファ(オーナー指示 2026-07-12)。overlay 未生成の間も受け、
+   * overlay 生成時に流し込む(stashedSpeak と同じ到着順非依存の流儀)。
+   * null=ストリーム非進行。ai-utterance(最終正文)受信でクリアする。
+   */
+  private streamingSpeak: string | null = null;
+
   /** 夢シーン演出のオーバーレイ(宿泊後・表示中) */
   private dreamOverlay: DreamOverlay | null = null;
 
@@ -295,6 +302,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.inventoryOverlay = null;
     this.conversationOverlay = null;
     this.stashedSpeak = null;
+    this.streamingSpeak = null;
     this.dreamOverlay = null;
     this.pendingDream = null;
     this.pendingSleep = false;
@@ -350,6 +358,17 @@ export class ExplorationScene extends Phaser.Scene {
       }),
       client.on("ai-utterance", (utterance) => {
         this.handleAiUtterance(utterance);
+      }),
+      // 対話ストリーミング(オーナー指示 2026-07-12): 未検証テキストの増分表示。
+      // 最終正文(ai-utterance)が届くと必ず置換される
+      client.on("ai-stream-start", () => {
+        this.streamingSpeak = "";
+        this.conversationOverlay?.beginStream();
+      }),
+      client.on("ai-stream-delta", (delta) => {
+        if (this.streamingSpeak === null) this.streamingSpeak = "";
+        this.streamingSpeak += delta.text;
+        this.conversationOverlay?.appendStream(delta.text);
       }),
       // 宿泊の入眠合図(M26-3)。夢の顕現(narrate)まで入眠演出で待つ
       client.on("sleep-start", () => {
@@ -682,6 +701,11 @@ export class ExplorationScene extends Phaser.Scene {
         this.client.send({ type: "conversation-end" });
       }
     });
+    if (this.streamingSpeak !== null && this.stashedSpeak === null) {
+      // 進行中ストリームを新しい overlay へ流し込む(最終正文が届けば置換される)
+      this.conversationOverlay.beginStream();
+      if (this.streamingSpeak.length > 0) this.conversationOverlay.appendStream(this.streamingSpeak);
+    }
     // overlay 生成前に届いていた挨拶(stash)があれば流し込む
     if (this.stashedSpeak !== null) {
       const text = this.stashedSpeak;
@@ -695,6 +719,7 @@ export class ExplorationScene extends Phaser.Scene {
     this.conversationOverlay?.destroy();
     this.conversationOverlay = null;
     this.stashedSpeak = null;
+    this.streamingSpeak = null;
   }
 
   /** 夢シーン overlay を開く(宿泊後・先行ダイアログ表示後に update から呼ぶ) */
@@ -980,6 +1005,7 @@ export class ExplorationScene extends Phaser.Scene {
    */
   private handleAiUtterance(utterance: AiUtteranceEvent): void {
     if (utterance.channel === "speak") {
+      this.streamingSpeak = null; // 最終正文到着=ストリーム終了
       if (this.conversationOverlay !== null) {
         this.conversationOverlay.playUtterance(utterance.text);
       } else {
