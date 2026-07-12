@@ -541,3 +541,43 @@ describe("MockDreamMaster 悪意モード", () => {
     expect(dispatched.ok).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MockDreamMaster の対話ストリーミング: onSpeakDelta 指定時、対話2フローで
+// speak テキストを決定論の2チャンクで発火してから解決する(オーナー指示 2026-07-12)
+// ---------------------------------------------------------------------------
+
+describe("MockDreamMaster の対話ストリーミング(オーナー指示 2026-07-12)", () => {
+  it("conversation で speak テキストを2チャンクで発火し、連結が全文に一致する", async () => {
+    const dm = new MockDreamMaster(config);
+    const got: string[] = [];
+    const result = await dm.run(
+      { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "" },
+      { onSpeakDelta: (d) => got.push(d) }
+    );
+    expect(result.ok).toBe(true);
+    expect(got.length).toBe(2);
+    if (result.ok) {
+      const speak = result.toolCalls.find((tc) => tc.toolName === "speak");
+      expect(got.join("")).toBe((speak?.rawInput as { text: string }).text);
+    }
+  });
+
+  it("battleResult / dream / summary では発火しない", async () => {
+    const dm = new MockDreamMaster(config);
+    const got: string[] = [];
+    await dm.run({ flow: "battleResult", enemyId: "mist-wolf" }, { onSpeakDelta: (d) => got.push(d) });
+    await dm.run({ flow: "dream", recentPlay: "静かな一日" }, { onSpeakDelta: (d) => got.push(d) });
+    expect(got).toEqual([]);
+  });
+
+  it("悪意モードの conversation(speak なし)では発火しない", async () => {
+    const dm = new MockDreamMaster(config, { malicious: true });
+    const got: string[] = [];
+    await dm.run(
+      { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "" },
+      { onSpeakDelta: (d) => got.push(d) }
+    );
+    expect(got).toEqual([]);
+  });
+});

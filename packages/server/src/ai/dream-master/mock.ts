@@ -6,6 +6,7 @@ import type {
   DreamMaster,
   DreamMasterContext,
   DreamMasterResult,
+  DreamMasterRunOptions,
   RawToolCall
 } from "./types.js";
 
@@ -432,19 +433,53 @@ export class MockDreamMaster implements DreamMaster {
     this.malicious = options.malicious ?? false;
   }
 
-  // options(signal 等)は Mock では使わない(実計測不要)。インターフェース整合のため受け取る。
-  run(context: DreamMasterContext): Promise<DreamMasterResult> {
+  // options.signal は Mock では使わない(実計測不要)。onSpeakDelta は対話2フローで使う。
+  public run(
+    context: DreamMasterContext,
+    options?: DreamMasterRunOptions
+  ): Promise<DreamMasterResult> {
     const spec = resolveFlowSpec(context.flow, this.config);
     const built = this.malicious
       ? buildMaliciousToolCalls(context)
       : buildNormalToolCalls(context);
-    const result: DreamMasterResult = {
+    return this.emitDeltasAndResolve(context, built, spec.model, options);
+  }
+
+  /**
+   * 対話2フロー(conversation/questGeneration)で onSpeakDelta があれば、speak テキストを
+   * 決定論の2チャンク(前半+後半)で発火してから解決する(対話ストリーミングのモック。
+   * オーナー指示 2026-07-12)。各チャンクの前に必ず `await Promise.resolve()` を挟み、
+   * 呼び出し元の同期継続(interaction 構築等)より後に届く順序を保つ(Live と同じ非同期性)。
+   */
+  private async emitDeltasAndResolve(
+    context: DreamMasterContext,
+    built: { toolCalls: RawToolCall[]; text: string | null },
+    model: string,
+    options?: DreamMasterRunOptions
+  ): Promise<DreamMasterResult> {
+    const onDelta = options?.onSpeakDelta;
+    if (
+      onDelta !== undefined &&
+      (context.flow === "conversation" || context.flow === "questGeneration")
+    ) {
+      for (const tc of built.toolCalls) {
+        if (tc.toolName !== "speak") continue;
+        const text = (tc.rawInput as { text?: unknown }).text;
+        if (typeof text !== "string" || text.length === 0) continue;
+        const chars = Array.from(text);
+        const mid = Math.ceil(chars.length / 2);
+        await Promise.resolve();
+        onDelta(chars.slice(0, mid).join(""));
+        await Promise.resolve();
+        onDelta(chars.slice(mid).join(""));
+      }
+    }
+    return {
       ok: true,
       flow: context.flow,
       toolCalls: built.toolCalls,
       text: built.text,
-      meta: { mode: this.mode, model: spec.model }
+      meta: { mode: this.mode, model }
     };
-    return Promise.resolve(result);
   }
 }
