@@ -82,6 +82,11 @@ SDK 0.3.200 の型定義で対応を確認済み。
 - 表示の最終状態は常に `stream-end`(検証済み全文)または `stream-abort`(定型文)、
   もしくは通常 `dialog`(ストリーム未発生時)=未検証テキストが画面に**残存**することはない。
 
+> **実装注記(計画時の精緻化)**: `dialog-stream-end` / `dialog-stream-abort` は新設せず、
+> **既存の `ai-utterance` が end/abort を兼ねる**(成功=検証済み全文/失敗=定型文で置換)。
+> メッセージ名は既存の `ai-utterance` 系に合わせ `ai-stream-start` / `ai-stream-delta` とする。
+> 置換・撤回・残存しない、の意味論は本設計のとおり。
+
 ### 3.3 ターン意味論(turn-executor)は不変
 
 - リトライ1回・表示系承認0件(`display_zero`)判定・オール・オア・ナッシング・
