@@ -77,7 +77,7 @@ const OBJECT_COLORS: Record<string, number> = {
   gather: 0x6fa06b
 };
 
-/** 敵シンボルのプレースホルダーカラー(敵種別。グラフィックはM5) */
+/** 敵マーカーのプレースホルダーカラー(雑魚シンボルは非描画のため、現在は中ボス描画のフォールバックのみで使用) */
 const SYMBOL_COLORS: Record<EnemyId, number> = {
   "mist-wolf": 0x9aa7b8,
   "candle-eater": 0xc9a25c,
@@ -97,6 +97,8 @@ type ConversationInteraction = Extract<ActiveInteraction, { kind: "conversation"
  * - 移動・調べる等の操作は GameClient でサーバーへ送り、snapshot を受けて描画を更新する
  * - マップ遷移・戦闘開始も snapshot(mapId 変化 / mode==="battle")で検知する
  * - dialog はグローバルキュー(dialog-queue)から表示可能なタイミングで順に表示する
+ * - 雑魚の敵シンボルは描画しない(2026-07-12 オーナー指示の透明化)。サーバー側には
+ *   存在・徘徊しており、接触すると従来どおり戦闘が始まる(ボス・中ボスは描画する)
  * 描画そのもの(タイル・NPC・シンボル)はプレースホルダーのまま(M5で差し替え)。
  */
 export class ExplorationScene extends Phaser.Scene {
@@ -251,11 +253,6 @@ export class ExplorationScene extends Phaser.Scene {
   /** 第2章: 導管の脈動演出を適用済みか(1シーン1回。M18-3) */
   private conduitPulseApplied = false;
 
-  private symbolViews: Phaser.GameObjects.GameObject[] = [];
-
-  /** 描画済みシンボルのキー(差分がある時だけ再描画する) */
-  private symbolsKey = "";
-
   private hudStatusText!: Phaser.GameObjects.Text;
 
   /** 操作キーの常設ヒント(右下。M15-2: 操作説明の不在への対処) */
@@ -314,8 +311,6 @@ export class ExplorationScene extends Phaser.Scene {
     this.nightOverlay = null;
     this.renderedTimeOfDay = snapshot.timeOfDay;
     this.objectViews.clear();
-    this.symbolViews = [];
-    this.symbolsKey = "";
     this.conduitPulseApplied = false;
 
     this.cameras.main.setBackgroundColor("#0b0d12");
@@ -329,7 +324,6 @@ export class ExplorationScene extends Phaser.Scene {
     this.drawNpcs();
     this.drawBoss();
     this.drawMidBoss();
-    this.updateEnemySymbols();
     this.updateResolvedObjects();
     this.updateConduitPulse();
     this.createPlayer();
@@ -559,7 +553,6 @@ export class ExplorationScene extends Phaser.Scene {
     if (!samePosition(view.location.position, this.renderedPosition)) {
       this.tweenPlayerTo(view.location.position);
     }
-    this.updateEnemySymbols();
     this.updateResolvedObjects();
     this.updateConduitPulse();
     this.updateCompanion();
@@ -1483,41 +1476,6 @@ export class ExplorationScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
     );
-  }
-
-  /** snapshot の敵シンボルを描画へ反映する(差分がある時だけ再構築) */
-  private updateEnemySymbols(): void {
-    const key = this.snapshot.symbols
-      .map((s) => `${s.enemyId}@${s.position.x},${s.position.y}:${s.facing}`)
-      .join("|");
-    if (key === this.symbolsKey) {
-      return;
-    }
-    this.symbolsKey = key;
-    this.symbolViews.forEach((view) => {
-      view.destroy();
-    });
-    this.symbolViews = [];
-    for (const symbol of this.snapshot.symbols) {
-      const { x, y } = this.tileCenter(symbol.position);
-      // 敵シンボルのスプライト(symbol-<enemyId>。M13-3)。未整備なら従来の菱形。
-      // 向きはサーバーが湧き時に決めたランダム4方向(M17)の差分テクスチャで表現
-      const view: Phaser.GameObjects.GameObject & { scale: number } =
-        this.mapSprite(this.directionalTextureId(`symbol-${symbol.enemyId}`, symbol.facing), x, y, 34) ??
-        this.add
-          .polygon(x, y, [0, -12, 12, 0, 0, 12, -12, 0], SYMBOL_COLORS[symbol.enemyId])
-          .setStrokeStyle(2, 0x0b0d12);
-      this.tweens.add({
-        targets: view,
-        scale: view.scale * 1.15,
-        duration: 900,
-        yoyo: true,
-        repeat: -1,
-        ease: "Sine.easeInOut"
-      });
-      this.worldLayer.add(view);
-      this.symbolViews.push(view);
-    }
   }
 
   private createPlayer(): void {
