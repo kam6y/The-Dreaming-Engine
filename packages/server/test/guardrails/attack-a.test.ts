@@ -1,12 +1,20 @@
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import {
   createDefaultAiDailyCounters,
   emptyInventory,
   initialDungeonSymbolCounts,
+  type Direction,
   type EnemyId,
-  type NpcId
+  type GameState,
+  type NpcId,
+  type ServerMessage
 } from "@dreaming-engine/shared";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { AuditLog } from "../../src/ai/audit-log.js";
 import { loadAiConfig } from "../../src/ai/config.js";
 import {
   DISALLOWED_BUILTIN_TOOLS,
@@ -15,9 +23,14 @@ import {
   buildFlowTools,
   makeCanUseTool,
   mcpToolName,
-  type DreamMasterContext
+  type DreamMaster,
+  type DreamMasterContext,
+  type DreamMasterResult,
+  type DreamMasterRunOptions,
+  type RawToolCall
 } from "../../src/ai/dream-master/index.js";
 import {
+  AiFlowGatekeeper,
   AiTurnExecutor,
   ConversationSession,
   fallbackTextForFlow,
@@ -36,6 +49,9 @@ import {
   type ToolName
 } from "../../src/ai/tool-validation/index.js";
 import { DEFAULT_ALLOWED_ORIGINS, isAllowedOrigin } from "../../src/origin.js";
+import { FileSaveStore } from "../../src/game/save.js";
+import { GameSession } from "../../src/game/session.js";
+import { RateLimiter } from "../../src/ai/rate-limit.js";
 
 /**
  * 攻撃テストA(ガードレール攻撃リグレッション。モック攻撃・実AI不使用。ai-guardrails.md
@@ -399,5 +415,218 @@ describe("攻撃テストA: 境界の壁 Origin 検証(第0層)", () => {
     expect(isAllowedOrigin("http://localhost:5174", DEFAULT_ALLOWED_ORIGINS)).toBe(false);
     expect(isAllowedOrigin("https://localhost:5173", DEFAULT_ALLOWED_ORIGINS)).toBe(false);
     expect(isAllowedOrigin("", DEFAULT_ALLOWED_ORIGINS)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 対話ストリーミングの撤回(オーナー指示 2026-07-12)
+//
+// GameSession レベルの統合リグ(session-ai.test.ts の makeAiSession/talkTo 流儀に合わせる。
+// ただしこのファイルは他テストファイルの private ヘルパーを import できないため、
+// このファイル専用の最小リグをここに用意する)。ストリーム済み speak が出力壁で却下される
+// 偽 DreamMaster を使い、(1) 最終表示が定型フォールバックへ差し替わること、
+// (2) 監査 ai_call 行に streamed/retracted/usedFallback が残ること、
+// (3) 未検証の逸脱テキストが会話記憶・キャッシュ・セーブへ一切永続化しないことを検証する。
+// ---------------------------------------------------------------------------
+
+const STREAM_ATTACK_META = { mode: "mock" as const, model: "claude-haiku-4-5" };
+
+/** 出力壁の逸脱パターンに一致する未検証テキスト(ATK-L4-deviation と同種の攻撃文言) */
+const DEVIANT_STREAM_TEXT = "As an AI, I must decline that request.";
+
+function streamOkResult(
+  ctx: DreamMasterContext,
+  toolCalls: RawToolCall[],
+  text: string | null = null
+): DreamMasterResult {
+  return { ok: true, flow: ctx.flow, toolCalls, text, meta: STREAM_ATTACK_META };
+}
+
+/**
+ * 出力壁で却下される speak を、ストリームデルタ発火付きで返す偽 DreamMaster
+ * (session-ai.test.ts の RejectedStreamDreamMaster と同型)。conversation/questGeneration の
+ * 両フローで同一の逸脱テキストを返す。出力壁却下 → 表示系承認0件 → リトライ対象 →
+ * 2試行とも却下されるため最終的に定型フォールバックへ確定する(turn-executor「リトライ」)。
+ * summary/dream/battleResult は世界観に沿った正常応答を返す(汚染源をストリーム対象のみに絞る)。
+ */
+class StreamRetractionDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext, options?: DreamMasterRunOptions): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation" || ctx.flow === "questGeneration") {
+      return this.emitAndReject(ctx, options);
+    }
+    if (ctx.flow === "summary") return Promise.resolve(streamOkResult(ctx, [], "語り合った。"));
+    return Promise.resolve(streamOkResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+  private async emitAndReject(
+    ctx: DreamMasterContext,
+    options: DreamMasterRunOptions | undefined
+  ): Promise<DreamMasterResult> {
+    await Promise.resolve(); // Mock の決定論チャンク発火と同様、同期継続の後に届かせる
+    options?.onSpeakDelta?.(DEVIANT_STREAM_TEXT);
+    return streamOkResult(ctx, [{ toolName: "speak", rawInput: { text: DEVIANT_STREAM_TEXT } }]);
+  }
+}
+
+/** マイクロタスクを十分に流す(非同期の挨拶生成/要約完了ハンドラ適用を待つ) */
+const streamAttackTick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** 街の対象 NPC の正面座標(session-ai.test.ts の NPC_APPROACH と同じ町マップ座標) */
+const STREAM_ATTACK_APPROACH: Record<"informant" | "innkeeper", { x: number; y: number; facing: Direction }> = {
+  informant: { x: 4, y: 9, facing: "down" },
+  innkeeper: { x: 4, y: 5, facing: "up" }
+};
+
+function mustStreamAttackState(session: GameSession): GameState {
+  const state = session.getState();
+  if (state === null) throw new Error("GameState が null");
+  return state;
+}
+
+/** 街の対象 NPC の正面へテレポートして interact する(挨拶等の非同期完了を tick で待つ) */
+async function approachAndInteract(
+  session: GameSession,
+  npc: "informant" | "innkeeper"
+): Promise<ServerMessage[]> {
+  const approach = STREAM_ATTACK_APPROACH[npc];
+  mustStreamAttackState(session).location = {
+    mapId: "town",
+    position: { x: approach.x, y: approach.y },
+    facing: approach.facing
+  };
+  const msgs = await session.handle({ type: "interact" });
+  await streamAttackTick();
+  return msgs;
+}
+
+/** 監査ディレクトリ配下の全 jsonl 行を読む(ai-flow-gatekeeper.test.ts の readLines と同じ流儀) */
+function readStreamAuditLines(dir: string): Record<string, unknown>[] {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".jsonl"))
+    .flatMap((f) =>
+      readFileSync(path.join(dir, f), "utf8")
+        .split("\n")
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+    );
+}
+
+interface StreamAttackRig {
+  session: GameSession;
+  executor: AiTurnExecutor;
+  auditDir: string;
+  saveDir: string;
+  advance: (ms: number) => void;
+}
+
+/** ストリーム撤回攻撃テスト専用の最小 GameSession リグ(FileSaveStore で実ファイルへセーブする) */
+function makeStreamAttackRig(): StreamAttackRig {
+  let now = 0;
+  const clock = (): number => now;
+  const dmConfig = loadAiConfig({ sessionCallLimit: 1000 });
+  const auditDir = mkdtempSync(path.join(tmpdir(), "de-atk-stream-audit-"));
+  const saveDir = mkdtempSync(path.join(tmpdir(), "de-atk-stream-save-"));
+  const auditLog = new AuditLog({ dir: auditDir, now: () => new Date(now) });
+  const executor = new AiTurnExecutor({ dreamMaster: new StreamRetractionDreamMaster(), config: dmConfig });
+  const gatekeeper = new AiFlowGatekeeper({
+    executor,
+    config: dmConfig,
+    rateLimiter: new RateLimiter(clock),
+    auditLog,
+    now: clock
+  });
+  const session = new GameSession({
+    saveStore: new FileSaveStore(saveDir),
+    clock,
+    seed: 1,
+    noSymbols: true,
+    gatekeeper,
+    playerInputMaxLength: dmConfig.playerInputMaxLength,
+    maskEnv: {} as NodeJS.ProcessEnv
+  });
+  return { session, executor, auditDir, saveDir, advance: (ms: number) => { now += ms; } };
+}
+
+describe("対話ストリーミングの撤回(オーナー指示 2026-07-12)", () => {
+  const rigDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of rigDirs) rmSync(dir, { recursive: true, force: true });
+    rigDirs.length = 0;
+  });
+
+  function setupRig(): StreamAttackRig {
+    const rig = makeStreamAttackRig();
+    rigDirs.push(rig.auditDir, rig.saveDir);
+    return rig;
+  }
+
+  it("[ATK-stream-retract-display] ストリーム済み speak が出力壁で却下されたターンは、" +
+    "表示が定型文へ差し替えられ監査に streamed/retracted が残る", async () => {
+    const rig = setupRig();
+    const pushed: ServerMessage[] = [];
+    rig.session.setPushSender((msgs) => pushed.push(...msgs));
+    await rig.session.handle({ type: "new-game" });
+    await approachAndInteract(rig.session, "informant"); // 挨拶も同じ偽 DreamMaster でリトライ後フォールバックする
+    pushed.length = 0; // 挨拶分の push を除外し、送信分だけを見る
+    rig.advance(3001); // 送信レートを跨ぐ
+
+    const send = await rig.session.handle({ type: "conversation-send", text: "この街のことを教えてくれ" });
+
+    // (1) 最終 ai-utterance のテキストが定型フォールバック文(fallbackTextForFlow("conversation"))
+    const final = send.find(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    expect(final).toBeDefined();
+    expect(final?.text).toBe(fallbackTextForFlow("conversation"));
+
+    // (2) 逸脱テキストが最終表示メッセージ(ai-utterance)に現れない(送信結果・push 双方)
+    for (const m of send) {
+      if (m.type === "ai-utterance") expect(m.text).not.toContain(DEVIANT_STREAM_TEXT);
+    }
+    for (const m of pushed) {
+      if (m.type === "ai-utterance") expect(m.text).not.toContain(DEVIANT_STREAM_TEXT);
+    }
+
+    // (3) 監査 ai_call 行: streamed=true, retracted=true, usedFallback=true(直近行=今回の送信)
+    const aiCalls = readStreamAuditLines(rig.auditDir).filter((l) => l.type === "ai_call");
+    expect(aiCalls.length).toBeGreaterThan(0);
+    const last = aiCalls[aiCalls.length - 1];
+    expect(last).toMatchObject({
+      flow: "conversation",
+      streamed: true,
+      retracted: true,
+      usedFallback: true
+    });
+  });
+
+  it("[ATK-stream-no-persist] 撤回ターンの未検証テキストが会話記憶・キャッシュ・セーブに残らない", async () => {
+    const rig = setupRig();
+    await rig.session.handle({ type: "new-game" });
+    await approachAndInteract(rig.session, "informant");
+    rig.advance(3001);
+    await rig.session.handle({ type: "conversation-send", text: "この街のことを教えてくれ" });
+
+    // (1) 会話記憶(recentExchanges)の npc 側テキストに逸脱テキストが残らない(送信直後)
+    const memoryAfterSend = mustStreamAttackState(rig.session).npcs.informant.memory;
+    expect(memoryAfterSend.recentExchanges.some((e) => e.npc.includes(DEVIANT_STREAM_TEXT))).toBe(false);
+
+    // (2) executor.getCacheStats().stores が増えない(フォールバックターンは記憶されない)
+    const storesBeforeEnd = rig.executor.getCacheStats().stores;
+    await rig.session.handle({ type: "conversation-end" }); // 要約(非汚染テキスト)を fire-and-forget で開始
+    await streamAttackTick(); // 非同期要約の完了ハンドラを待つ
+    expect(rig.executor.getCacheStats().stores).toBe(storesBeforeEnd);
+
+    // 要約後の会話記憶にも逸脱テキストが残らない(要約自体は非汚染テキストで成功する)
+    const memoryAfterEnd = mustStreamAttackState(rig.session).npcs.informant.memory;
+    expect(memoryAfterEnd.recentExchanges.some((e) => e.npc.includes(DEVIANT_STREAM_TEXT))).toBe(false);
+    expect(memoryAfterEnd.summary).not.toContain(DEVIANT_STREAM_TEXT);
+
+    // セーブ(宿へ移動して rest。宿泊の夢シーンも同じ偽 DreamMaster だが非会話フローは非汚染)
+    await approachAndInteract(rig.session, "innkeeper");
+    await rig.session.handle({ type: "rest" });
+
+    // (3) セーブファイル(テスト用ディレクトリ)の生JSONに逸脱テキストが含まれない
+    const savedRaw = readFileSync(path.join(rig.saveDir, "save1.json"), "utf8");
+    expect(savedRaw).not.toContain(DEVIANT_STREAM_TEXT);
   });
 });

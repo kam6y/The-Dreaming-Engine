@@ -96,7 +96,11 @@ export const REQUIRED_ATTACK_TEST_IDS: readonly string[] = [
   // 二次インジェクション・憲法不変条件
   "ATK-secondary-injection",
   "ATK-constitution-invariants",
-  "ATK-constitution-all-flows"
+  "ATK-constitution-all-flows",
+
+  // 対話ストリーミングの撤回(第4層の例外規定の必須条件。オーナー指示 2026-07-12)
+  "ATK-stream-retract-display",
+  "ATK-stream-no-persist"
 ];
 
 // ---------------------------------------------------------------------------
