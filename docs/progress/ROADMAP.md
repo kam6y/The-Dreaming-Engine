@@ -622,7 +622,7 @@ JOURNALへ「仕様変更提案」として記録する)。
       選択UI(新規ゲーム時3択が確定点・difficultyはmock限定にしない(チートでなく正規選択の裁量)・
       ゲーム中変更set-difficultyは任意=縮退可)・?difficulty=URLフラグ・view純追加・
       data-difficulty観測点・AI非波及・不干渉条件。「セーブ/ロード」章の保存内容列挙へ追記
-- [ ] M25-2: shared/serverの実装(**subagent担当**。UIは書かない):
+- [x] M25-2: shared/serverの実装(**subagent担当**。UIは書かない):
       shared=`difficultySchema`(easy/normal/hard)・`DIFFICULTY_DISPLAY_NAMES`・
       `DIFFICULTY_COEFFICIENTS`(0.75/1.0/1.4)・`createBattle`第5引数`difficulty`(既定normal)+
       `BattleState.incomingDamageMultiplier`(既定1.0)・`dealDamage`のプレイヤー被弾分岐1点で

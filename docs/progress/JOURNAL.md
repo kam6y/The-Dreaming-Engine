@@ -2591,3 +2591,41 @@
   difficultyを足さない(セーブ値が正) (5)M25-3(タイトル3択+URLフラグ+data-difficulty+E2E)は
   UI=オーケストレーター自身。設定オーバーレイでのゲーム中変更は縮退可(最小=新規時のみ)
   (6)subagentへ: advisorは使えない・報告は最終メッセージで返す(ファイル保存しない)
+
+## [84] 2026-07-12 M25-2: 難易度のshared/server実装(実装=subagent委譲・検収/二重確認=オーケストレーター)
+
+- やったこと(実装・テスト・検証はsubagent(今回は中断なく完遂)、差分検収+check/E2E
+  再実行の二重確認+コミットはオーケストレーター):
+  - difficulty.ts(新規): difficultySchema(easy/normal/hard)・DIFFICULTY_DISPLAY_NAMES
+    (やさしい/ふつう/むずかしい)・DIFFICULTY_COEFFICIENTS(0.75/1.0固定/1.4)+
+    裁量でDEFAULT_DIFFICULTY・DIFFICULTY_ORDER(M25-3の既定カーソル・並びの単一の正)
+  - battle.ts: BattleState.incomingDamageMultiplier(既定1.0・セーブ非対象)・
+    createBattle第5引数difficulty(既定"normal")・dealDamageのtarget==="player"分岐のみで
+    max(1, floor(dmg×係数))(computeDamage・RNG消費順序・敵側被ダメは無改変。
+    イベント/メッセージも適用値で一貫)
+  - game-state: difficulty=default("normal")(GAME_STATE_VERSION据え置き・advanceDay持続)。
+    messages: snapshotView.difficulty必須純追加+newGameOptions.difficulty
+    (**mock限定にしない**=liveでも尊重する正規選択)。continueには足さない(セーブ値が正)
+  - session: new-gameで無条件反映(未指定=normal)・戦闘入口2箇所(beginBattle/
+    beginBossBattle)でcreateBattleへ受け渡し・buildViewへ露出
+  - テスト+14=unit 1011(difficulty.test.ts: 定義3・createBattle3(省略=明示normalの
+    完全一致含む)・適用4(同一シードeasy<normal<hard・normal旧挙動バイト一致・敵被ダメ不変・
+    最低1ダメージ)・GameState4(旧セーブ欠落→normal・advanceDay持続・zod拒否))。
+    フィクスチャ2件(messages/game-client.test)はdifficulty追記のみ
+- 裁量で決めたこと(subagent提案を検収で採用):
+  - 毒などのstatus-tickによるプレイヤー被ダメは難易度非依存(適用はdealDamageの
+    直接攻撃分岐のみ=骨子の単一チョークポイントに忠実。hardでも毒ダメは増えない=意図的)
+  - DEFAULT_DIFFICULTY/DIFFICULTY_ORDERの追加(UI便宜)
+- 検証: pnpm check 緑(unit 1011。combat-balance.test無改変で緑=バイト一致保存)・
+  pnpm test:e2e 21/21緑(subagent実行+オーケストレーター再実行の二重確認。
+  再実行1回目のバックグラウンドタスクが空出力でkillされたため再試行で完遂=コード起因ではない)
+- 次にやること: M25-3(クライアントUI=**オーケストレーター自身**)+M25ゲート(test:e2e:full)+
+  完了時BACKLOGチェック。申し送り:
+  (1)view契約: view.difficulty(必須)。表示名はDIFFICULTY_DISPLAY_NAMESを直接import
+  (2)タイトル新規ゲームフローへ3択(既定カーソル=DEFAULT_DIFFICULTY・並び=DIFFICULTY_ORDER・
+  決定値をoptions.difficultyで送信。既存セーブ上書き確認との位置関係は不変)
+  (3)newGameOptionsFromUrl()へ?difficulty=読み取り(safeParse流儀)・syncDomStateへ
+  data-difficulty・HUD表示は裁量(控えめ)
+  (4)ゲーム中変更は縮退可(新規時のみ確定=set-difficultyメッセージ追加なしが最小)
+  (5)E2E: ?difficulty=hard→data-difficulty="hard"観測の1本
+  (6)client typecheck単体実行時はsharedを先にビルドする(pnpm checkは順序内包)
