@@ -22,6 +22,7 @@ import type {
 } from "../tool-validation/types.js";
 import { fallbackTextForFlow } from "./fallback-text.js";
 import type { ConversationSession } from "./session.js";
+import { TurnCache, cacheKeyForContext, type CacheKey, type TurnCacheStats } from "./turn-cache.js";
 
 /**
  * AIターン実行器(ai-integration.md「呼び出しフロー別仕様」246-278)。
@@ -81,6 +82,12 @@ export interface AiTurnResult {
   readonly degradationActivated: DegradationCause | null;
   /** DreamMaster を実際に呼んだか(監査ログ・失敗計上の可否) */
   readonly aiInvoked: boolean;
+  /**
+   * メモ化キャッシュのヒットで検証済み表示専用ターンを再生したか(M26)。
+   * true のとき aiInvoked=false・approvedEffects 空・失敗ではない。監査は ai_cache_hit として記録する
+   * (ai_call ではない)。未設定=通常ターン(false 相当)。
+   */
+  readonly cacheHit?: boolean;
   /** 監査ログ用の応答テキスト(speak/narrate 連結 or 要約 or 生テキスト。なければ null) */
   readonly responseText: string | null;
   /** 使用モデル名(AIを呼んだ場合)。なければ null */
@@ -164,6 +171,10 @@ function extractEventField(rawInput: unknown): unknown {
 export class AiTurnExecutor {
   private readonly dreamMaster: DreamMaster;
   private readonly sessionCallLimit: number;
+  /** 表示専用ターンのメモ化キャッシュ(メモリのみ・非永続・有界。M26) */
+  private readonly turnCache = new TurnCache();
+  /** キャッシュの有効/無効(config.cache.enabled。本番デフォルト true) */
+  private readonly cacheEnabled: boolean;
 
   private sessionCallCount = 0;
   /** 通常縮退(3連続失敗)。日送りで解除できる */
@@ -176,6 +187,7 @@ export class AiTurnExecutor {
   public constructor(options: AiTurnExecutorOptions) {
     this.dreamMaster = options.dreamMaster;
     this.sessionCallLimit = options.config.sessionCallLimit;
+    this.cacheEnabled = options.config.cache.enabled;
   }
 
   // -------------------------------------------------------------------------
@@ -202,6 +214,11 @@ export class AiTurnExecutor {
     return this.consecutiveFailures[flow];
   }
 
+  /** メモ化キャッシュの観測カウンタ(hit/miss/store。デバッグ・テスト用) */
+  public getCacheStats(): TurnCacheStats {
+    return this.turnCache.stats();
+  }
+
   /**
    * 通常縮退(3連続失敗)を解除し、連続失敗カウントを0に戻す(ai-integration.md 271-274)。
    * **セッション総数上限縮退は解除しない**(上限保護の無効化を防ぐ: 同 276-277)。
@@ -221,7 +238,8 @@ export class AiTurnExecutor {
   public async executeTurn(input: AiTurnInput): Promise<AiTurnResult> {
     const flow = input.dmContext.flow;
 
-    // 縮退中: AIを呼ばず定型フォールバック(AIを呼ばないブロックなので失敗に数えない)
+    // 縮退中: AIを呼ばず定型フォールバック(AIを呼ばないブロックなので失敗に数えない)。
+    // **縮退中はキャッシュを引かない**(早期リターンの意味を変えない: ai-integration.md「整合」)。
     if (this.isDegraded()) {
       return this.fallbackResult(flow, {
         failedTurn: false,
@@ -229,6 +247,33 @@ export class AiTurnExecutor {
         degradationActivated: null,
         aiInvoked: false
       });
+    }
+
+    // メモ化キャッシュ(DreamMaster.run 直前のルックアップ)。対象2フロー(戦果描写・会話開始挨拶)
+    // かつ有効時のみ鍵を導出する。ヒットなら**AIを呼ばず**検証済みの表示テキストを即返す
+    // (セッション総数を消費しない・失敗に数えない。許可判定=直列化/クールダウン/送信レートは
+    // ゲートキーパーで先に適用済み。縮退中は上の早期リターンで既に除外)。
+    const cacheKey = this.cacheEnabled ? cacheKeyForContext(input.dmContext) : null;
+    if (cacheKey !== null) {
+      const cached = this.turnCache.get(cacheKey);
+      if (cached !== undefined) {
+        return {
+          flow,
+          displayText: cached.displayText,
+          approvedEffects: [],
+          summaryText: null,
+          usedFallback: false,
+          failedTurn: false,
+          failureKind: null,
+          degraded: false,
+          degradationActivated: null,
+          aiInvoked: false,
+          cacheHit: true,
+          responseText: null,
+          model: cached.model,
+          toolCallRecords: []
+        };
+      }
     }
 
     // 初回 + リトライ最大1回(ai-integration.md「リトライ」)。リトライ対象は
@@ -256,7 +301,11 @@ export class AiTurnExecutor {
         // 副作用を確定させず次の試行へ(検証カウンタ・失敗カウント・セッションcommitは未確定)
         continue;
       }
-      return this.finalizeOutcome(flow, outcome);
+      const result = this.finalizeOutcome(flow, outcome);
+      // メモ化キャッシュ(DreamMaster.run 直後の格納)。**状態変更 effect を1件も含まない
+      // 成功ターン**(フォールバック/縮退/却下でない・出力壁通過済み)だけを記憶する。
+      if (cacheKey !== null) this.maybeStoreTurn(cacheKey, result);
+      return result;
     }
 
     // ループは attempt=RETRY_LIMIT_PER_TRIGGER で必ず return する(到達しない。網羅性の保険)
@@ -266,6 +315,25 @@ export class AiTurnExecutor {
       degradationActivated: null,
       aiInvoked: true
     });
+  }
+
+  /**
+   * このトリガーの最終結果が**記憶条件**を満たすときだけキャッシュへ格納する(DreamMaster.run 直後)。
+   * 記憶条件(ai-integration.md 採用案A): 実際にAIを呼んで得た成功で、フォールバック/縮退/却下でなく、
+   * **状態変更 effect を1件も含まない**(approvedEffects 空・summary でない)表示専用ターン。
+   * これにより汚染テキスト・却下結果・副作用(adjust_affinity 等)がキャッシュに焼き込まれない。
+   */
+  private maybeStoreTurn(cacheKey: CacheKey, result: AiTurnResult): void {
+    if (
+      result.aiInvoked &&
+      !result.usedFallback &&
+      !result.failedTurn &&
+      result.summaryText === null &&
+      result.approvedEffects.length === 0 &&
+      result.displayText.length > 0
+    ) {
+      this.turnCache.set(cacheKey, { displayText: result.displayText, model: result.model });
+    }
   }
 
   /** DreamMaster 結果を TurnOutcome へ評価する(副作用なし。確定は finalizeOutcome) */

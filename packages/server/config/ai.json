@@ -21,5 +21,6 @@
   },
   "conversationSendRateSeconds": 3,
   "sessionCallLimit": 200,
-  "playerInputMaxLength": 200
+  "playerInputMaxLength": 200,
+  "cache": { "enabled": true }
 }

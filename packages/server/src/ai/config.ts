@@ -57,7 +57,14 @@ export const aiConfigSchema = z.object({
   /** サーバー起動(セッション)ごとの AI 呼び出し総数上限 */
   sessionCallLimit: z.number().int().positive(),
   /** 自由入力の最大文字数 */
-  playerInputMaxLength: z.number().int().positive()
+  playerInputMaxLength: z.number().int().positive(),
+  /**
+   * AI 応答キャッシュ(表示専用ターンのメモ化。ai-integration.md「AI応答キャッシュ・先行生成」)。
+   * **本番デフォルトは enabled=true**。テストは loadAiConfig({ cache: { enabled: false } }) で無効化できる
+   * (防御ではなく体感レイテンシ改善機構。ヒットは AI 呼び出しではないため防御・コスト保護を弱めない)。
+   * 旧設定ファイル互換のため既定値つき。
+   */
+  cache: z.object({ enabled: z.boolean() }).default({ enabled: true })
 });
 
 export type AiConfig = z.infer<typeof aiConfigSchema>;

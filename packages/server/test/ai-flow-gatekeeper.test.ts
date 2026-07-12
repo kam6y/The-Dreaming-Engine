@@ -420,8 +420,13 @@ describe("AiFlowGatekeeper", () => {
   });
 
   it("onDayAdvanced はセッション上限縮退を解除しない", async () => {
+    // cache.enabled=false で挙動を固定(M26)。同一文脈の挨拶ターンを2回呼ぶ設計のため、
+    // メモ化キャッシュが2回目を肩代わりすると上限に到達しない。ここの検証対象は
+    // 「セッション上限縮退が日送りで解除されない」ことなので、キャッシュを無効化して
+    // 2回とも実呼び出しにする(上限機構・解除条件のアサート自体は不変)
     const { gk, executor } = makeGatekeeper(new MockDreamMaster(loadAiConfig({ sessionCallLimit: 1 })), {
-      sessionCallLimit: 1
+      sessionCallLimit: 1,
+      cache: { enabled: false }
     });
     const input = {
       dmContext: { flow: "conversation", partnerNpcId: "innkeeper", playerUtterance: "" } as const,

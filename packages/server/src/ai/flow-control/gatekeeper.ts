@@ -448,7 +448,14 @@ export class AiFlowGatekeeper {
     turn: AiTurnResult,
     durationMs: number
   ): void {
-    if (turn.aiInvoked) {
+    if (turn.cacheHit === true) {
+      // キャッシュヒット(AI呼び出しではない): ai_cache_hit を1行残す(生テキストなし・注記のみ)。
+      // aiInvoked=false なので下の ai_call とは排他(二重記録しない)。
+      this.auditLog.logCacheHit({
+        flow: AUDIT_FLOW_BY_TOOL_FLOW[flow],
+        contextHash: hashContext(dmContext)
+      });
+    } else if (turn.aiInvoked) {
       this.auditLog.logAiCall({
         flow: AUDIT_FLOW_BY_TOOL_FLOW[flow],
         contextHash: hashContext(dmContext),

@@ -30,7 +30,8 @@ const SPEC_DEFAULTS: AiConfig = {
   },
   conversationSendRateSeconds: 3,
   sessionCallLimit: 200,
-  playerInputMaxLength: 200
+  playerInputMaxLength: 200,
+  cache: { enabled: true }
 };
 
 describe("loadAiConfig(本番デフォルトの不変条件)", () => {
