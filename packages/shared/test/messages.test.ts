@@ -180,7 +180,9 @@ describe("サーバー→クライアント メッセージ(M3)", () => {
       // 訪問済みマップ(M22。view 必須フィールド)。開始マップのみ訪問済み
       visitedMaps: state.visitedMaps,
       // 解除済み実績(M24。view 必須フィールド)。新規ゲームは空
-      unlockedAchievements: state.unlockedAchievements
+      unlockedAchievements: state.unlockedAchievements,
+      // 難易度(M25。view 必須フィールド)。新規ゲームは既定「ふつう」
+      difficulty: state.difficulty
     };
   }
 

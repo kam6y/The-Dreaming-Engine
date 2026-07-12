@@ -5,6 +5,7 @@ export * from "./map.js";
 export * from "./maps/index.js";
 export * from "./map-graph.js";
 export * from "./time-of-day.js";
+export * from "./difficulty.js";
 export * from "./rng.js";
 export * from "./combat/index.js";
 export * from "./inventory.js";

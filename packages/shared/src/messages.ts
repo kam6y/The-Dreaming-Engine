@@ -13,6 +13,7 @@ import { enemySymbolPlacementSchema } from "./combat/encounter.js";
 import { equipmentItemIdSchema, equipmentSlotSchema, itemIdSchema } from "./combat/items.js";
 import { MAX_LEVEL } from "./combat/stats.js";
 import { statusStateSchema } from "./combat/status.js";
+import { difficultySchema } from "./difficulty.js";
 import { gameLocationSchema } from "./game-state.js";
 import { directionSchema } from "./geometry.js";
 import { mapIdSchema } from "./map.js";
@@ -261,6 +262,12 @@ export const snapshotViewSchema = z.object({
    * クライアント未改修でも無視できる純追加フィールド。
    */
   unlockedAchievements: z.array(achievementIdSchema),
+  /**
+   * 難易度(M25。「やさしい/ふつう/むずかしい」)。表示名はクライアントが shared の
+   * DIFFICULTY_DISPLAY_NAMES から引くため、view へ載せるのは id のみ(timeOfDay と同じ最小露出)。
+   * クライアント未改修でも無視できる純追加フィールド。E2E は #game の data-difficulty で観測する。
+   */
+  difficulty: difficultySchema,
   /** 有効な対話(店/宿/会話)。無ければ省略 */
   interaction: activeInteractionSchema.optional(),
   /** 戦闘ビュー(mode==="battle" のときのみ) */
@@ -293,7 +300,14 @@ export const newGameOptionsSchema = z.object({
    * 固定され、歩数進行・昼リセットの影響を受けない("night"=夜スモークの決定論再現 /
    * "day"=長い spec の昼固定)。startLevel と同流儀のテスト加速フラグ。
    */
-  timeOfDay: timeOfDaySchema.optional()
+  timeOfDay: timeOfDaySchema.optional(),
+  /**
+   * 難易度(M25。新規ゲーム時の3択の確定値。省略時はサーバーが normal で開始する)。
+   * startLevel/startGold/timeOfDay(進行加速チートゆえ live では無視)と異なり、difficulty は
+   * UI で選ぶ**正規のプレイヤー選択**なので mock 限定にしない(live でも尊重する)。
+   * URL フラグ `?difficulty=` は M25-3 の newGameOptionsFromUrl() がこの経路へ載せる。
+   */
+  difficulty: difficultySchema.optional()
 });
 
 export const clientNewGameMessageSchema = z.object({

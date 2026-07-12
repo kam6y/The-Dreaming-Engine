@@ -12,6 +12,7 @@ import {
   weatherSchema
 } from "./ai/world-event.js";
 import { playerProgressSchema, statsForLevel } from "./combat/index.js";
+import { difficultySchema } from "./difficulty.js";
 import { createEmptyEquipment, equipmentSchema } from "./equipment.js";
 import { directionSchema, positionSchema } from "./geometry.js";
 import { enemyIdSchema } from "./ids.js";
@@ -222,7 +223,14 @@ export const gameStateSchema = z.object({
    * 解除は不可逆で、サーバーの単一チョークポイント評価が `∪ 評価結果` で単調更新する
    * (mergeUnlockedAchievements)。新規ゲームは空。収集進捗のため advanceDay(日送り)では持続する。
    */
-  unlockedAchievements: z.array(achievementIdSchema).default([])
+  unlockedAchievements: z.array(achievementIdSchema).default([]),
+  /**
+   * 難易度(M25。プレイヤー被ダメージ倍率のみを動かすランタイム乗算層の選択値)。
+   * 新規ゲームは選択値(既定 normal)、continue はセーブ値が正。旧セーブは未保持=
+   * `default("normal")` で「ふつう」補完(GAME_STATE_VERSION 据え置き・マイグレーション不要)。
+   * 日次状態ではないため advanceDay(日送り)で持続する(`...state` の spread で保持)。
+   */
+  difficulty: difficultySchema.default("normal")
 });
 export type GameState = z.infer<typeof gameStateSchema>;
 
@@ -255,7 +263,9 @@ export function createNewGameState(): GameState {
     // 開始マップ(灯町)を訪問済みで初期化する(location.mapId と同一の単一の正)
     visitedMaps: [NEW_GAME_START.mapId],
     // 実績「夢の欠片」は空から収集する(M24)
-    unlockedAchievements: []
+    unlockedAchievements: [],
+    // 難易度は既定「ふつう」で初期化する(server の new-game が options.difficulty で上書きしうる。M25)
+    difficulty: "normal"
   };
 }
 
@@ -271,7 +281,8 @@ export function createNewGameState(): GameState {
  * - 当日有効な street_event のクリア(「当日有効」のため翌日へ持ち越さない)
  * - market_shift(marketShift)・npc_absence(absentNpc)のリセット(翌日限りのため。M20)
  * 天候・各層敵シンボル数・侵食度(dreamErosion)・好感度・会話記憶・訪問済みマップ
- * (visitedMaps。探索進捗)・解除済み実績(unlockedAchievements。収集進捗。M24)は
+ * (visitedMaps。探索進捗)・解除済み実績(unlockedAchievements。収集進捗。M24)・
+ * 難易度(difficulty。日次状態ではない。M25)は
  * 持続する(`...state` の spread で保持=明示的なリセット対象外)。
  */
 export function advanceDay(state: GameState): GameState {

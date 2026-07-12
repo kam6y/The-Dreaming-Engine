@@ -71,6 +71,7 @@ import {
   type BossMarker,
   type ClientMessage,
   type ConversationAction,
+  type DifficultyId,
   type Direction,
   type EnemyId,
   type EnemySymbolPlacement,
@@ -440,6 +441,7 @@ export class GameSession {
     startLevel?: number | undefined;
     startGold?: number | undefined;
     timeOfDay?: TimeOfDay | undefined;
+    difficulty?: DifficultyId | undefined;
   }): ServerMessage[] {
     const seed = options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0);
     this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
@@ -452,6 +454,12 @@ export class GameSession {
     if (options?.startGold !== undefined && this.aiMode !== "live") {
       // 装備購入スモーク(M8-4)等の資金確保。startLevel と同じテスト加速の扱い
       this.state.player.gold = options.startGold;
+    }
+    // 難易度(M25。新規ゲーム時の3択の確定値)。UI で選ぶ正規のプレイヤー選択のため
+    // startLevel 等の加速チートと異なり mock 限定にしない(live でも尊重する)。
+    // 未指定は createNewGameState の既定「ふつう」のまま。以後の戦闘・宿泊セーブへ反映される。
+    if (options?.difficulty !== undefined) {
+      this.state.difficulty = options.difficulty;
     }
     // テスト用の時間帯固定ピン(M23。startLevel と同流儀=mock 限定・live では無視)。
     // resetRuntime(→resetTimeOfDay)がこのピンを参照するため、必ず先に確定する
@@ -660,7 +668,8 @@ export class GameSession {
     const symbol = this.symbols[symbolIndex];
     if (symbol === undefined) return;
     const seed = this.rng.int(0, 0x7fffffff);
-    this.battle = createBattle(state.player, symbol.enemyId, seed, state.equipment);
+    // 難易度(M25)を渡す(被ダメージ倍率を開始時に固定=進行中戦闘には遡及しない)
+    this.battle = createBattle(state.player, symbol.enemyId, seed, state.equipment, state.difficulty);
     this.battleSymbolIndex = symbolIndex;
     this.mode = "battle";
     this.activeInteraction = null;
@@ -703,7 +712,8 @@ export class GameSession {
   private beginBossBattle(enemyId: EnemyId): void {
     const state = this.requireState();
     const seed = this.rng.int(0, 0x7fffffff);
-    this.battle = createBattle(state.player, enemyId, seed, state.equipment);
+    // 難易度(M25)を渡す(ボス戦もプレイヤー被ダメージのみに作用。敵定義は不変)
+    this.battle = createBattle(state.player, enemyId, seed, state.equipment, state.difficulty);
     this.battleSymbolIndex = null;
     this.mode = "battle";
     this.activeInteraction = null;
@@ -1904,7 +1914,9 @@ export class GameSession {
       // 訪問済みマップ(M22。「夢の地図」用)。接続グラフ・displayName はクライアントが MAPS から引く
       visitedMaps: [...state.visitedMaps],
       // 解除済み実績(M24。「夢の欠片」)。表示名・フレーバー・総数はクライアントが ACHIEVEMENTS から引く
-      unlockedAchievements: [...state.unlockedAchievements]
+      unlockedAchievements: [...state.unlockedAchievements],
+      // 難易度(M25)。表示名はクライアントが DIFFICULTY_DISPLAY_NAMES から引く。E2E は data-difficulty で観測
+      difficulty: state.difficulty
     };
 
     return {

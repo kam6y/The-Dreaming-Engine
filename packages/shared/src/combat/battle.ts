@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { DIFFICULTY_COEFFICIENTS } from "../difficulty.js";
+import type { DifficultyId } from "../difficulty.js";
 import { createEmptyEquipment, effectiveStats, effectiveStatusResistances } from "../equipment.js";
 import type { Equipment } from "../equipment.js";
 import { ENEMY_DISPLAY_NAMES, enemyIdSchema } from "../ids.js";
@@ -113,6 +115,13 @@ export interface BattleState {
    * 実効防御力を装備込みで再導出する(applyLevelUps)ために保持する。
    */
   equipment: Equipment;
+  /**
+   * プレイヤーの被ダメージ倍率(難易度由来。M25)。createBattle が difficulty から解決して固定し、
+   * dealDamage のプレイヤー被弾分岐でのみ乗算する(敵側被ダメは不変)。既定 1.0(=normal=恒等)。
+   * 進行中戦闘は開始時の値で固定(戦闘途中の難易度変更は当該戦闘に遡及しない)。
+   * BattleState はセーブ非対象の一時状態のため、フィールド追加は GAME_STATE_VERSION に影響しない。
+   */
+  incomingDamageMultiplier: number;
   player: BattlePlayerState;
   enemy: BattleEnemyState;
 }
@@ -279,7 +288,8 @@ export function createBattle(
   progress: PlayerProgress,
   enemyId: EnemyId,
   seed: number,
-  equipment: Equipment = createEmptyEquipment()
+  equipment: Equipment = createEmptyEquipment(),
+  difficulty: DifficultyId = "normal"
 ): BattleState {
   const parsed = playerProgressSchema.parse(progress);
   const def = ENEMIES[enemyId];
@@ -325,6 +335,8 @@ export function createBattle(
     isBoss: def.isBoss,
     outcome: "ongoing",
     equipment,
+    // 難易度→被ダメージ倍率を開始時に解決して固定する(既定 normal=1.0=恒等)。
+    incomingDamageMultiplier: DIFFICULTY_COEFFICIENTS[difficulty],
     player,
     enemy
   };
@@ -648,13 +660,19 @@ function dealDamage(
   events: BattleEvent[]
 ): void {
   const dmg = computeDamage(attack, defense, multiplier, rng);
+  // 難易度係数はプレイヤー被弾のみに適用する(唯一のチョークポイント。敵の被ダメは不変)。
+  // computeDamage の戻り値(≥1)を得た**後**に整数へ乗算するだけで、乱数は消費しない=乱数列不変。
+  // normal(1.0)は floor(dmg × 1.0)=dmg・max(1, dmg)=dmg で恒等。やさしい/むずかしいは
+  // 増減後に floor し、max(1, …) で最低1ダメージを再保証する(既存「最低1ダメージ」規則と整合)。
+  const applied =
+    target === "player" ? Math.max(1, Math.floor(dmg * next.incomingDamageMultiplier)) : dmg;
   const unit = target === "player" ? next.player : next.enemy;
-  unit.hp = Math.max(0, unit.hp - dmg);
+  unit.hp = Math.max(0, unit.hp - applied);
   const message =
     target === "player"
-      ? `旅人は${dmg}の痛手を負った。`
-      : `${ENEMY_DISPLAY_NAMES[next.enemy.enemyId]}に${dmg}の痛手を与えた。`;
-  events.push({ type: "damage", target, amount: dmg, remainingHp: unit.hp, message });
+      ? `旅人は${applied}の痛手を負った。`
+      : `${ENEMY_DISPLAY_NAMES[next.enemy.enemyId]}に${applied}の痛手を与えた。`;
+  events.push({ type: "damage", target, amount: applied, remainingHp: unit.hp, message });
 }
 
 function healTarget(next: BattleState, target: Combatant, amount: number, events: BattleEvent[], message: string): void {
