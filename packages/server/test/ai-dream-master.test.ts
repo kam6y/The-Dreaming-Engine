@@ -568,6 +568,10 @@ describe("MockDreamMaster の対話ストリーミング(オーナー指示 2026
     const got: string[] = [];
     await dm.run({ flow: "battleResult", enemyId: "mist-wolf" }, { onSpeakDelta: (d) => got.push(d) });
     await dm.run({ flow: "dream", recentPlay: "静かな一日" }, { onSpeakDelta: (d) => got.push(d) });
+    await dm.run(
+      { flow: "summary", partnerNpcId: "innkeeper", existingSummary: "", exchanges: [] },
+      { onSpeakDelta: (d) => got.push(d) }
+    );
     expect(got).toEqual([]);
   });
 

@@ -618,6 +618,10 @@ describe("対話ストリーミングの撤回(オーナー指示 2026-07-12)", 
     // (1) 会話記憶(recentExchanges)の npc 側テキストに逸脱テキストが残らない(送信直後)
     const memoryAfterSend = mustStreamAttackState(rig.session).npcs.informant.memory;
     expect(memoryAfterSend.recentExchanges.some((e) => e.npc.includes(DEVIANT_STREAM_TEXT))).toBe(false);
+    // 正アサート: 送信の往復は実在し(空配列での空振り通過を塞ぐ)、npc 側は定型フォールバック文である
+    const lastExchange = memoryAfterSend.recentExchanges.at(-1);
+    expect(lastExchange).toBeDefined();
+    expect(lastExchange?.npc).toBe(fallbackTextForFlow("conversation"));
 
     await rig.session.handle({ type: "conversation-end" }); // 要約(非汚染テキスト)を fire-and-forget で開始
     await streamAttackTick(); // 非同期要約の完了ハンドラを待つ

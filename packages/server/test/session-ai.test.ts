@@ -1492,6 +1492,27 @@ class DeferredStreamGreetingDreamMaster implements DreamMaster {
   }
 }
 
+/**
+ * 挨拶(会話 flow)でストリームデルタを発火したのち、DreamMaster.run 自体が reject する偽 DreamMaster。
+ * RejectedStreamDreamMaster(出力壁却下=正常終了した GateResult)とは異なり、こちらは
+ * openConversation の Promise 自体を拒否させる(タイムアウト/APIエラー等の想定)。
+ * session.ts openConversation の `.catch()` フォールバック経路(未検証テキストを画面に残さない)
+ * の検証専用。
+ */
+class RejectingGreetingDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext, options?: DreamMasterRunOptions): Promise<DreamMasterResult> {
+    if (ctx.flow === "conversation") return this.emitAndReject(options);
+    if (ctx.flow === "summary") return Promise.resolve(okResult(ctx, [], "語り合った。"));
+    return Promise.resolve(okResult(ctx, [{ toolName: "narrate", rawInput: { text: "夜。" } }]));
+  }
+  private async emitAndReject(options: DreamMasterRunOptions | undefined): Promise<DreamMasterResult> {
+    await Promise.resolve(); // 決定論チャンク発火と同様、同期継続の後に届かせる
+    options?.onSpeakDelta?.("「これは画面に残ってはいけない挨拶……");
+    throw new Error("挨拶生成中に通信が切れた(テスト用の例外)");
+  }
+}
+
 describe("対話ストリーミングの push 配線(オーナー指示 2026-07-12)", () => {
   it("挨拶生成: ai-stream-start → delta×2 → [snapshot, ai-utterance] の順で届き、デルタ連結=最終正文", async () => {
     const { session } = makeAiSession(); // MockDreamMaster(通常モード)
@@ -1567,6 +1588,25 @@ describe("対話ストリーミングの push 配線(オーナー指示 2026-07-
     expect(last).toBeDefined();
     expect(last?.npc).not.toContain("As an AI");
     expect(last?.npc).toBe(fallbackTextForFlow("conversation"));
+  });
+
+  it("挨拶生成の完了ハンドラで例外(Promise reject)が起きても、まだ同一NPCと会話中なら定型文が push される(未検証テキストの残存防止)", async () => {
+    const { session } = makeAiSession({ dreamMaster: () => new RejectingGreetingDreamMaster() });
+    const pushed: ServerMessage[] = [];
+    session.setPushSender((msgs) => pushed.push(...msgs));
+    await session.handle({ type: "new-game" });
+
+    await talkTo(session, "informant"); // 挨拶生成がストリームデルタ発火後に reject する
+
+    // ストリームデルタは届くが、最後の ai-utterance は必ず定型フォールバック文(未検証テキストではない)
+    expect(pushed.some((m) => m.type === "ai-stream-delta")).toBe(true);
+    const utterances = pushed.filter(
+      (m): m is Extract<ServerMessage, { type: "ai-utterance" }> => m.type === "ai-utterance"
+    );
+    const final = utterances.at(-1);
+    expect(final).toBeDefined();
+    expect(final?.text).toBe(fallbackTextForFlow("conversation"));
+    expect(final?.text).not.toContain("これは画面に残ってはいけない");
   });
 
   it("会話を即終了した後に完了したストリームは push されない(ガード)", async () => {

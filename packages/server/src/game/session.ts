@@ -96,6 +96,7 @@ import {
 } from "@dreaming-engine/shared";
 
 import type { AiFlowGatekeeper, SpeakStreamSink } from "../ai/flow-control/index.js";
+import { fallbackTextForFlow } from "../ai/flow-control/index.js";
 import type { StateChangeEffect } from "../ai/flow-control/turn-executor.js";
 import type { AiMode } from "../ai/mode.js";
 import type { PersistentStateContext } from "../ai/tool-validation/types.js";
@@ -1095,7 +1096,13 @@ export class GameSession {
         }
       })
       .catch(() => {
-        // 挨拶生成時の例外は握って無害化(unhandled rejection にしない・プロセスを落とさない)
+        // 挨拶生成時の例外は握って無害化(プロセスを落とさない)。ただしストリーム済みの
+        // 未検証テキストを画面に残さないため、まだ同一NPCと会話中なら定型文で必ず置換する
+        // (guardrails第4層の例外規定・必須条件(2): 最終表示は常に検証済み全文または定型文)
+        if (this.gameGeneration !== generation || this.state === null) return;
+        if (this.activeInteraction?.kind === "conversation" && this.activeInteraction.npcId === npcId) {
+          this.push([this.aiUtteranceMsg("speak", fallbackTextForFlow("conversation"), npcId)]);
+        }
       });
 
     // 即時: 会話画面へ切替え(挨拶待ち表示)。挨拶は上の完了ハンドラが届き次第 push する
