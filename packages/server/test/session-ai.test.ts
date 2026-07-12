@@ -138,6 +138,52 @@ class DeferredSummaryDreamMaster implements DreamMaster {
   }
 }
 
+/** 宿泊2フェーズ化の検証で使う夢の情景テキスト(M26-3) */
+const DEFERRED_DREAM_TEXT = "深い夢の底で、歯車がひとつ鳴った。";
+
+/**
+ * 夢シーン(dream flow)を test 側が releaseDream() を呼ぶまで**保留**する DreamMaster。
+ * 入眠の合図(フェーズ1)が夢の完了前に届き、顕現とセーブが完了後になることの検証に使う(M26-3)。
+ * 解決時は narrate+世界変化(weather: fog)を出す(手順3→4→5の順序検証を兼ねる)。
+ */
+class DeferredDreamSceneDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public dreamStarted = false;
+  private resolveDream: (() => void) | null = null;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "dream") {
+      this.dreamStarted = true;
+      return new Promise<DreamMasterResult>((resolve) => {
+        this.resolveDream = () =>
+          resolve(
+            okResult(ctx, [
+              { toolName: "narrate", rawInput: { text: DEFERRED_DREAM_TEXT } },
+              { toolName: "trigger_world_event", rawInput: { event: { kind: "weather", value: "fog" } } }
+            ])
+          );
+      });
+    }
+    return Promise.resolve(okResult(ctx, [{ toolName: "speak", rawInput: { text: "「……ようこそ」" } }]));
+  }
+  /** 保留中の夢シーンを完了させる */
+  public releaseDream(): void {
+    if (this.resolveDream === null) throw new Error("夢シーンがまだ開始していない");
+    this.resolveDream();
+    this.resolveDream = null;
+  }
+}
+
+/** 夢シーン(dream flow)で例外を投げる DreamMaster(2フェーズ化後もセーブが必ず成立することの検証用) */
+class ThrowingDreamSceneDreamMaster implements DreamMaster {
+  public readonly mode = "mock" as const;
+  public run(ctx: DreamMasterContext): Promise<DreamMasterResult> {
+    if (ctx.flow === "dream") {
+      return Promise.reject(new Error("夢の紡ぎ糸が切れた(テスト用の例外)"));
+    }
+    return Promise.resolve(okResult(ctx, [{ toolName: "speak", rawInput: { text: "「……ようこそ」" } }]));
+  }
+}
+
 /** 会話は即応答、要約は text=null(出力壁却下 → summaryText null)を返す DreamMaster(要約失敗の検証用) */
 class FailingSummaryDreamMaster implements DreamMaster {
   public readonly mode = "mock" as const;
@@ -524,6 +570,95 @@ describe("宿泊と夢シーン", () => {
     expect(store.saved).toHaveLength(2); // セーブも通常
     expect(narrations(msgs2)).toContain(DREAM_FALLBACK_TEXT); // 夢は定型
     expect(mustState(session).world.weather).toBe("fog"); // 世界変化なし(1泊目の値のまま)
+  });
+});
+
+// ===========================================================================
+// 宿泊の2フェーズ化(M26-3: 入眠合図と夢シーン生成のオーバーラップ)
+// ===========================================================================
+
+describe("宿泊の2フェーズ化(M26-3)", () => {
+  it("入眠の合図(snapshot+締め台詞+sleep-start)は夢の完了前に届き、顕現とセーブは完了後になる", async () => {
+    const { session, store, dreamMaster } = makeAiSession({
+      dreamMaster: () => new DeferredDreamSceneDreamMaster()
+    });
+    const dm = dreamMaster as DeferredDreamSceneDreamMaster;
+    const pushed: ServerMessage[][] = [];
+    session.setPushSender((msgs) => pushed.push(msgs));
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "innkeeper");
+
+    const restPromise = session.handle({ type: "rest" });
+    await tick();
+
+    // フェーズ1: 夢の生成は開始済み・完了前に、日送り済みの snapshot+締め台詞+入眠合図が届いている
+    expect(dm.dreamStarted).toBe(true);
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]?.map((m) => m.type)).toEqual(["snapshot", "dialog", "sleep-start"]);
+    const phase1 = pushed[0]?.[0];
+    if (phase1?.type !== "snapshot") throw new Error("フェーズ1の先頭が snapshot でない");
+    expect(phase1.view.day).toBe(2); // 手順2(日送り)は入眠合図の前に完了
+    expect(phase1.view.interaction).toBeUndefined(); // 宿の overlay は閉じている
+    expect(mustState(session).world.weather).toBe("clear"); // 世界変化(手順4)はまだ適用されない
+    expect(store.saved).toHaveLength(0); // セーブ(手順5)もまだ
+
+    // 夢の完了 → フェーズ2: 世界変化を含む snapshot+夢の顕現。セーブが手順4の後に成立する
+    dm.releaseDream();
+    const msgs = await restPromise;
+    expect(msgs.map((m) => m.type)).toEqual(["snapshot", "ai-utterance"]);
+    const phase2 = msgs[0];
+    if (phase2?.type !== "snapshot") throw new Error("フェーズ2の先頭が snapshot でない");
+    expect(phase2.view.day).toBe(2);
+    expect(mustState(session).world.weather).toBe("fog"); // 手順4(世界変化)は顕現までに適用済み
+    expect(narrations(msgs)).toContain(DEFERRED_DREAM_TEXT);
+    expect(store.saved).toHaveLength(1);
+    expect(store.saved[0]?.day).toBe(2);
+    expect(store.saved[0]?.world.weather).toBe("fog"); // 手順3→4→5 の順序は不変
+  });
+
+  it("夢生成の予期しない例外でも定型の顕現(入眠の解除)とセーブは必ず成立する", async () => {
+    const { session, store } = makeAiSession({
+      dreamMaster: () => new ThrowingDreamSceneDreamMaster()
+    });
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "innkeeper");
+    const msgs = await session.handle({ type: "rest" });
+
+    expect(mustState(session).day).toBe(2); // 日送りは必ず成立
+    expect(store.saved).toHaveLength(1); // 例外でもセーブ(手順5)は成立
+    expect(store.saved[0]?.day).toBe(2);
+    expect(narrations(msgs)).toContain(DREAM_FALLBACK_TEXT); // 顕現は定型で返り、入眠が解ける
+    expect(mustState(session).world.weather).toBe("clear"); // 世界変化なし
+  });
+
+  it("宿泊費不足(無料)は単相のまま=sleep-start を送らず AI も呼ばない", async () => {
+    const { session, store, dreamMaster } = makeAiSession({
+      dreamMaster: (config) => new CountingDreamMaster(new MockDreamMaster(config))
+    });
+    const pushed: ServerMessage[][] = [];
+    session.setPushSender((msgs) => pushed.push(msgs));
+    await session.handle({ type: "new-game" });
+    mustState(session).player.gold = 5; // 宿代10Gに満たない
+    await talkTo(session, "innkeeper");
+    const msgs = await session.handle({ type: "rest" });
+
+    expect(pushed).toHaveLength(0); // フェーズ分割なし(push なし)
+    expect(msgs.map((m) => m.type)).toEqual(["snapshot", "dialog", "ai-utterance"]);
+    expect(narrations(msgs)).toContain(DREAM_FALLBACK_TEXT); // 夢は定型
+    const counting = dreamMaster as CountingDreamMaster;
+    expect(counting.calls["dream"] ?? 0).toBe(0); // AI 不呼び出し(コスト保護は従来どおり)
+    expect(store.saved).toHaveLength(1); // セーブは成立
+  });
+
+  it("pushSender 未設定(切断中)でも宿泊は完走しフェーズ2(顕現+セーブ)が成立する", async () => {
+    const { session, store } = makeAiSession();
+    await session.handle({ type: "new-game" });
+    await talkTo(session, "innkeeper");
+    const msgs = await session.handle({ type: "rest" });
+
+    expect(msgs.map((m) => m.type)).toEqual(["snapshot", "ai-utterance"]);
+    expect(mustState(session).world.weather).toBe("fog"); // 世界変化は従来どおり適用
+    expect(store.saved).toHaveLength(1);
   });
 });
 

@@ -513,6 +513,16 @@ export const serverAiUtteranceMessageSchema = z.object({
   text: z.string().min(1)
 });
 
+/**
+ * 宿泊の入眠合図(M26-3: 夢シーンの先行生成=オーバーラップ)。
+ * 有料宿泊のフェーズ1(snapshot+締め台詞に続く)で送られ、クライアントは入眠演出で
+ * 「夢の顕現」(後続の ai-utterance narrate + snapshot)を待つ。その間サーバーは
+ * 夢シーンの生成(手順3)を進めている。無料宿泊・AI無効時は送られない(単相のまま)。
+ */
+export const serverSleepStartMessageSchema = z.object({
+  type: z.literal("sleep-start")
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
   serverStateMessageSchema,
   serverPongMessageSchema,
@@ -521,7 +531,8 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   serverSnapshotMessageSchema,
   serverDialogMessageSchema,
   serverBattleEventsMessageSchema,
-  serverAiUtteranceMessageSchema
+  serverAiUtteranceMessageSchema,
+  serverSleepStartMessageSchema
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

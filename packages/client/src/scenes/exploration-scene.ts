@@ -184,6 +184,19 @@ export class ExplorationScene extends Phaser.Scene {
    */
   private pendingDream: string | null = null;
 
+  /**
+   * 入眠演出の予約フラグ(M26-3)。sleep-start 受信で立て、宿の締め台詞を表示し終えてから
+   * 暗転する(pendingInn/pendingDream と同じ「先行ダイアログ待ち」)。夢の顕現(narrate)が
+   * 先に届いていれば暗転を挟まず直接夢 overlay へ進む(低レイテンシ時のちらつき防止)。
+   */
+  private pendingSleep = false;
+
+  /**
+   * 入眠演出の暗幕(M26-3)。サーバーが夢シーンを生成している間(sleep-start〜narrate)の
+   * 表示で、移動・メニュー・調べるの入力ブロックを兼ねる。夢 overlay が開くとき閉じる。
+   */
+  private sleepVeil: Phaser.GameObjects.Container | null = null;
+
   /** クエストジャーナル(Qで開閉) */
   private questJournal: QuestJournalOverlay | null = null;
 
@@ -287,6 +300,8 @@ export class ExplorationScene extends Phaser.Scene {
     this.stashedSpeak = null;
     this.dreamOverlay = null;
     this.pendingDream = null;
+    this.pendingSleep = false;
+    this.sleepVeil = null;
     this.questJournal = null;
     this.mapOverlay = null;
     this.achievementsOverlay = null;
@@ -342,6 +357,10 @@ export class ExplorationScene extends Phaser.Scene {
       client.on("ai-utterance", (utterance) => {
         this.handleAiUtterance(utterance);
       }),
+      // 宿泊の入眠合図(M26-3)。夢の顕現(narrate)まで入眠演出で待つ
+      client.on("sleep-start", () => {
+        this.handleSleepStart();
+      }),
       client.on("server-error", (error) => {
         this.handleServerError(error.message);
       })
@@ -355,6 +374,7 @@ export class ExplorationScene extends Phaser.Scene {
       this.closeInventoryOverlay();
       this.closeConversationOverlay();
       this.closeDreamOverlay();
+      this.closeSleepVeil();
       this.closeQuestJournal();
       this.questConfirm?.destroy();
       this.questConfirm = null;
@@ -400,12 +420,13 @@ export class ExplorationScene extends Phaser.Scene {
           }
         }
       } else if (
+        this.sleepVeil !== null ||
         this.dreamOverlay !== null ||
         this.questJournal !== null ||
         this.mapOverlay !== null ||
         this.achievementsOverlay !== null
       ) {
-        // 夢・ジャーナル・地図・欠片一覧中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
+        // 入眠演出・夢・ジャーナル・地図・欠片一覧中はダイアログを保留する(overlay を上書きしない。閉じた後に表示)
       } else if (!this.dialog.isOpen && this.innConfirm === null && this.questConfirm === null) {
         const next = dequeueDialog();
         if (next !== undefined) {
@@ -425,11 +446,27 @@ export class ExplorationScene extends Phaser.Scene {
       this.openInnConfirm(this.pendingInn);
     }
 
-    // 夢シーンは宿屋のおやすみダイアログをすべて表示し終えてから開く(先行ダイアログ待ち)
+    // 入眠演出(M26-3)は宿の締め台詞をすべて表示し終えてから暗転する(先行ダイアログ待ち)。
+    // 夢の顕現(pendingDream)が既に届いていれば暗転を挟まず直接夢 overlay へ進む
+    if (
+      this.pendingSleep &&
+      !this.dialog.isOpen &&
+      !hasPendingDialog() &&
+      this.sleepVeil === null
+    ) {
+      this.pendingSleep = false;
+      if (this.pendingDream === null) {
+        this.openSleepVeil();
+      }
+    }
+
+    // 夢シーンは宿屋のおやすみダイアログをすべて表示し終えてから開く(先行ダイアログ待ち)。
+    // 入眠演出(暗幕)中は保留キューを待たない(夢の顕現と同時に届いた市場の一言等は
+    // 目覚めた後に表示する。暗幕はここで夢 overlay へ引き継いで閉じる)
     if (
       this.pendingDream !== null &&
       !this.dialog.isOpen &&
-      !hasPendingDialog() &&
+      (this.sleepVeil !== null || !hasPendingDialog()) &&
       this.dreamOverlay === null &&
       this.conversationOverlay === null &&
       this.shopOverlay === null &&
@@ -440,6 +477,7 @@ export class ExplorationScene extends Phaser.Scene {
     ) {
       const text = this.pendingDream;
       this.pendingDream = null;
+      this.closeSleepVeil();
       this.openDreamOverlay(text);
     }
 
@@ -458,6 +496,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.isOpen ||
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.pendingSleep ||
+      this.sleepVeil !== null ||
       this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
@@ -679,6 +719,68 @@ export class ExplorationScene extends Phaser.Scene {
     this.dreamOverlay = null;
   }
 
+  /**
+   * 入眠合図(sleep-start)を受ける(M26-3)。宿の締め台詞の表示が終わり次第、
+   * update() が暗転(openSleepVeil)する。サーバーはこの間に夢シーンを生成しており、
+   * 夢の顕現(narrate)が届くと暗幕は夢 overlay へ引き継がれて閉じる。
+   */
+  private handleSleepStart(): void {
+    this.pendingSleep = true;
+    this.syncDomState(); // data-sleep=open を反映(E2E・デバッグの観測点)
+  }
+
+  /**
+   * 入眠演出の暗幕を開く(M26-3)。まぶたが落ちるようにゆっくり暗転し、
+   * 「眠りにつく……」が浅く明滅して夢の生成待ちを伝える。表示中は移動・メニューを
+   * ブロックする(プレースホルダー描画: 単色+テキストのみ・新アセットなし)。
+   */
+  private openSleepVeil(): void {
+    if (this.sleepVeil !== null) {
+      return;
+    }
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const veil = this.add.rectangle(0, 0, width, height, 0x05060a, 0.92).setOrigin(0, 0);
+    const caption = this.add
+      .text(width / 2, height / 2, "眠りにつく……", {
+        color: "#8f86b0",
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: "19px"
+      })
+      .setOrigin(0.5);
+    const container = this.add.container(0, 0, [veil, caption]).setAlpha(0);
+    this.uiLayer.add(container);
+    this.tweens.add({ targets: container, alpha: 1, duration: 700, ease: "Sine.easeIn" });
+    this.tweens.add({
+      targets: caption,
+      alpha: 0.4,
+      duration: 900,
+      delay: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut"
+    });
+    this.sleepVeil = container;
+    this.syncDomState();
+  }
+
+  /** 入眠演出を終える(夢 overlay への引き継ぎ・シーン終了時)。tween を止めてから破棄する */
+  private closeSleepVeil(): void {
+    if (!this.pendingSleep && this.sleepVeil === null) {
+      return;
+    }
+    this.pendingSleep = false;
+    if (this.sleepVeil !== null) {
+      for (const child of this.sleepVeil.getAll()) {
+        this.tweens.killTweensOf(child);
+      }
+      this.tweens.killTweensOf(this.sleepVeil);
+      this.sleepVeil.destroy(true);
+      this.sleepVeil = null;
+    }
+    this.syncDomState(); // data-sleep=closed を反映
+  }
+
   /** クエストジャーナルを開く(Q。他の overlay/ダイアログが無いときのみ) */
   private openQuestJournal(): void {
     if (
@@ -688,6 +790,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.isOpen ||
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.pendingSleep ||
+      this.sleepVeil !== null ||
       this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
@@ -732,6 +836,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.isOpen ||
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.pendingSleep ||
+      this.sleepVeil !== null ||
       this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
@@ -768,6 +874,8 @@ export class ExplorationScene extends Phaser.Scene {
       this.dialog.isOpen ||
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.pendingSleep ||
+      this.sleepVeil !== null ||
       this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
@@ -919,6 +1027,10 @@ export class ExplorationScene extends Phaser.Scene {
     // 夢の欠片(実績一覧)も Esc で閉じる(M24-3)
     if (this.achievementsOverlay !== null) {
       this.closeAchievementsOverlay();
+      return;
+    }
+    // 入眠演出中は夢の顕現を待つ(Esc は無視する。M26-3)
+    if (this.pendingSleep || this.sleepVeil !== null) {
       return;
     }
     // 夢はスペースで目覚める(Esc は無視する)
@@ -1617,6 +1729,8 @@ export class ExplorationScene extends Phaser.Scene {
     if (
       this.innConfirm !== null ||
       this.pendingInn !== null ||
+      this.pendingSleep ||
+      this.sleepVeil !== null ||
       this.questConfirm !== null ||
       this.shopOverlay !== null ||
       this.inventoryOverlay !== null ||
@@ -1626,7 +1740,7 @@ export class ExplorationScene extends Phaser.Scene {
       this.mapOverlay !== null ||
       this.achievementsOverlay !== null
     ) {
-      // 各オーバーレイ側(MenuList・夢の目覚まし)が入力を処理する
+      // 各オーバーレイ側(MenuList・夢の目覚まし)が入力を処理する(入眠演出中は何もしない)
       return;
     }
     if (this.awaiting) {
@@ -1712,6 +1826,8 @@ export class ExplorationScene extends Phaser.Scene {
     game.dataset["achievementLast"] = view.unlockedAchievements.at(-1) ?? "none";
     // E2E 用: 難易度(M25-3。?difficulty= 指定・3択の決定値がサーバー正本で反映される)
     game.dataset["difficulty"] = view.difficulty;
+    // E2E 用: 入眠演出(M26-3。sleep-start 受信〜夢の顕現までの間 open)
+    game.dataset["sleep"] = this.pendingSleep || this.sleepVeil !== null ? "open" : "closed";
     delete game.dataset["battleEnemy"];
   }
 }

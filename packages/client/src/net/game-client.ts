@@ -93,6 +93,8 @@ export interface GameClientEventMap {
   "battle-events": BattleEventsPayload;
   /** 検証済み AI 発話/ナレーション(疑似ストリーミング表示) */
   "ai-utterance": AiUtteranceEvent;
+  /** 宿泊の入眠合図(M26-3)。夢の顕現(narrate)まで入眠演出で待つ */
+  "sleep-start": void;
   /** サーバーからの明示エラー */
   "server-error": ServerErrorEvent;
 }
@@ -137,6 +139,7 @@ export class GameClient {
     dialog: new Set(),
     "battle-events": new Set(),
     "ai-utterance": new Set(),
+    "sleep-start": new Set(),
     "server-error": new Set()
   };
 
@@ -270,6 +273,9 @@ export class GameClient {
             ? { channel: message.channel, text: message.text }
             : { channel: message.channel, npcId: message.npcId, text: message.text }
         );
+        break;
+      case "sleep-start":
+        this.emit("sleep-start", undefined);
         break;
       case "error":
         this.emit(

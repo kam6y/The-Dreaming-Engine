@@ -1595,28 +1595,58 @@ export class GameSession {
     // 手順2直後: 縮退解除フック(通常縮退のみ解除。セッション上限縮退は残す)
     this.gatekeeper?.onDayAdvanced();
 
-    // 手順3-4: 夢シーン(AI)+ 世界変化 effect の適用。
-    // AI 失敗(タイムアウト/表示系0件/悪意)・クールダウン・縮退でもフォールバックで進行し、
-    // 世界変化が無いだけでセーブと日送りは必ず成立する。宿泊費不足(wasFree)は AI を呼ばず定型。
-    const dreamMsgs: ServerMessage[] = [];
-    if (this.gatekeeper !== null) {
-      if (wasFree) {
-        dreamMsgs.push(this.aiUtteranceMsg("narrate", DREAM_FALLBACK_TEXT));
-      } else {
-        const result = await this.gatekeeper.dreamScene({
-          persistent: this.buildPersistentContext(),
-          recentPlay: this.buildRecentPlay(),
-          world: this.requireState().world
-        });
-        // 実績イベント(M24): 世界変化が1件以上承認・適用されるか(woven-morning)。
-        // 適用前の world との比較が要るため applyApprovedEffects の前に判定して積む
-        if (this.hasAppliedWorldEvents(result.approvedEffects)) {
-          this.pendingAchievementEvents.push("world-event-applied");
-        }
-        // 世界変化(dream_world_events)を GameState へ適用(承認分のみ)
-        this.applyApprovedEffects(result.approvedEffects);
-        dreamMsgs.push(this.aiUtteranceMsg("narrate", result.displayText));
+    // 宿の overlay を閉じ、締めの台詞(宿NPC別: 灯宿=オルガ / 寄り屋=イルマ)を組む。
+    // 2フェーズ時(下記)は入眠の合図とともに夢の顕現より先に届ける
+    // (innNpcId は宿NPC=innkeeper|caretaker のいずれかで必ず lines を持つ。?? は型・スキーマ保険の非空文字列)
+    this.activeInteraction = null;
+    const lines = INN_REST_LINES[innNpcId];
+    const body = wasFree
+      ? (lines?.free ?? "旅人は泥のように眠り、気づけば朝だった。")
+      : (lines?.paid ?? "旅人は目を閉じ、機関に一日を手渡した。");
+    const closingMsgs: ServerMessage[] = [
+      this.snapshotMsg(),
+      this.dialogMsg(NPC_DISPLAY_NAMES[innNpcId], body)
+    ];
+
+    // 手順3-4(単相): AI無効・宿泊費不足(wasFree)は夢のAI待ちが無い=従来どおり一括返却。
+    // wasFree は AI を呼ばず定型・世界変化なし(コスト保護)
+    if (this.gatekeeper === null || wasFree) {
+      const dreamMsgs: ServerMessage[] =
+        this.gatekeeper === null ? [] : [this.aiUtteranceMsg("narrate", DREAM_FALLBACK_TEXT)];
+      // 手順4後・手順5前: 実績の評価(M24)。解除がそのまま当該セーブに載る
+      this.settleAchievements();
+      // 手順5: セーブ。日付は必ず進む
+      this.accruePlaytime();
+      await this.saveStore.save(this.requireState());
+      return [...closingMsgs, ...dreamMsgs];
+    }
+
+    // 手順3-4(2フェーズ=M26-3): 入眠の合図を先に届け、夢シーン生成(最も遅いAI呼び出し)の
+    // await をクライアントの入眠演出と重ねる(呼び出しは従来と同一の1回=コスト中立。
+    // 徴収・日送り済みで夢の消費が確定した後にのみ発火=空撃ちなし)。
+    // <recent_play>/<world_state> は従来どおり日送り後に構築する(バイト一致)。
+    // クールダウン・縮退・失敗フォールバックは dreamScene 内で従来どおり働く。
+    // 直列チェーンは本ハンドラの解決まで次のクライアント操作を処理しないため、
+    // 入眠中に別操作が状態を書き換えることはない(適用順序 手順3→4→5 は不変)
+    this.push([...closingMsgs, { type: "sleep-start" }]);
+    let dreamText = DREAM_FALLBACK_TEXT;
+    try {
+      const result = await this.gatekeeper.dreamScene({
+        persistent: this.buildPersistentContext(),
+        recentPlay: this.buildRecentPlay(),
+        world: this.requireState().world
+      });
+      // 実績イベント(M24): 世界変化が1件以上承認・適用されるか(woven-morning)。
+      // 適用前の world との比較が要るため applyApprovedEffects の前に判定して積む
+      if (this.hasAppliedWorldEvents(result.approvedEffects)) {
+        this.pendingAchievementEvents.push("world-event-applied");
       }
+      // 世界変化(dream_world_events)を GameState へ適用(承認分のみ)
+      this.applyApprovedEffects(result.approvedEffects);
+      dreamText = result.displayText;
+    } catch {
+      // dreamScene は失敗時もフォールバック解決する契約だが、万一の例外でも
+      // 夢の顕現(入眠演出の解除)とセーブ(手順5)は必ず成立させる(定型の夢へ縮退)
     }
 
     // 手順4後・手順5前: 実績の評価(M24)。woven-morning 等の解除がそのまま当該セーブに載る
@@ -1627,14 +1657,8 @@ export class GameSession {
     this.accruePlaytime();
     await this.saveStore.save(this.requireState());
 
-    this.activeInteraction = null; // 宿の overlay を閉じる
-    // 締めの台詞は宿NPC別(灯宿=オルガ / 寄り屋=イルマ)。夢シーン・世界変化・セーブは上で共通に済ませてある
-    // (innNpcId は宿NPC=innkeeper|caretaker のいずれかで必ず lines を持つ。?? は型・スキーマ保険の非空文字列)
-    const lines = INN_REST_LINES[innNpcId];
-    const body = wasFree
-      ? (lines?.free ?? "旅人は泥のように眠り、気づけば朝だった。")
-      : (lines?.paid ?? "旅人は目を閉じ、機関に一日を手渡した。");
-    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[innNpcId], body), ...dreamMsgs];
+    // フェーズ2: 夢の顕現(世界変化を含む snapshot+検証済みの夢の情景)
+    return [this.snapshotMsg(), this.aiUtteranceMsg("narrate", dreamText)];
   }
 
   // =========================================================================

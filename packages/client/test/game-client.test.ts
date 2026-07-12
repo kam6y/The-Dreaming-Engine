@@ -237,6 +237,16 @@ describe("GameClient — dialog / battle-events / server-error", () => {
     expect(handler).toHaveBeenCalledWith([sampleBattleEvent]);
   });
 
+  it("sleep-start(宿泊の入眠合図。M26-3)をイベントとして発火する", () => {
+    const { client, fakes } = setup();
+    const handler = vi.fn();
+    client.on("sleep-start", handler);
+    client.connect();
+    requireSocket(fakes, 0).emitOpen();
+    requireSocket(fakes, 0).emitMessage(JSON.stringify({ type: "sleep-start" }));
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it("error を server-error として発火する(code 有り/無し)", () => {
     const { client, fakes } = setup();
     const handler = vi.fn();
