@@ -5,6 +5,7 @@ import {
   GameClient,
   getGameClient,
   setGameClient,
+  type AiStreamStartEvent,
   type GameClientOptions,
   type SocketCloseEvent,
   type SocketMessageEvent,
@@ -245,6 +246,22 @@ describe("GameClient — dialog / battle-events / server-error", () => {
     requireSocket(fakes, 0).emitOpen();
     requireSocket(fakes, 0).emitMessage(JSON.stringify({ type: "sleep-start" }));
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("ai-stream-start / ai-stream-delta(対話ストリーミング)をイベントとして発火する", () => {
+    const { client, fakes } = setup();
+    const starts: AiStreamStartEvent[] = [];
+    const deltas: string[] = [];
+    client.on("ai-stream-start", (e) => starts.push(e));
+    client.on("ai-stream-delta", (e) => deltas.push(e.text));
+    client.connect();
+    requireSocket(fakes, 0).emitOpen();
+    requireSocket(fakes, 0).emitMessage(
+      JSON.stringify({ type: "ai-stream-start", npcId: "informant" })
+    );
+    requireSocket(fakes, 0).emitMessage(JSON.stringify({ type: "ai-stream-delta", text: "「やあ" }));
+    expect(starts).toEqual([{ npcId: "informant" }]);
+    expect(deltas).toEqual(["「やあ"]);
   });
 
   it("error を server-error として発火する(code 有り/無し)", () => {

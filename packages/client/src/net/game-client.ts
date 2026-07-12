@@ -74,6 +74,16 @@ export interface CloseEvent {
   readonly reason: string;
 }
 
+/** 対話ストリーミングの開始(表示バッファをクリアして増分表示を始める) */
+export interface AiStreamStartEvent {
+  readonly npcId?: NpcId;
+}
+
+/** 対話ストリーミングの増分(未検証テキスト。最終正文は ai-utterance が置換する) */
+export interface AiStreamDeltaEvent {
+  readonly text: string;
+}
+
 /**
  * GameClient が発火するイベントとそのペイロードの対応表。
  * シーンはこれらを購読して UI を再構築する。
@@ -95,6 +105,10 @@ export interface GameClientEventMap {
   "ai-utterance": AiUtteranceEvent;
   /** 宿泊の入眠合図(M26-3)。夢の顕現(narrate)まで入眠演出で待つ */
   "sleep-start": void;
+  /** 対話AI応答のストリーミング開始(未検証テキストの先行表示を始める) */
+  "ai-stream-start": AiStreamStartEvent;
+  /** 対話AI応答のストリーミング増分(未検証テキスト) */
+  "ai-stream-delta": AiStreamDeltaEvent;
   /** サーバーからの明示エラー */
   "server-error": ServerErrorEvent;
 }
@@ -140,6 +154,8 @@ export class GameClient {
     "battle-events": new Set(),
     "ai-utterance": new Set(),
     "sleep-start": new Set(),
+    "ai-stream-start": new Set(),
+    "ai-stream-delta": new Set(),
     "server-error": new Set()
   };
 
@@ -276,6 +292,12 @@ export class GameClient {
         break;
       case "sleep-start":
         this.emit("sleep-start", undefined);
+        break;
+      case "ai-stream-start":
+        this.emit("ai-stream-start", message.npcId !== undefined ? { npcId: message.npcId } : {});
+        break;
+      case "ai-stream-delta":
+        this.emit("ai-stream-delta", { text: message.text });
         break;
       case "error":
         this.emit(
