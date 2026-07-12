@@ -23,7 +23,7 @@ import type {
   DreamMasterContext,
   DreamMasterResult
 } from "../src/ai/dream-master/index.js";
-import { AiFlowGatekeeper, AiTurnExecutor } from "../src/ai/flow-control/index.js";
+import { AiFlowGatekeeper, AiTurnExecutor, type SpeakStreamSink } from "../src/ai/flow-control/index.js";
 import { RateLimiter } from "../src/ai/rate-limit.js";
 import type { PersistentStateContext } from "../src/ai/tool-validation/index.js";
 
@@ -440,5 +440,119 @@ describe("AiFlowGatekeeper", () => {
     gk.onDayAdvanced();
     expect(executor.isSessionLimitDegraded()).toBe(true); // 解除されない
     expect(boundaryLines().some((l) => l.kind === "degraded_cleared")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // 対話ストリーミングの素通しと監査(オーナー指示 2026-07-12)
+  // -------------------------------------------------------------------------
+
+  describe("対話ストリーミングの素通しと監査(オーナー指示 2026-07-12)", () => {
+    /** デルタ・attempt開始を記録する sink(ai-turn-executor.test.ts の sinkRecorder 流儀に合わせる) */
+    function sinkRecorder(): { sink: SpeakStreamSink; starts: number; deltas: string[] } {
+      const rec = { starts: 0, deltas: [] as string[] } as {
+        sink: SpeakStreamSink;
+        starts: number;
+        deltas: string[];
+      };
+      rec.sink = {
+        onAttemptStart: () => {
+          rec.starts += 1;
+        },
+        onDelta: (d) => {
+          rec.deltas.push(d);
+        }
+      };
+      return rec;
+    }
+
+    /**
+     * 出力壁で却下される speak を返す偽 DreamMaster(ai-turn-executor.test.ts の streamingDm 流儀)。
+     * onSpeakDelta があれば呼び出しごとに未検証の1チャンクを発火してから、"As an AI" 定型文の
+     * 拒否パターン(output-wall.ts)に一致する speak を返す。retry でも同じ結果を返す。
+     */
+    function rejectedSpeakDm(): DreamMaster {
+      return {
+        mode: "mock",
+        run: async (ctx, options) => {
+          await Promise.resolve();
+          options?.onSpeakDelta?.("As an AI");
+          return {
+            ok: true,
+            flow: ctx.flow,
+            toolCalls: [{ toolName: "speak", rawInput: { text: "As an AI language model, I cannot." } }],
+            text: null,
+            meta: META
+          };
+        }
+      };
+    }
+
+    it("openConversation の speakStream が DreamMaster まで届き、デルタが転送される", async () => {
+      // MockDreamMaster(対話2フローで2チャンク発火)で組んだ gatekeeper に sink を渡す
+      const { gk } = makeGatekeeper(new MockDreamMaster(loadAiConfig()));
+      const deltas: string[] = [];
+      let starts = 0;
+      const result = await gk.openConversation({
+        npcId: "innkeeper",
+        affinityAtOpen: 30,
+        persistent: persistentBase(),
+        speakStream: {
+          onAttemptStart: () => {
+            starts += 1;
+          },
+          onDelta: (d) => {
+            deltas.push(d);
+          }
+        }
+      });
+      expect(starts).toBe(1);
+      expect(deltas.join("")).toBe(result.displayText); // Mock は検証を通るため最終正文と一致
+    });
+
+    it("ai_call 監査行に streamed/retracted が記録される(成功=retracted:false)", async () => {
+      const { gk } = makeGatekeeper(new MockDreamMaster(loadAiConfig()));
+      const rec = sinkRecorder();
+      const result = await gk.openConversation({
+        npcId: "innkeeper",
+        affinityAtOpen: 30,
+        persistent: persistentBase(),
+        speakStream: rec.sink
+      });
+      expect(result.outcome).toBe("ai");
+
+      const aiCalls = readLines().filter((l) => l.type === "ai_call");
+      expect(aiCalls).toHaveLength(1);
+      expect(aiCalls[0]).toMatchObject({
+        flow: "conversation",
+        streamed: true,
+        retracted: false
+      });
+    });
+
+    it("ストリーム後フォールバック確定のターンは retracted: true で記録される", async () => {
+      const { gk } = makeGatekeeper(rejectedSpeakDm());
+
+      // 会話セッションを開く(このDMの応答は出力壁で却下されるが、gatekeeperは
+      // 直列化/クールダウン判定を通過すればAI応答の成否によらずセッションを作る)
+      await gk.openConversation({ npcId: "innkeeper", affinityAtOpen: 30, persistent: persistentBase() });
+
+      const rec = sinkRecorder();
+      const result = await gk.sendConversation({
+        npcId: "innkeeper",
+        utterance: "こんにちは",
+        persistent: persistentBase(),
+        speakStream: rec.sink
+      });
+      expect(result.outcome).toBe("ai");
+      expect(result.turn?.usedFallback).toBe(true); // 出力壁却下で定型フォールバック確定
+
+      const aiCalls = readLines().filter((l) => l.type === "ai_call");
+      const last = aiCalls[aiCalls.length - 1];
+      expect(last).toMatchObject({
+        flow: "conversation",
+        streamed: true,
+        retracted: true
+      });
+    });
   });
 });

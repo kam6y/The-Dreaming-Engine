@@ -19,7 +19,7 @@ import type { RateLimiter } from "../rate-limit.js";
 import type { PersistentStateContext, ToolFlow } from "../tool-validation/types.js";
 import { AUDIT_FLOW_BY_TOOL_FLOW, fallbackTextForFlow } from "./fallback-text.js";
 import { ConversationSession } from "./session.js";
-import type { AiTurnExecutor, AiTurnResult, StateChangeEffect } from "./turn-executor.js";
+import type { AiTurnExecutor, AiTurnResult, SpeakStreamSink, StateChangeEffect } from "./turn-executor.js";
 
 /**
  * ゲートキーパー(ai-integration.md「呼び出しフロー別仕様」直列化234-241 /
@@ -70,6 +70,8 @@ export interface OpenConversationInput {
   /** 充実コンテキスト(M4-E が GameState から供給。Live prompt が使う。任意) */
   readonly topic?: string;
   readonly memorySummary?: string;
+  /** 対話ストリーミングの受け口(未指定なら従来どおり非ストリーミング。オーナー指示 2026-07-12) */
+  readonly speakStream?: SpeakStreamSink;
 }
 
 export interface SendConversationInput {
@@ -78,6 +80,8 @@ export interface SendConversationInput {
   readonly persistent: PersistentStateContext;
   readonly topic?: string;
   readonly memorySummary?: string;
+  /** 対話ストリーミングの受け口(未指定なら従来どおり非ストリーミング。オーナー指示 2026-07-12) */
+  readonly speakStream?: SpeakStreamSink;
 }
 
 export interface GenerateQuestInput {
@@ -85,6 +89,8 @@ export interface GenerateQuestInput {
   readonly npcId: NpcId;
   readonly persistent: PersistentStateContext;
   readonly topic?: string;
+  /** 対話ストリーミングの受け口(未指定なら従来どおり非ストリーミング。オーナー指示 2026-07-12) */
+  readonly speakStream?: SpeakStreamSink;
 }
 
 export interface DreamSceneInput {
@@ -209,7 +215,8 @@ export class AiFlowGatekeeper {
       },
       persistent: input.persistent,
       session,
-      playerInput: null
+      playerInput: null,
+      ...(input.speakStream !== undefined ? { speakStream: input.speakStream } : {})
     });
   }
 
@@ -258,7 +265,8 @@ export class AiFlowGatekeeper {
       },
       persistent: input.persistent,
       session,
-      playerInput: input.utterance
+      playerInput: input.utterance,
+      ...(input.speakStream !== undefined ? { speakStream: input.speakStream } : {})
     });
   }
 
@@ -300,7 +308,8 @@ export class AiFlowGatekeeper {
       },
       persistent: input.persistent,
       session,
-      playerInput: null
+      playerInput: null,
+      ...(input.speakStream !== undefined ? { speakStream: input.speakStream } : {})
     });
   }
 
@@ -420,11 +429,14 @@ export class AiFlowGatekeeper {
     persistent: PersistentStateContext;
     session: ConversationSession | null;
     playerInput: string | null;
+    /** 対話ストリーミングの受け口(素通しのみ。dream/battleResult/summary は渡さない=現状のまま) */
+    speakStream?: SpeakStreamSink;
   }): Promise<GateResult> {
     const promise = this.executor.executeTurn({
       dmContext: spec.dmContext,
       persistent: spec.persistent,
-      session: spec.session
+      session: spec.session,
+      ...(spec.speakStream !== undefined ? { speakStream: spec.speakStream } : {})
     });
     const entry: InFlight = { flow: spec.flow, npcId: spec.npcId, promise };
     this.inFlight = entry;
@@ -466,7 +478,10 @@ export class AiFlowGatekeeper {
         model: turn.model ?? "unknown",
         // 失敗種別・フォールバック有無を残す(表示系承認0件フォールバック等の事後診断のため)
         failureKind: turn.failureKind,
-        usedFallback: turn.usedFallback
+        usedFallback: turn.usedFallback,
+        // 対話ストリーミングの先行表示・撤回の記録(オーナー指示 2026-07-12)
+        streamed: turn.streamed === true,
+        retracted: turn.streamed === true && turn.usedFallback
       });
     }
     // 縮退の発動を境界イベントとして記録
