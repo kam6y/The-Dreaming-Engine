@@ -2878,3 +2878,23 @@
   そのまま
 - 人間確認待ち: AI_MODE=liveでの体感短縮の確認(モックはレイテンシゼロで観測不能)・
   実プレイでのストリーム表示の見え方確認(pnpm test:ai-live含む)
+
+## [91] 2026-07-21 README概要のスクリーンショット刷新(オーナー指示)
+
+- やったこと:
+  - オーナー指示「READMEの概要部分(# The Dreaming Engineの下)を、実アプリの様々な場面の
+    スクリーンショットで魅力が伝わるよう新規作成。重複する『### スクリーンショット』節は削除」
+  - モックAI(pnpm dev:mock)+隔離SAVE_DIR(セッションscratchpad)でゲームを起動し、
+    Playwrightスクリプトで通しプレイを自動操縦して撮影(seed=42。conversation/quest/dream/
+    battle/playthrough.full 各specの駆動手順を踏襲)。9場面を docs/screenshots/ へ配置:
+    title/opening/conversation/boss/ending(既存5枚を同一viewport 1280x800で撮り直し差し替え)+
+    town/quest-propose/dream/battle(新規4枚)
+  - README冒頭を「## どんなゲームか」に全面書き換え(探索・AI自由会話・サブクエスト動的生成・
+    夢による世界変化・戦闘/ボス・エンディング・ガードレール紹介を各場面のスクリーンショット付きで)。
+    旧「### スクリーンショット」節は削除(重複のためオーナー指示で許可)。
+    開発駆動の説明は「## 開発スタイル」として存置
+- 検証: pnpm check緑・pnpm test:e2e 24/24緑(10.7m、フレークなし)
+- 裁量で決めたこと: 戦闘はコマンドメニューの写るコマを採用/ボス第2形態は第1形態と見た目の
+  差が小さくREADME非採用/未採用カット(difficulty・quest-journal・field・dungeon等)は
+  コミットしない/夢はオーバーレイ「―夢―」表示中のコマを採用
+- 次にやること: JOURNAL[90]の継続項目のまま(BACKLOG未着手項目・人間確認待ち各種)
