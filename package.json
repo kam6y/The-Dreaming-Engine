@@ -1,0 +1,37 @@
+{
+  "name": "the-dreaming-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.3",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c magenta,cyan \"pnpm --filter @dreaming-engine/server dev\" \"pnpm --filter @dreaming-engine/client dev\"",
+    "dev:mock": "AI_MODE=mock pnpm dev",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts",
+    "build": "pnpm -r build",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm scan:secrets",
+    "test:e2e": "playwright test --config playwright.config.ts",
+    "test:e2e:full": "playwright test --config playwright.full.config.ts",
+    "test:ai-live": "AI_LIVE_TEST=1 AI_MODE=live vitest run --config vitest.ai-live.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.0",
+    "@types/ws": "8.18.1",
+    "concurrently": "10.0.3",
+    "eslint": "10.6.0",
+    "globals": "17.7.0",
+    "tsx": "4.22.5",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.62.1",
+    "vite": "8.1.3",
+    "vitest": "4.1.9"
+  }
+}

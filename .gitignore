@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+
+#Agent
+.codex
+.claude
+
+# 環境変数・秘密情報(.env.local / .env.development 等の派生も含めて無視)
+.env*
+!.env.example
+
+# 実行時生成物
+node_modules/
+.pnpm-store/
+saves/
+logs/
+dist/
+coverage/
+playwright-report/
+test-results/
+.playwright-mcp/

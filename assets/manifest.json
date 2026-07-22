@@ -1,0 +1,1088 @@
+[
+  {
+    "id": "battle-dungeon",
+    "path": "assets/backgrounds/battle-dungeon.png",
+    "kind": "battle-background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/battle-dungeon.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "battle-field",
+    "path": "assets/backgrounds/battle-field.png",
+    "kind": "battle-background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/battle-field.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "chapel-interior",
+    "path": "assets/backgrounds/chapel-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/chapel-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "dungeon",
+    "path": "assets/backgrounds/dungeon.png",
+    "kind": "background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/dungeon.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "ed-1",
+    "path": "assets/backgrounds/ed-1.png",
+    "kind": "ending",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/ed-1.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "ed-2",
+    "path": "assets/backgrounds/ed-2.png",
+    "kind": "ending",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/ed-2.md",
+    "createdAt": "2026-07-03",
+    "note": "プロンプト原文逸失のため画像特徴から復元"
+  },
+  {
+    "id": "field",
+    "path": "assets/backgrounds/field.png",
+    "kind": "background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/field.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "inn-interior",
+    "path": "assets/backgrounds/inn-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/inn-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "op-1",
+    "path": "assets/backgrounds/op-1.png",
+    "kind": "opening",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/op-1.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "op-2",
+    "path": "assets/backgrounds/op-2.png",
+    "kind": "opening",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/op-2.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "shop-interior",
+    "path": "assets/backgrounds/shop-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/shop-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "tavern-interior",
+    "path": "assets/backgrounds/tavern-interior.png",
+    "kind": "interior",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/tavern-interior.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "town",
+    "path": "assets/backgrounds/town.png",
+    "kind": "background",
+    "sizePx": {
+      "w": 1920,
+      "h": 1080
+    },
+    "promptFile": "assets/prompts/town.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "candle-eater",
+    "path": "assets/enemies/candle-eater.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/candle-eater.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "creaking-doll",
+    "path": "assets/enemies/creaking-doll.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/creaking-doll.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "dream-eater-phase2",
+    "path": "assets/enemies/dream-eater-phase2.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 768,
+      "h": 768
+    },
+    "promptFile": "assets/prompts/dream-eater-phase2.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過。レビュー対応3回目: 第1形態のうずくまった非対称シルエットを保持し、靄剥落・中央大裂け目・琥珀炉光を強化"
+  },
+  {
+    "id": "dream-eater",
+    "path": "assets/enemies/dream-eater.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 768,
+      "h": 768
+    },
+    "promptFile": "assets/prompts/dream-eater.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "mist-wolf",
+    "path": "assets/enemies/mist-wolf.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/mist-wolf.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-informant",
+    "path": "assets/portraits/npc-informant.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-informant.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-innkeeper",
+    "path": "assets/portraits/npc-innkeeper.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-innkeeper.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-merchant",
+    "path": "assets/portraits/npc-merchant.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-merchant.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "npc-priest",
+    "path": "assets/portraits/npc-priest.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-priest.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "player",
+    "path": "assets/portraits/player.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/player.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "title-background",
+    "path": "assets/title/title-background.png",
+    "kind": "title",
+    "sizePx": {
+      "w": 1672,
+      "h": 941
+    },
+    "promptFile": "assets/prompts/title-background.md",
+    "createdAt": "2026-07-03",
+    "note": ""
+  },
+  {
+    "id": "cursor",
+    "path": "assets/ui/cursor.png",
+    "kind": "ui",
+    "sizePx": {
+      "w": 128,
+      "h": 128
+    },
+    "promptFile": "assets/prompts/cursor.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過。レビュー対応再生成: 先端を左上、垂直から約20度傾いた通常カーソル向きに修正"
+  },
+  {
+    "id": "window-frame",
+    "path": "assets/ui/window-frame.png",
+    "kind": "ui",
+    "sizePx": {
+      "w": 1024,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/window-frame.md",
+    "createdAt": "2026-07-03",
+    "note": "背景透過"
+  },
+  {
+    "id": "wisp-flame",
+    "path": "assets/enemies/wisp-flame.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/wisp-flame.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "whisper-mask",
+    "path": "assets/enemies/whisper-mask.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/whisper-mask.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "rust-eater",
+    "path": "assets/enemies/rust-eater.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/rust-eater.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "failing-spinner",
+    "path": "assets/enemies/failing-spinner.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/failing-spinner.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過"
+  },
+  {
+    "id": "failing-spinner-phase2",
+    "path": "assets/enemies/failing-spinner-phase2.png",
+    "kind": "enemy",
+    "sizePx": {
+      "w": 512,
+      "h": 512
+    },
+    "promptFile": "assets/prompts/failing-spinner-phase2.md",
+    "createdAt": "2026-07-06",
+    "note": "背景透過。紡ぎ損ない第2形態用"
+  },
+  {
+    "id": "sprite-player",
+    "path": "assets/sprites/sprite-player.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-innkeeper",
+    "path": "assets/sprites/sprite-innkeeper.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-merchant",
+    "path": "assets/sprites/sprite-merchant.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-informant",
+    "path": "assets/sprites/sprite-informant.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-priest",
+    "path": "assets/sprites/sprite-priest.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-mist-wolf",
+    "path": "assets/sprites/symbol-mist-wolf.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-mist-wolf.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-wisp-flame",
+    "path": "assets/sprites/symbol-wisp-flame.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-wisp-flame.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-candle-eater",
+    "path": "assets/sprites/symbol-candle-eater.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-candle-eater.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-whisper-mask",
+    "path": "assets/sprites/symbol-whisper-mask.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-whisper-mask.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-rust-eater",
+    "path": "assets/sprites/symbol-rust-eater.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-rust-eater.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-creaking-doll",
+    "path": "assets/sprites/symbol-creaking-doll.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-creaking-doll.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-dream-eater",
+    "path": "assets/sprites/symbol-dream-eater.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-dream-eater.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "symbol-failing-spinner",
+    "path": "assets/sprites/symbol-failing-spinner.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/symbol-failing-spinner.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "prop-sign",
+    "path": "assets/sprites/prop-sign.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/prop-sign.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "prop-chest",
+    "path": "assets/sprites/prop-chest.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/prop-chest.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "prop-gather",
+    "path": "assets/sprites/prop-gather.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/prop-gather.md",
+    "createdAt": "2026-07-07",
+    "note": "背景透過。マップ上スプライト(32px表示)"
+  },
+  {
+    "id": "sprite-player-up",
+    "path": "assets/sprites/sprite-player-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-player-left",
+    "path": "assets/sprites/sprite-player-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-player-right",
+    "path": "assets/sprites/sprite-player-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-player-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-innkeeper-up",
+    "path": "assets/sprites/sprite-innkeeper-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-innkeeper-left",
+    "path": "assets/sprites/sprite-innkeeper-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-innkeeper-right",
+    "path": "assets/sprites/sprite-innkeeper-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-innkeeper-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-merchant-up",
+    "path": "assets/sprites/sprite-merchant-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-merchant-left",
+    "path": "assets/sprites/sprite-merchant-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-merchant-right",
+    "path": "assets/sprites/sprite-merchant-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-merchant-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-informant-up",
+    "path": "assets/sprites/sprite-informant-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-informant-left",
+    "path": "assets/sprites/sprite-informant-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-informant-right",
+    "path": "assets/sprites/sprite-informant-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-informant-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-priest-up",
+    "path": "assets/sprites/sprite-priest-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(up/背面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-priest-left",
+    "path": "assets/sprites/sprite-priest-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-priest-right",
+    "path": "assets/sprites/sprite-priest-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-priest-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-1向き差分(right/右向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "symbol-mist-wolf-up",
+    "path": "assets/sprites/symbol-mist-wolf-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-mist-wolf-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/背面)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-mist-wolf-left",
+    "path": "assets/sprites/symbol-mist-wolf-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-mist-wolf-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-mist-wolf-right",
+    "path": "assets/sprites/symbol-mist-wolf-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-mist-wolf-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-wisp-flame-up",
+    "path": "assets/sprites/symbol-wisp-flame-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-wisp-flame-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/奥向きの流れ)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-wisp-flame-left",
+    "path": "assets/sprites/symbol-wisp-flame-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-wisp-flame-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向きの流れ)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-wisp-flame-right",
+    "path": "assets/sprites/symbol-wisp-flame-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-wisp-flame-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向きの流れ・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-candle-eater-up",
+    "path": "assets/sprites/symbol-candle-eater-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-candle-eater-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/奥向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-candle-eater-left",
+    "path": "assets/sprites/symbol-candle-eater-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-candle-eater-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-candle-eater-right",
+    "path": "assets/sprites/symbol-candle-eater-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-candle-eater-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-whisper-mask-up",
+    "path": "assets/sprites/symbol-whisper-mask-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-whisper-mask-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/背面空洞)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-whisper-mask-left",
+    "path": "assets/sprites/symbol-whisper-mask-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-whisper-mask-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-whisper-mask-right",
+    "path": "assets/sprites/symbol-whisper-mask-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-whisper-mask-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-rust-eater-up",
+    "path": "assets/sprites/symbol-rust-eater-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-rust-eater-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/奥向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-rust-eater-left",
+    "path": "assets/sprites/symbol-rust-eater-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-rust-eater-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-rust-eater-right",
+    "path": "assets/sprites/symbol-rust-eater-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-rust-eater-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-creaking-doll-up",
+    "path": "assets/sprites/symbol-creaking-doll-up.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-creaking-doll-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(up/背面)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-creaking-doll-left",
+    "path": "assets/sprites/symbol-creaking-doll-left.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-creaking-doll-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(left/左向き)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "symbol-creaking-doll-right",
+    "path": "assets/sprites/symbol-creaking-doll-right.png",
+    "kind": "sprite",
+    "sizePx": { "w": 256, "h": 256 },
+    "promptFile": "assets/prompts/symbol-creaking-doll-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M17-2向き差分(right/右向き・個別生成)。背景透過。マップ上34px前後表示"
+  },
+  {
+    "id": "npc-caretaker",
+    "path": "assets/portraits/npc-caretaker.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-caretaker.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5世話役イルマ立ち絵。背景透過。M16-5/M17スプライトのcanonical identityアンカー"
+  },
+  {
+    "id": "npc-artisan",
+    "path": "assets/portraits/npc-artisan.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-artisan.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5職人ガロ立ち絵。背景透過。M16-5/M17スプライトのcanonical identityアンカー"
+  },
+  {
+    "id": "npc-warden",
+    "path": "assets/portraits/npc-warden.png",
+    "kind": "portrait",
+    "sizePx": {
+      "w": 1024,
+      "h": 1536
+    },
+    "promptFile": "assets/prompts/npc-warden.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5番人トワ立ち絵。背景透過。深いフード影で年齢不詳を保持するcanonical identityアンカー"
+  },
+  {
+    "id": "sprite-caretaker",
+    "path": "assets/sprites/sprite-caretaker.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(down/正面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-caretaker-up",
+    "path": "assets/sprites/sprite-caretaker-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(up/背面・顔なし)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-caretaker-left",
+    "path": "assets/sprites/sprite-caretaker-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-caretaker-right",
+    "path": "assets/sprites/sprite-caretaker-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-caretaker-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(right/右向き・個別生成)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan",
+    "path": "assets/sprites/sprite-artisan.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(down/正面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan-up",
+    "path": "assets/sprites/sprite-artisan-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(up/背面・顔なし)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan-left",
+    "path": "assets/sprites/sprite-artisan-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-artisan-right",
+    "path": "assets/sprites/sprite-artisan-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-artisan-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(right/右向き・個別生成)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden",
+    "path": "assets/sprites/sprite-warden.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(down/正面)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden-up",
+    "path": "assets/sprites/sprite-warden-up.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden-up.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(up/背面・顔なし)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden-left",
+    "path": "assets/sprites/sprite-warden-left.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden-left.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(left/左向き)。背景透過。マップ上32px表示"
+  },
+  {
+    "id": "sprite-warden-right",
+    "path": "assets/sprites/sprite-warden-right.png",
+    "kind": "sprite",
+    "sizePx": {
+      "w": 256,
+      "h": 256
+    },
+    "promptFile": "assets/prompts/sprite-warden-right.md",
+    "createdAt": "2026-07-10",
+    "note": "M16-5/M17新NPC向き差分(right/右向き・個別生成)。背景透過。マップ上32px表示"
+  }
+]

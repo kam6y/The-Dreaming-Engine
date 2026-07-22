@@ -1,0 +1,2096 @@
+import {
+  DREAM_FALLBACK_TEXT,
+  ENEMY_DISPLAY_NAMES,
+  GAME_TITLE,
+  INVENTORY_CAPACITY,
+  ITEMS,
+  MAPS,
+  NPC_DISPLAY_NAMES,
+  TOWN_WAKE_POINT,
+  abandonQuest,
+  acceptProposal,
+  addItem,
+  advanceDay,
+  applyPartyWipe,
+  battleItemToConsume,
+  bossAt,
+  midBossAt,
+  isMidBossEnemyId,
+  midBossDefeatFlag,
+  adjustedSellPrice,
+  affinityTier,
+  countOf,
+  createBattle,
+  createNewGameState,
+  createRng,
+  discountedBuyPrice,
+  effectiveStats,
+  equipItem,
+  evaluateAchievements,
+  freeSpace,
+  hasNarratedEnemy,
+  innFeeFor,
+  interactionTarget,
+  isInShopStock,
+  isReportReady,
+  isStageAtOrAfter,
+  lootForChest,
+  lootForGather,
+  mergeUnlockedAchievements,
+  neighbor,
+  npcPlacementsForTime,
+  receiveQuestParcel,
+  reclaimQuestParcel,
+  recordDelivery,
+  recordEscortArrival,
+  recordHuntKill,
+  recordNarratedEnemy,
+  recordSurvey,
+  recordVisitedMap,
+  removeItem,
+  removeQuestFromList,
+  reportQuest,
+  resolveTurn,
+  subQuestTargetLabel,
+  sampleEnemySymbols,
+  samePosition,
+  timeOfDayForSteps,
+  shopStockEntries,
+  statsForLevel,
+  toPlayerProgress,
+  transitionAt,
+  tryMove,
+  unequipItem,
+  usedSpace,
+  xpToNext,
+  type AchievementEvent,
+  type ActiveInteraction,
+  type BattleCommand,
+  type BattleEvent,
+  type BattleState,
+  type BossMarker,
+  type ClientMessage,
+  type ConversationAction,
+  type DifficultyId,
+  type Direction,
+  type EnemyId,
+  type EnemySymbolPlacement,
+  type EquipmentItemId,
+  type EquipmentSlot,
+  type GameState,
+  type ItemId,
+  type LootEntry,
+  type MapDefinition,
+  type MapObject,
+  type NpcId,
+  type NpcMemory,
+  type PendingProposalView,
+  type Rng,
+  type ServerMessage,
+  type SnapshotView,
+  type SubQuest,
+  type TimeOfDay,
+  type ViewBattle,
+  type ViewEquipmentSlot,
+  type ViewItemStack
+} from "@dreaming-engine/shared";
+
+import type { AiFlowGatekeeper, SpeakStreamSink } from "../ai/flow-control/index.js";
+import { fallbackTextForFlow } from "../ai/flow-control/index.js";
+import type { StateChangeEffect } from "../ai/flow-control/turn-executor.js";
+import type { AiMode } from "../ai/mode.js";
+import type { PersistentStateContext } from "../ai/tool-validation/types.js";
+import { DEFAULT_PLAYER_INPUT_MAX_LENGTH, sanitizePlayerInput } from "../ai/input-wall.js";
+import { applyStateChangeEffect } from "./ai-effects.js";
+import { appendMaskedExchange, maskSummaryForStorage } from "./conversation-memory.js";
+import type { SaveStore } from "./save.js";
+
+/**
+ * サーバー権威の GameState ストア + 操作リデューサー(1プロセスに1つ)。
+ *
+ * クライアントの操作イベント(ClientMessage)を受け、shared の純ロジックで決定論的に適用して
+ * ServerMessage 列(snapshot / dialog / battle-events / error)を返す。ゲーム状態の正本は
+ * ここが保持し、宿泊時にのみ SaveStore で永続化する(ai-integration.md「全体像」/ game-design.md)。
+ *
+ * FS I/O(save/load)・時刻・乱数シードは注入し、ユニットテストで再現可能にする。
+ */
+
+export interface GameSessionDeps {
+  saveStore: SaveStore;
+  /** 現在時刻(ミリ秒)。既定 Date.now。プレイ時間計測に使う */
+  clock?: () => number;
+  /** 敵シンボル/戦闘シードの既定シード(GAME_SEED)。new-game の options.seed で上書き可 */
+  seed?: number;
+  /** 敵シンボルを無効化するか(GAME_NO_SYMBOLS)。new-game の options.noSymbols で上書き可 */
+  noSymbols?: boolean;
+  /**
+   * AIフロー制御ゲートキーパー(会話/夢/戦果/クエスト生成の配線)。
+   * 未指定なら AI 機能は無効化され、会話対応 NPC は定型ダイアログ・宿泊は夢シーンなしで進む
+   * (M3 互換のフォールバック)。createDefaultSession は resolveAiMode→createDreamMaster→gatekeeper を組む。
+   */
+  gatekeeper?: AiFlowGatekeeper;
+  /** 自由入力の最大文字数(config playerInputMaxLength)。既定 200 */
+  playerInputMaxLength?: number;
+  /** 機密マスクの env(既定 process.env)。テストで注入可能 */
+  maskEnv?: NodeJS.ProcessEnv;
+  /**
+   * AI モード(resolveAiMode(env) の結果)。既定 mock。
+   * new-game の startLevel 加速フラグを **live では無視** するゲートに使う
+   * (テスト実行時の進行加速は防御弱体化にあたらない: ai-integration.md「レート・コスト保護」)。
+   */
+  aiMode?: AiMode;
+}
+
+type Mode = "exploration" | "battle";
+
+/** gatekeeper 未注入時(AI 無効)の情報屋の定型ダイアログ(M3 互換フォールバック) */
+const PLACEHOLDER_INFORMANT_LINE =
+  "「……いい話、あるにはあるんだけどね。それはもう少し、夢が深まってからかな」";
+
+/** gatekeeper 未注入時(AI 無効)の番人トワの定型ダイアログ(M3 互換フォールバック。world-lore 3.8) */
+const PLACEHOLDER_WARDEN_LINE =
+  "「唄はね……もう少し、夢が深まってから聞かせよう、とさ」";
+
+/** 店の開店挨拶(店 NPC 別。world-lore 3.3=レンド / 3.7=ガロ の口調)。既存文言はテスト回帰のため不変 */
+const SHOP_GREETINGS: Partial<Record<NpcId, string>> = {
+  merchant: "「いらっしゃい。旅の道具は命の続きです。ゆっくり見ておいきなさい」",
+  artisan: "「売り物は選んで置いてる。安心して買っていけ」"
+};
+
+/** 宿の案内挨拶(宿 NPC 別。world-lore 3.2=オルガ / 3.6=イルマ の口調)。既存文言はテスト回帰のため不変 */
+const INN_GREETINGS: Partial<Record<NpcId, string>> = {
+  innkeeper: "「おや、疲れた顔だね。今夜は泊まっておいき。腹が減ってちゃ悪夢も見れやしないよ」",
+  caretaker: "「遠くから来なさったね。今夜の火の番は、わたしがしますよ。ゆっくりお休みなさい」"
+};
+
+/**
+ * 宿泊完了時の描写(宿 NPC 別。paid=宿代を払った / free=無銭で泊めた)。
+ * 夢シーン・世界変化・セーブの機構は灯宿と同一(rest が共通処理)で、ここは締めの台詞だけを差し替える。
+ * 既存(灯宿)の文言はテスト回帰のため不変。
+ */
+const INN_REST_LINES: Partial<Record<NpcId, { paid: string; free: string }>> = {
+  innkeeper: {
+    paid: "「ゆっくりおやすみ。悪い夢を見たって、朝には湯を沸かしておくからね」旅人は目を閉じ、機関に一日を手渡した。",
+    free: "「今日はお代はいらないよ。……いい夢を、とは言えないけどね」旅人は泥のように眠り、気づけば朝だった。"
+  },
+  caretaker: {
+    paid: "「今夜の火の番は、わたしがしますよ。ゆっくりお眠りなさい」旅人は囲炉裏のそばで目を閉じ、機関に一日を手渡した。",
+    free: "「お代はいりませんよ。……よい夢を、とは言えませんけれどねえ」旅人は泥のように眠り、気づけば朝だった。"
+  }
+};
+
+/**
+ * 司祭フィオルによるメインクエストの明かし(AI 非依存のスクリプト。game-design.md 74 行:
+ * 進行に必須の会話は選択肢=決定論で進める)。arrival で一度だけ提示し rift-revealed へ進める。
+ * 文面は world-lore.md 3.5(フィオル)/ 1.2(夢喰い)の典拠に沿う。
+ */
+const PRIEST_REVEAL_LINES: readonly string[] = [
+  "「よく、この灯守堂まで来られました。……あなたの夢には、どこか継ぎ目の匂いがする」",
+  "「夢の綻びの源は、裂け目のいちばん奥――『夢喰い』と呼ばれるものに根があります」",
+  "「あれは飢えた機関の歯車の成れの果て。悲しむべきは敵ではなく、飢えそのもの。……それでも、止めねばならないのです」"
+];
+
+/** rift-revealed 以降に司祭へ話しかけた時の短い激励(gatekeeper 未注入時のスクリプト) */
+const PRIEST_ENCOURAGE_LINE =
+  "「裂け目の奥へ。……どうか、無事で。祈ることしかできぬ身が、それでも祈っています」";
+
+/** ボス戦ゲート未達(arrival)でボスへ近づいた時のスクリプト(司祭へ誘導) */
+const BOSS_GATE_LINE =
+  "重い唸りのような静寂が満ちている。……まだ、近づくには早い。まず、灯守堂の司祭に会うべきだ。";
+
+/** 撃破後にボスの在った場所へ近づいた時のスクリプト(再戦不可) */
+const BOSS_DEFEATED_LINE = "裂け目の奥は、もう静かだ。飢えは終わり、ただ青灰の凪だけが残っている。";
+
+/** 中ボス撃破後にその場所へ近づいた時のスクリプト(再戦不可。M10) */
+const MID_BOSS_DEFEATED_LINE =
+  "崩れた織機の残骸が、糸を垂らしたまま動かない。空回りは、もう止まっている。";
+
+// ---------------------------------------------------------------------------
+// メインクエスト第2章「灯の還る先」の決定論スクリプト(M18-2)
+// 物語的な正: world-lore.md 1.6 / game-design.md「メインクエスト第2章(拡張: M18)」。
+// すべて選択肢会話・調べイベントの決定論で運ぶ(AI 非依存。司祭 PRIEST_REVEAL_LINES と同方式)。
+// 開示の高度はフック#2(「灯の還る先」が在るという確証)まで。トワ個人の最奥(3.8 の70以上)・
+// フック#1(旅人の正体)は匂わせを越えない。トーンは6節の語りのトーンガイドに従う。
+// ---------------------------------------------------------------------------
+
+/** 灯還りの坑「導管の間」の調べオブジェクト id(第2章の起点/結び。dungeon4.ts と一致) */
+const CONDUIT_OBJECT_ID = "d4-conduit";
+
+/** 【第2章開始】epilogue で導管の間を再訪して調べた時の気づき(ch2-stirring へ) */
+const CONDUIT_STIRRING_LINES: readonly string[] = [
+  "以前はただ「かすかに温かい」だけだった導管が、脈打っている。ひとつ、またひとつと、闇の奥へ熱を送り出している。",
+  "この温もりは、ここで生まれているのではない。どこかへ運ばれ、どこかで受け取られている――そう、確かに感じる。",
+  "坑の異変を知る者がいるとすれば、坑口の番人トワだろう。あの唄には、まだ続きがある気がする。"
+];
+
+/** ch2-stirring で導管を再び調べた時(段階は進めない=トワの唄待ちへ促す) */
+const CONDUIT_AWAIT_SONG_LINE =
+  "導管は変わらず脈打ち、遠い彼方へ温もりを送り続けている。この行き先を知るには、まず坑口のトワの唄を聴くべきだ。";
+
+/** 【第2章クリア】ch2-vigil-song でトワの唄を胸に導管の間へ戻った時の結び(ch2-beyond へ+即時セーブ) */
+const CONDUIT_BEYOND_LINES: readonly string[] = [
+  "トワの唄を胸に導管の前に立つと、脈打つ導管は問いに応えるように、いっそう強く温もりを送り出した。",
+  "得られたのは答えではなく、確証だった。灯町も、琥珀郷も、裂け目も、機関が紡ぐ夢のごく一部に過ぎない。",
+  "その外に、まだ夢を紡ぐ何かが確かにある。どこへ通じ、その先で誰が夢を見ているのかは、まだわからない。",
+  "旅人は予感だけを胸に、導管の間を後にした。灯は、還るべき先へ還っていく。"
+];
+
+/** 第2章クリア後(ch2-beyond)に導管を再び調べた時の余韻(段階不変・章は再発しない) */
+const CONDUIT_AFTERGLOW_LINE =
+  "導管は今も、静かに脈打っている。灯は還るべき先へ還り、その先でなお、誰かが夢を見ている。";
+
+/** ch2-stirring でトワに話しかけた時、唄の続き「灯の還る先」を明かす(ch2-vigil-song へ) */
+const WARDEN_VIGIL_SONG_LINES: readonly string[] = [
+  "「坑の奥が、脈を打ちはじめた。……あんたも、あれに気づいたんだね」",
+  "「なら、誰も歌わなくなった唄の続きを、あんたにだけ聴かせよう。『灯の還る先』――そういう節さ」",
+  "「消えた灯は、この郷でも、あの裂け目でもない、どこかへ還る。そこでは今も夢が紡がれている……と、唄はそう伝えている」",
+  "「どこの、とは唄わない。誰も知らないからね。あたしはただ、坑の奥のまだ温かいものを、静かに見ているだけ」",
+  "「導管の間へお戻り。あの脈動が、唄が本当かどうかを、あんたに答えてくれるはずだよ」"
+];
+
+export class GameSession {
+  private readonly saveStore: SaveStore;
+
+  private readonly clock: () => number;
+
+  private readonly defaultSeed: number | undefined;
+
+  private readonly defaultNoSymbols: boolean;
+
+  /** GameState の正本。null = まだゲームが始まっていない */
+  private state: GameState | null = null;
+
+  private mode: Mode = "exploration";
+
+  /**
+   * 時間帯(昼/夜。M23)。`mode` と同格の非永続ランタイム状態(セーブスキーマ変更なし=
+   * セーブは宿泊手順5のみで必ず日送り(→朝)の後のため、あらゆるセーブは昼で取られ、
+   * ロードは常に昼で再開できる: game-design.md「セーブ/ロードへの影響」)。
+   */
+  private timeOfDay: TimeOfDay = "day";
+
+  /** その日の移動成立歩数(M23。timeOfDay の唯一の進行源。リセット規則は resetTimeOfDay 参照) */
+  private daySteps = 0;
+
+  /**
+   * 時間帯の固定ピン(M23。テスト用・mock 限定)。new-game の options.timeOfDay で設定し、
+   * non-null の間は歩数進行・昼リセットに関わらずこの値に固定する(E2E の決定論再現用。
+   * live では無視して null のまま=通常進行)。continue では常に null(通常進行)。
+   */
+  private timeOfDayPin: TimeOfDay | null = null;
+
+  /**
+   * 当該操作で起きた実績の決定論イベント(M24。sub-quest-reported / world-event-applied)。
+   * 当該処理(reportSubQuest 成功・宿泊手順4の世界変化適用)が積み、単一チョークポイント評価
+   * (settleAchievements)が消費してクリアする。`mode` と同格の非永続ランタイム状態
+   * (newGame/continue でもクリアする=resetRuntime)。
+   */
+  private readonly pendingAchievementEvents: AchievementEvent[] = [];
+
+  private battle: BattleState | null = null;
+
+  /** 戦闘中の敵シンボルの this.symbols 上のインデックス(勝利で除去する) */
+  private battleSymbolIndex: number | null = null;
+
+  /** 現マップの敵シンボル(runtime。マップ入場でサンプリング、再訪でリスポーン) */
+  private symbols: EnemySymbolPlacement[] = [];
+
+  /** 今回の訪問で採取済みの採取点 id(マップ離脱でクリア=リスポーン) */
+  private readonly gatheredThisVisit = new Set<string>();
+
+  /** 有効な対話(店/宿)。interact で設定、move 等で解除 */
+  private activeInteraction: ActiveInteraction | null = null;
+
+  /** 敵シンボル/戦闘シード用の RNG(new-game/continue でシード) */
+  private rng: Rng;
+
+  private noSymbols: boolean;
+
+  /** プレイ時間の計測起点(ミリ秒)。state.playtimeSeconds を基点に加算する */
+  private activeSince: number;
+
+  /** AIフロー制御(未注入なら null=AI 機能無効) */
+  private readonly gatekeeper: AiFlowGatekeeper | null;
+
+  /** 自由入力の最大長(会話 sanitize に使う) */
+  private readonly playerInputMaxLength: number;
+
+  /** 機密マスクの env(会話履歴の永続化前マスクに使う) */
+  private readonly maskEnv: NodeJS.ProcessEnv;
+
+  /** AI モード(startLevel 加速フラグの live 無効化ゲートに使う) */
+  private readonly aiMode: AiMode;
+
+  /** 提案サブクエストの id 採番カウンタ(プロセス内で単調増加。ロード時に既存 id を跨いで補正) */
+  private aiQuestSeq = 0;
+
+  /**
+   * ゲーム世代(new-game/continue のたびに +1)。非同期化した会話要約の完了ハンドラが、
+   * 立ち去り後にリセット/ロードされた**別のゲーム**の GameState へ誤って書き戻すのを防ぐ印。
+   * conversationEnd で控えた世代と、完了時点の世代が一致するときのみ memory を更新する。
+   */
+  private gameGeneration = 0;
+
+  /**
+   * サーバー直列チェーンの外で走る完了ハンドラから、接続中の WS へ自発 push する送信手段。
+   * server.ts が WS 接続確立時に注入し、切断時に null へ戻す。未設定(切断中)の push は黙って破棄する
+   * (再接続時は connect() の snapshot 再同期が正を配るため、失われても不整合にならない)。
+   */
+  private pushSender: ((messages: ServerMessage[]) => void) | null = null;
+
+  public constructor(deps: GameSessionDeps) {
+    this.saveStore = deps.saveStore;
+    this.clock = deps.clock ?? Date.now;
+    this.defaultSeed = deps.seed;
+    this.defaultNoSymbols = deps.noSymbols ?? false;
+    this.noSymbols = this.defaultNoSymbols;
+    this.rng = createRng(this.defaultSeed ?? 0);
+    this.activeSince = this.clock();
+    this.gatekeeper = deps.gatekeeper ?? null;
+    this.playerInputMaxLength = deps.playerInputMaxLength ?? DEFAULT_PLAYER_INPUT_MAX_LENGTH;
+    this.maskEnv = deps.maskEnv ?? process.env;
+    this.aiMode = deps.aiMode ?? "mock";
+  }
+
+  // =========================================================================
+  // 接続時: hello(セーブ有無)+ ゲーム進行中なら現スナップショットで再同期
+  // =========================================================================
+
+  public async connect(): Promise<ServerMessage[]> {
+    const hasSave = await this.saveStore.exists();
+    const msgs: ServerMessage[] = [{ type: "hello", title: GAME_TITLE, hasSave }];
+    if (this.state !== null) msgs.push(this.snapshotMsg());
+    return msgs;
+  }
+
+  /**
+   * 自発 push の送信手段を登録/解除する(server.ts が WS 接続確立時に注入、切断時に null)。
+   * 直列チェーンの外(AI 完了ハンドラ)から現接続の socket へ配信するために使う。
+   */
+  public setPushSender(sender: ((messages: ServerMessage[]) => void) | null): void {
+    this.pushSender = sender;
+  }
+
+  /**
+   * 直列チェーンの外(挨拶生成の完了ハンドラ等)からクライアントへ自発 push する。
+   * sender 未設定(切断中)なら黙って破棄する。送信例外は握って無害化する
+   * (切断直後の送信等でプロセスを落とさない)。
+   */
+  private push(messages: ServerMessage[]): void {
+    const sender = this.pushSender;
+    if (sender === null) return;
+    try {
+      sender(messages);
+    } catch {
+      // 送信例外は握って無害化(切断直後の socket へ書いた等)
+    }
+  }
+
+  /** 操作イベントを処理し ServerMessage 列を返す(ping は server.ts が処理する) */
+  public async handle(message: ClientMessage): Promise<ServerMessage[]> {
+    switch (message.type) {
+      case "ping":
+        return [];
+      case "new-game":
+        return this.newGame(message.options);
+      case "continue":
+        return this.continueGame(message.options);
+      case "move":
+        return this.move(message.direction);
+      case "interact":
+        return this.interact();
+      case "battle-command":
+        return this.battleCommand(message.command);
+      case "use-item":
+        return this.useItem(message.itemId);
+      case "discard-item":
+        return this.discardItem(message.itemId, message.quantity);
+      case "equip":
+        return this.equip(message.itemId);
+      case "unequip":
+        return this.unequip(message.slot);
+      case "shop-buy":
+        return this.shopBuy(message.itemId, message.quantity);
+      case "shop-sell":
+        return this.shopSell(message.itemId, message.quantity);
+      case "rest":
+        return this.rest();
+      case "conversation-send":
+        return this.conversationSend(message.text);
+      case "conversation-choose":
+        return this.conversationChoose(message.choice);
+      case "conversation-end":
+        return this.conversationEnd();
+      case "quest-request":
+        return this.questRequest();
+      case "abandon-quest":
+        return this.abandonSubQuest(message.questId);
+      case "report-quest":
+        return this.reportSubQuest(message.questId);
+      case "acknowledge-ending":
+        return this.acknowledgeEnding();
+    }
+  }
+
+  // =========================================================================
+  // 新規ゲーム / つづきから
+  // =========================================================================
+
+  private newGame(options?: {
+    seed?: number | undefined;
+    noSymbols?: boolean | undefined;
+    startLevel?: number | undefined;
+    startGold?: number | undefined;
+    timeOfDay?: TimeOfDay | undefined;
+    difficulty?: DifficultyId | undefined;
+  }): ServerMessage[] {
+    const seed = options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0);
+    this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
+    this.rng = createRng(seed);
+    this.state = createNewGameState();
+    // テスト加速: startLevel / startGold(mock 限定)。live では無視して通常の開始を守る
+    if (options?.startLevel !== undefined && this.aiMode !== "live") {
+      this.applyStartLevel(options.startLevel);
+    }
+    if (options?.startGold !== undefined && this.aiMode !== "live") {
+      // 装備購入スモーク(M8-4)等の資金確保。startLevel と同じテスト加速の扱い
+      this.state.player.gold = options.startGold;
+    }
+    // 難易度(M25。新規ゲーム時の3択の確定値)。UI で選ぶ正規のプレイヤー選択のため
+    // startLevel 等の加速チートと異なり mock 限定にしない(live でも尊重する)。
+    // 未指定は createNewGameState の既定「ふつう」のまま。以後の戦闘・宿泊セーブへ反映される。
+    if (options?.difficulty !== undefined) {
+      this.state.difficulty = options.difficulty;
+    }
+    // テスト用の時間帯固定ピン(M23。startLevel と同流儀=mock 限定・live では無視)。
+    // resetRuntime(→resetTimeOfDay)がこのピンを参照するため、必ず先に確定する
+    this.timeOfDayPin =
+      options?.timeOfDay !== undefined && this.aiMode !== "live" ? options.timeOfDay : null;
+    this.syncQuestSeq();
+    this.resetRuntime();
+    this.activeSince = this.clock();
+    this.enterCurrentMap();
+    // 新規ゲームは既存セーブに触れない(最初の宿泊セーブで自然に上書きされる)
+    return [this.snapshotMsg()];
+  }
+
+  /**
+   * テスト加速フラグ: プレイヤーを指定レベルで開始させる(HP/MP は statsForLevel、
+   * XP は当該レベル到達直後の 0、ゴールドは初期値のまま)。mock 限定で newGame が呼ぶ。
+   */
+  private applyStartLevel(startLevel: number): void {
+    const state = this.requireState();
+    const stats = statsForLevel(startLevel);
+    state.player = {
+      ...state.player,
+      level: startLevel,
+      xp: 0,
+      hp: stats.maxHP,
+      mp: stats.maxMP
+    };
+  }
+
+  private async continueGame(options?: {
+    seed?: number | undefined;
+    noSymbols?: boolean | undefined;
+  }): Promise<ServerMessage[]> {
+    const result = await this.saveStore.load();
+    if (!result.ok) {
+      if (result.reason === "missing") {
+        return this.errorMsgs("no-save", "記録された夢は、まだない。");
+      }
+      return this.errorMsgs("save-corrupted", "記録が霧に滲んでいる……新しく始めるほかないようだ。");
+    }
+    this.state = result.state;
+    // つづきからは常に通常進行(時間帯固定ピンなし)。ロードは必ず昼で再開する
+    // (セーブは必ず朝の状態で取られるため: game-design.md「セーブ/ロードへの影響」)
+    this.timeOfDayPin = null;
+    this.syncQuestSeq();
+    // E2E/デバッグ用の options(seed / noSymbols)で既定を上書きする。未指定なら従来どおり
+    // 既定シード(GAME_SEED)→clock、既定 noSymbols(GAME_NO_SYMBOLS)を使う。
+    // startLevel/startGold は continue には無い=セーブ済みの進行が正。
+    this.noSymbols = options?.noSymbols ?? this.defaultNoSymbols;
+    this.rng = createRng(options?.seed ?? this.defaultSeed ?? (this.clock() >>> 0));
+    this.resetRuntime();
+    this.activeSince = this.clock();
+    this.enterCurrentMap();
+    return [this.snapshotMsg()];
+  }
+
+  private resetRuntime(): void {
+    // 新規/ロードで世代を進める。進行中の非同期要約が完了しても、リセット/ロード後の
+    // 別ゲームへは書き戻さない(conversationEnd の完了ハンドラが世代不一致で破棄する)。
+    // 呼び出し元は newGame / continueGame のみ(いずれも新しいゲーム文脈の確立点)。
+    this.gameGeneration += 1;
+    this.mode = "exploration";
+    this.battle = null;
+    this.battleSymbolIndex = null;
+    this.activeInteraction = null;
+    this.gatheredThisVisit.clear();
+    // 新規/ロードで前ゲームの実績イベントを持ち越さない(M24。非永続ランタイム)
+    this.pendingAchievementEvents.length = 0;
+    // 新規/ロードで時間帯は昼へ(M23。固定ピンがあればピンの値=テスト用の決定論再現)
+    this.resetTimeOfDay();
+  }
+
+  // =========================================================================
+  // 昼夜サイクル(M23。非永続ランタイム。進行源は移動成立歩数のみ)
+  // =========================================================================
+
+  /**
+   * 時間帯を昼(朝)へ戻し歩数カウンタを 0 にする(M23)。呼び出し元は仕様の4リセット点:
+   * 新規ゲーム/ロード(resetRuntime 経由)・宿泊(advanceDay の日送り直後)・全滅帰還。
+   * テスト用の固定ピン(mock 限定)がある場合はピンの値に固定する。
+   */
+  private resetTimeOfDay(): void {
+    this.daySteps = 0;
+    this.timeOfDay = this.timeOfDayPin ?? "day";
+  }
+
+  /**
+   * 移動が実際に成立した歩数を1つ積み、時間帯を再計算する(M23)。
+   * 呼び出すのは move の tryMove 成立時のみ(戦闘開始の踏み込み・衝突・ボス接触では
+   * 移動が成立しないため加算しない。調べる・会話・売買でも進めない=歩数が唯一の進行源)。
+   */
+  private registerStep(): void {
+    this.daySteps += 1;
+    this.timeOfDay = this.timeOfDayPin ?? timeOfDayForSteps(this.daySteps);
+  }
+
+  /**
+   * 現在地マップの時間帯適用済み定義(M23)。npcs を npcPlacementsForTime
+   * (配置の唯一の正。クライアント描画も同一関数を通す)の結果へ差し替えて返す。
+   * 移動衝突・正面インタラクション・占有判定は必ずこのマップに対して行う
+   * (絵と当たり判定の乖離防止)。変化が無い(昼・灯町以外)場合は元の定義をそのまま返す。
+   */
+  private currentMapForTime(): MapDefinition {
+    const state = this.requireState();
+    const map = MAPS[state.location.mapId];
+    const npcs = npcPlacementsForTime(map, this.timeOfDay);
+    return npcs === map.npcs ? map : { ...map, npcs };
+  }
+
+  /** 現在地のマップに入場する: 敵シンボルをサンプリングし、採取状態と対話をリセットする */
+  private enterCurrentMap(): void {
+    // 訪問済みマップの記録(M22。「夢の地図」用)。マップ入場の唯一の合流点である本メソッドで
+    // 現在地 mapId を visitedMaps へ(未収録なら)追記する。呼び出し元は4箇所=
+    // newGame(開始 town。createNewGameState で初期化済み=冪等)/ continueGame(ロード時に
+    // 現在地を補完=旧セーブの visitedMaps 欠落を救う)/ move(遷移成立で行き先を追記)/
+    // 全滅帰還(TOWN_WAKE_POINT。冪等)。将来ここ以外でマップを変える経路を足すときは要追記。
+    const arrived = this.requireState();
+    this.state = recordVisitedMap(arrived, arrived.location.mapId);
+    const state = this.requireState();
+    this.gatheredThisVisit.clear();
+    this.activeInteraction = null;
+    // 時間帯適用済みマップ(M23)。現状は夜上書きが灯町(safe=シンボルなし)のみで
+    // サンプリング結果は不変だが、占有判定の正を一元化しておく(将来の上書き拡張に備える)
+    const map = this.currentMapForTime();
+    const sampled = this.noSymbols ? [] : sampleEnemySymbols(map, this.rng);
+    // プレイヤーの現在マスに湧いたシンボルは除去(入場即戦闘を避ける)
+    this.symbols = sampled.filter((s) => !samePosition(s.position, state.location.position));
+  }
+
+  // =========================================================================
+  // 移動
+  // =========================================================================
+
+  private move(direction: Direction): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+
+    state.location.facing = direction;
+    this.clearInteraction(); // 移動で対話は解除(会話中なら要約せず破棄)
+
+    // 時間帯適用済みマップ(M23)。衝突・占有判定は夜配置(npcPlacementsForTime)に対して行う
+    const map = this.currentMapForTime();
+    const target = neighbor(state.location.position, direction);
+
+    // 敵シンボルへの踏み込み = 戦闘開始(移動はしない)
+    const symbolIndex = this.symbols.findIndex((s) => samePosition(s.position, target));
+    if (symbolIndex >= 0) {
+      this.beginBattle(symbolIndex);
+      return [this.snapshotMsg()];
+    }
+
+    // ボスマーカーへの踏み込み = ゲート付きボス戦(占有マスなので通常移動はしない)
+    const boss = bossAt(map, target);
+    if (boss !== null) return this.approachBoss(boss);
+
+    // 中ボスマーカーへの踏み込み = 中ボス戦(占有マス。撃破済みなら定型 dialog。M10)
+    const midBoss = midBossAt(map, target);
+    if (midBoss !== null) return this.approachMidBoss(midBoss);
+
+    const result = tryMove(map, state.location.position, direction);
+    if (result.moved) {
+      // 移動成立=歩数を積んで時間帯を再計算(M23。衝突・戦闘開始・ボス接触では積まない)
+      this.registerStep();
+      state.location.position = result.position;
+      const transition = transitionAt(map, result.position);
+      if (transition) {
+        state.location = {
+          mapId: transition.to.mapId,
+          position: { ...transition.to.position },
+          facing: transition.to.facing
+        };
+        this.enterCurrentMap();
+      }
+    }
+    // 護衛(escort)の到達判定(移動処理後。到達地点=目的地の(mapId,座標)なら達成)
+    return [this.snapshotMsg(), ...this.recordEscortArrivalHere()];
+  }
+
+  /**
+   * 護衛(escort)の到達判定(move の後処理。ai-integration.md「5b」達成の意味論)。
+   * 現在地(mapId, position)が active な escort の目的地に一致すれば completed にし、達成を通知する。
+   * 目的地に別クエスト無し・到達していない場合は無変化・空配列(何も起きない)。
+   */
+  private recordEscortArrivalHere(): ServerMessage[] {
+    const state = this.requireState();
+    const before = state.subQuests;
+    const after = recordEscortArrival(before, state.location.mapId, state.location.position);
+    // active→completed になった escort だけを拾う(recordEscortArrival は毎回新配列を返すため id で比較)
+    const completed = after.filter((q) => {
+      if (q.type !== "escort" || q.status !== "completed") return false;
+      return before.find((p) => p.id === q.id)?.status === "active";
+    });
+    if (completed.length === 0) return [];
+    this.state = { ...state, subQuests: after };
+    return completed.map((q) =>
+      this.dialogMsg(
+        null,
+        `${subQuestTargetLabel(q)}に辿り着いた。同行者は無事に送り届けられた。「${q.title}」を果たした――カイに報告しよう。`
+      )
+    );
+  }
+
+  private beginBattle(symbolIndex: number): void {
+    const state = this.requireState();
+    const symbol = this.symbols[symbolIndex];
+    if (symbol === undefined) return;
+    const seed = this.rng.int(0, 0x7fffffff);
+    // 難易度(M25)を渡す(被ダメージ倍率を開始時に固定=進行中戦闘には遡及しない)
+    this.battle = createBattle(state.player, symbol.enemyId, seed, state.equipment, state.difficulty);
+    this.battleSymbolIndex = symbolIndex;
+    this.mode = "battle";
+    this.activeInteraction = null;
+  }
+
+  /**
+   * ボスマーカーへの接触/interact 時のゲート処理(接触=move も interact も同一経路):
+   * - 撃破済み(dream-eater-defeated 以降): 非アクティブ。スクリプト dialog で戻す(再戦不可)
+   * - arrival(司祭未面会): ゲートで戻す(スクリプト dialog。司祭へ誘導)
+   * - rift-revealed: ボス戦(isBoss)を開始する
+   */
+  private approachBoss(boss: BossMarker): ServerMessage[] {
+    // approachBoss は move からも呼ばれる。クライアントの移動ロック(awaiting)は snapshot/error
+    // でのみ解除されるため、ゲート/撃破済みでも snapshot を必ず先に返す(dialog のみだと移動が固まる)。
+    if (this.isBossDefeated()) return [this.snapshotMsg(), this.dialogMsg(null, BOSS_DEFEATED_LINE)];
+    if (this.requireState().mainQuestStage === "arrival") {
+      return [this.snapshotMsg(), this.dialogMsg(null, BOSS_GATE_LINE)];
+    }
+    this.beginBossBattle(boss.enemyId);
+    return [this.snapshotMsg()];
+  }
+
+  /**
+   * 中ボスマーカーへの接触処理(M10。最終ボスと別枠):
+   * - 撃破済み(gimmicks に記録あり): 非アクティブ。定型 dialog で戻す(再戦不可)
+   * - 未撃破: 中ボス戦を開始(beginBossBattle と同経路。isBoss=false なのでメインクエスト進行・
+   *   エンディングは誘発しない。逃走は敵定義どおり可能)
+   * approachBoss と同様、move からの呼び出しで移動ロックが固まらないよう snapshot を必ず先に返す。
+   */
+  private approachMidBoss(midBoss: BossMarker): ServerMessage[] {
+    const state = this.requireState();
+    if (state.gimmicks.includes(midBossDefeatFlag(midBoss.enemyId))) {
+      return [this.snapshotMsg(), this.dialogMsg(null, MID_BOSS_DEFEATED_LINE)];
+    }
+    this.beginBossBattle(midBoss.enemyId);
+    return [this.snapshotMsg()];
+  }
+
+  /** ボス戦を開始する(シンボル由来ではないので battleSymbolIndex は null。isBoss は敵定義由来) */
+  private beginBossBattle(enemyId: EnemyId): void {
+    const state = this.requireState();
+    const seed = this.rng.int(0, 0x7fffffff);
+    // 難易度(M25)を渡す(ボス戦もプレイヤー被ダメージのみに作用。敵定義は不変)
+    this.battle = createBattle(state.player, enemyId, seed, state.equipment, state.difficulty);
+    this.battleSymbolIndex = null;
+    this.mode = "battle";
+    this.activeInteraction = null;
+  }
+
+  /**
+   * ボス撃破済みか(dream-eater-defeated 以降。ボスマーカーの非アクティブ判定に使う)。
+   * 第2章段階(ch2-*)を epilogue の後ろへ足したため、等値ではなく**順序判定**で
+   * 「dream-eater-defeated 以降」を表す(さもないと第2章中にボスマーカーが再活性化する:
+   * game-design.md「メインクエスト第2章」実装上の要注意点)。
+   */
+  private isBossDefeated(): boolean {
+    return isStageAtOrAfter(this.requireState().mainQuestStage, "dream-eater-defeated");
+  }
+
+  // =========================================================================
+  // 戦闘
+  // =========================================================================
+
+  private async battleCommand(command: BattleCommand): Promise<ServerMessage[]> {
+    if (this.state === null) return this.errorMsgs("no-active-game", "まだ物語は始まっていない。");
+    if (this.mode !== "battle" || this.battle === null) {
+      return this.errorMsgs("invalid-mode", "今は戦っていない。");
+    }
+    // どうぐは所持していない品を受け付けない(クライアントは所持品のみ提示するが二重防御。ラウンドを進めない)
+    if (command.kind === "item" && countOf(this.requireState().inventory, command.itemId) <= 0) {
+      return this.errorMsgs("not-owned", "それは持っていない。");
+    }
+    const result = resolveTurn(this.battle, command);
+    this.battle = result.state;
+    // どうぐ消費: 実際に使用された(該当 itemId の item-used イベントがある)ときだけ数量を1つ減らす。
+    // 竦みで行動不能=不発(action-skipped・item-used なし)や却下時は減算しない(battleItemToConsume が判定)。
+    const consumed = battleItemToConsume(command, result.events);
+    if (consumed !== null) {
+      const state = this.requireState();
+      state.inventory = removeItem(state.inventory, consumed, 1).inventory;
+    }
+    // 勝敗を適用してから(状態を確定してから)スナップショットを組む
+    const trailing = await this.settleBattleOutcome(result.state, result.events);
+    return [{ type: "battle-events", events: result.events }, this.snapshotMsg(), ...trailing];
+  }
+
+  private async settleBattleOutcome(
+    battle: BattleState,
+    events: readonly BattleEvent[]
+  ): Promise<ServerMessage[]> {
+    const state = this.requireState();
+    const dialogs: ServerMessage[] = [];
+
+    switch (battle.outcome) {
+      case "ongoing":
+        return [];
+      case "victory": {
+        // 報酬(ゴールド・XP・レベル・HP/MP)は戦闘エンジンが battle.player に反映済み
+        state.player = toPlayerProgress(battle.player);
+        // ドロップ品をインベントリへ。満杯なら入らない分は破棄(通知)
+        const victory = events.find((e) => e.type === "victory");
+        const drops = victory && victory.type === "victory" ? victory.drops : [];
+        let overflowed = false;
+        for (const itemId of drops) {
+          const added = addItem(state.inventory, itemId, 1);
+          state.inventory = added.inventory;
+          if (added.overflow > 0) overflowed = true;
+        }
+        // hunt 進行: 受注中 hunt サブクエストの対象討伐をカウント
+        const enemyId = battle.enemy.enemyId;
+        state.subQuests = recordHuntKill(state.subQuests, enemyId);
+        // 撃破したシンボルを除去(再入場でリスポーン)
+        if (this.battleSymbolIndex !== null) this.symbols.splice(this.battleSymbolIndex, 1);
+        // 中ボス撃破: gimmicks に記録(リスポーンなし)。isBoss=false なのでメインクエストは進めない。
+        // 永続化は次回セーブ時(宝箱の開封と同じ扱い。game-design.md「敵バリエーション(拡張: M10)」)。
+        if (isMidBossEnemyId(enemyId) && !state.gimmicks.includes(midBossDefeatFlag(enemyId))) {
+          state.gimmicks.push(midBossDefeatFlag(enemyId));
+        }
+        this.endBattle();
+        if (overflowed) {
+          dialogs.push(this.dialogMsg(null, "戦利品は手に余り、いくらかは夢に溶けて消えた。(持ちきれなかった)"));
+        }
+        // 戦果描写: 初見(未描写)のみ AI ナレーション・既見は定型(いずれも ai-utterance narrate)
+        dialogs.push(...(await this.narrateBattle(enemyId)));
+        // ボス撃破: メインクエストを dream-eater-defeated へ進めてセーブに永続化する。
+        // 以後ボスマーカーは非アクティブ(再戦不可)。リロード(continue)後もこの段階が保たれる。
+        // クライアント(M6-B)はこのスナップショット(mode:exploration・dungeon-3・
+        // mainQuestStage:dream-eater-defeated)を検出してエンディングへ直行する。
+        if (battle.isBoss && !this.isBossDefeated()) {
+          this.state = { ...this.requireState(), mainQuestStage: "dream-eater-defeated" };
+          this.accruePlaytime();
+          await this.saveStore.save(this.requireState());
+        }
+        return dialogs;
+      }
+      case "defeat": {
+        // 全滅: ゴールド半減 + HP/MP全回復 + 日送り。宿屋で目覚める(セーブはしない)
+        const wipe = applyPartyWipe(toPlayerProgress(battle.player));
+        state.player = wipe.progress;
+        state.location = {
+          mapId: TOWN_WAKE_POINT.mapId,
+          position: { ...TOWN_WAKE_POINT.position },
+          facing: TOWN_WAKE_POINT.facing
+        };
+        // 日送り(advanceDay: 日付+1・aiDaily/話題/street_event リセット)+ 縮退解除フック
+        this.state = advanceDay(this.requireState());
+        this.gatekeeper?.onDayAdvanced();
+        // 全滅帰還=翌朝に目覚める: 時間帯を昼へ戻す(M23)
+        this.resetTimeOfDay();
+        this.endBattle();
+        this.enterCurrentMap();
+        const body =
+          wipe.goldLost > 0
+            ? `悪夢から覚めた。旅人は灯宿の寝台にいた。……${wipe.goldLost}のゴールドを、夢のどこかに落としてきたらしい。`
+            : "悪夢から覚めた。旅人は灯宿の寝台にいた。";
+        dialogs.push(this.dialogMsg(null, body));
+        return dialogs;
+      }
+      case "fled":
+        // 逃走: シンボルは残す(逃げた敵は消えない)
+        this.endBattle();
+        return dialogs;
+    }
+  }
+
+  /** 戦果描写: 初見のみ AI ナレーション、既見は定型(いずれも gatekeeper 経由)。未注入なら何もしない */
+  private async narrateBattle(enemyId: EnemyId): Promise<ServerMessage[]> {
+    if (this.gatekeeper === null) return [];
+    const already = hasNarratedEnemy(this.requireState(), enemyId);
+    const result = await this.gatekeeper.battleResult({
+      enemyId,
+      persistent: this.buildPersistentContext(),
+      alreadyNarrated: already
+    });
+    if (!already) this.state = recordNarratedEnemy(this.requireState(), enemyId);
+    return [this.aiUtteranceMsg("narrate", result.displayText)];
+  }
+
+  private endBattle(): void {
+    this.battle = null;
+    this.battleSymbolIndex = null;
+    this.mode = "exploration";
+    this.activeInteraction = null;
+  }
+
+  // =========================================================================
+  // 調べる・話す
+  // =========================================================================
+
+  private async interact(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    this.clearInteraction();
+
+    // 時間帯適用済みマップ(M23)。正面インタラクションも夜配置に対して行う(絵との乖離防止)
+    const map = this.currentMapForTime();
+    const target = interactionTarget(map, state.location.position, state.location.facing);
+    if (target === null) {
+      return [this.dialogMsg(null, "……この手が触れるものは、何もない。")];
+    }
+    if (target.kind === "npc") return this.interactNpc(target.npc.id);
+    if (target.kind === "object") return this.interactObject(target.object);
+    // boss: メインクエスト段階でゲートし、rift-revealed のみボス戦へ
+    return this.approachBoss(target.boss);
+  }
+
+  /**
+   * NPC への interact。**deliver の納品を先行**させてから通常フロー(店/宿/会話/スクリプト)へ合流する。
+   * 受取NPC(recipientId)に active な deliver クエストがあれば決定論の納品イベント(AI 非依存)を先に処理し、
+   * その手渡し dialog を通常フローの先頭 snapshot 直後に差し込む(宿・店 overlay を持つ NPC も納品後に開く)。
+   * 受取NPC以外・預かり品を持たない相手では納品は起きない(deliverPendingParcel が無変化・空を返す)。
+   *
+   * npc_absence(M20): 当日不在の NPC(world.absentNpc)は会話・店・宿とも利用不可の定型表示のみ返し、
+   * 通常フローも deliver 納品も行わない(納品は翌日以降へ持ち越し。翌朝の advanceDay で自動復帰)。
+   */
+  private async interactNpc(npcId: NpcId): Promise<ServerMessage[]> {
+    if (this.requireState().world.absentNpc === npcId) {
+      return [this.dialogMsg(null, `${NPC_DISPLAY_NAMES[npcId]}は、今日は姿が見えないようだ。`)];
+    }
+    const deliveryDialogs = this.deliverPendingParcel(npcId);
+    const normal = await this.openNpcInteraction(npcId);
+    if (deliveryDialogs.length === 0) return normal;
+    // 納品の手渡しを snapshot(納品反映済み)直後に差し込む。snapshot が無い経路は先頭に補う。
+    const idx = normal.findIndex((m) => m.type === "snapshot");
+    if (idx >= 0) {
+      return [...normal.slice(0, idx + 1), ...deliveryDialogs, ...normal.slice(idx + 1)];
+    }
+    return [this.snapshotMsg(), ...deliveryDialogs, ...normal];
+  }
+
+  /** NPC 種別ごとの通常 interact(店/宿/会話/メインクエストスクリプト)。deliver 納品は interactNpc が先行する */
+  private async openNpcInteraction(npcId: NpcId): Promise<ServerMessage[]> {
+    switch (npcId) {
+      case "merchant":
+      case "artisan":
+        // 店(渡り物屋=レンド / 琥珀工房=ガロ)。品揃え・割引は店主の好感度で決まる
+        return this.openShop(npcId);
+      case "innkeeper":
+      case "caretaker":
+        // 宿(灯宿=オルガ / 寄り屋=イルマ)。宿代は宿NPC別(innFeeFor)、処理順序は共通(rest)
+        return this.openInn(npcId);
+      case "informant":
+        // 情報屋カイ。gatekeeper 注入時は AI 会話、未注入(M3 互換)なら定型ダイアログ。
+        if (this.gatekeeper === null) {
+          return [this.dialogMsg(NPC_DISPLAY_NAMES.informant, PLACEHOLDER_INFORMANT_LINE)];
+        }
+        return this.openConversation("informant");
+      case "warden":
+        // 番人トワ。第2章 ch2-stirring では唄の続きを決定論スクリプトで明かす。それ以外は従来の会話。
+        return this.interactWarden();
+      case "priest":
+        // 司祭フィオル(メインクエスト進行役)。arrival はスクリプトの明かしで rift-revealed へ。
+        return this.interactPriest();
+    }
+  }
+
+  /**
+   * 受取NPC への話しかけ時の決定論の納品イベント(deliver。ai-integration.md「5b」達成の意味論。AI 非依存)。
+   * active な deliver クエストの対象が npcId なら recordDelivery で預かり品を別枠から削除し completed にする。
+   * 対象が無ければ無変化・空配列を返す(受取NPC以外・情報屋/番人/世話役への話しかけでは何も起きない)。
+   * 返すのは手渡し+達成通知の dialog 列(snapshot は呼び出し側 interactNpc が通常フローと合流させる)。
+   */
+  private deliverPendingParcel(npcId: NpcId): ServerMessage[] {
+    const state = this.requireState();
+    const target = state.subQuests.find(
+      (q) => q.type === "deliver" && q.status === "active" && q.recipientId === npcId
+    );
+    if (target === undefined || target.type !== "deliver") return [];
+    const result = recordDelivery(state.subQuests, state.inventory, npcId);
+    this.state = { ...state, subQuests: result.quests, inventory: result.inventory };
+    return [
+      this.dialogMsg(null, `${ITEMS[target.parcelId].name}を${NPC_DISPLAY_NAMES[npcId]}に手渡した。`),
+      this.dialogMsg(null, `「${target.title}」を果たした――カイに報告しよう。`)
+    ];
+  }
+
+  /**
+   * 調査(survey)の達成判定(sign 調べの後処理。ai-integration.md「5b」達成の意味論。AI 非依存)。
+   * 調べた objectId が active な survey の対象なら completed にし、達成を通知する。
+   * 対象でなければ無変化・空配列(既存の看板の調べ挙動は変えない)。
+   */
+  private recordSurveyHere(objectId: string): ServerMessage[] {
+    const state = this.requireState();
+    const before = state.subQuests;
+    const after = recordSurvey(before, objectId);
+    const completed = after.filter((q) => {
+      if (q.type !== "survey" || q.status !== "completed") return false;
+      return before.find((p) => p.id === q.id)?.status === "active";
+    });
+    if (completed.length === 0) return [];
+    this.state = { ...state, subQuests: after };
+    return completed.map((q) =>
+      this.dialogMsg(null, `${subQuestTargetLabel(q)}を確かめた。「${q.title}」を果たした――カイに報告しよう。`)
+    );
+  }
+
+  /**
+   * 店を開く(店 NPC 共通=レンド/ガロ)。品揃え(shopStockEntries)と割引は店主の好感度で計算する。
+   * 開いている間は好感度が変わらない(adjust_affinity は会話 interaction 中のみ)ため、開店時の値で一貫する。
+   */
+  private openShop(npcId: NpcId): ServerMessage[] {
+    const state = this.requireState();
+    const affinity = state.npcs[npcId].affinity;
+    // 当日の market_shift(買値倍率)。stock の買値表示・請求(shopBuy)とも同一計算にする(M20)
+    const marketShift = state.world.marketShift;
+    this.activeInteraction = {
+      kind: "shop",
+      npcId,
+      npcName: NPC_DISPLAY_NAMES[npcId],
+      stock: shopStockEntries(npcId, affinity, marketShift),
+      // 売値表示をクライアントがサーバーと同一計算するための店主好感度(M11-3。フィールド名は既存互換)
+      merchantAffinity: affinity,
+      // 当日の市場の変化(M20-3)。クライアントの売値表示・市場の一言に使う(請求と同一計算)
+      marketShift
+    };
+    const greeting = SHOP_GREETINGS[npcId] ?? "「……ゆっくり見ておいき」";
+    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[npcId], greeting)];
+  }
+
+  /**
+   * 宿を開く(宿 NPC 共通=オルガ/イルマ)。宿代は宿NPC別(innFeeFor: 灯宿10G・寄り屋5G)。
+   * 宿泊の処理順序・無銭時の扱い・夢シーン・セーブは rest が共通に担う。
+   */
+  private openInn(npcId: NpcId): ServerMessage[] {
+    this.activeInteraction = {
+      kind: "inn",
+      npcId,
+      npcName: NPC_DISPLAY_NAMES[npcId],
+      costGold: innFeeFor(npcId)
+    };
+    const greeting = INN_GREETINGS[npcId] ?? "「今夜は、ここでお休みなさい」";
+    return [this.snapshotMsg(), this.dialogMsg(NPC_DISPLAY_NAMES[npcId], greeting)];
+  }
+
+  /**
+   * 司祭フィオルへの interact。メインクエスト進行の要:
+   * - arrival: スクリプトの明かし(AI 非依存の dialog 列)を返し mainQuestStage を rift-revealed へ進める(冪等)
+   * - rift-revealed 以降: AI 会話(gatekeeper 注入時)/ 未注入なら短い激励スクリプト
+   * 進行に必須の会話は AI 生成に依存させない(game-design.md「メインクエスト」)。
+   */
+  private async interactPriest(): Promise<ServerMessage[]> {
+    const state = this.requireState();
+    if (state.mainQuestStage === "arrival") {
+      // 決定論の進行。スナップショットで新段階(rift-revealed)を先に伝え、明かしの dialog 列を続ける
+      this.state = { ...state, mainQuestStage: "rift-revealed" };
+      return [
+        this.snapshotMsg(),
+        ...PRIEST_REVEAL_LINES.map((line) => this.dialogMsg(NPC_DISPLAY_NAMES.priest, line))
+      ];
+    }
+    if (this.gatekeeper === null) {
+      return [this.dialogMsg(NPC_DISPLAY_NAMES.priest, PRIEST_ENCOURAGE_LINE)];
+    }
+    return this.openConversation("priest");
+  }
+
+  /**
+   * 番人トワへの interact。店・宿は持たず会話のみ(サブクエスト窓口は従来どおりカイのみ)。
+   * - ch2-stirring(第2章): 唄の続き「灯の還る先」を決定論スクリプト(AI 非依存)で明かし
+   *   mainQuestStage を ch2-vigil-song へ進める。司祭リビールと同じ「snapshot 先出し→dialog 列」方式。
+   * - それ以外の段階: 従来どおり(gatekeeper 未注入=定型ダイアログ / 注入=AI 会話)。
+   *   進行済み(ch2-vigil-song 以降)でも唄は再発しない=AI 会話へ戻る(章の主線は決定論・深部は好感度会話)。
+   */
+  private interactWarden(): ServerMessage[] {
+    const state = this.requireState();
+    if (state.mainQuestStage === "ch2-stirring") {
+      // 決定論の進行。スナップショットで新段階(ch2-vigil-song)を先に伝え、唄の続きの dialog 列を続ける
+      this.state = { ...state, mainQuestStage: "ch2-vigil-song" };
+      return [
+        this.snapshotMsg(),
+        ...WARDEN_VIGIL_SONG_LINES.map((line) => this.dialogMsg(NPC_DISPLAY_NAMES.warden, line))
+      ];
+    }
+    if (this.gatekeeper === null) {
+      return [this.dialogMsg(NPC_DISPLAY_NAMES.warden, PLACEHOLDER_WARDEN_LINE)];
+    }
+    return this.openConversation("warden");
+  }
+
+  // =========================================================================
+  // 会話フロー(AI。gatekeeper 注入時のみ)
+  // =========================================================================
+
+  /**
+   * NPC へ話しかけて会話を開始する(挨拶=1ターン。クールダウン中は定型挨拶)。**2段階化**:
+   *
+   * - 即時: 会話 interaction を張って snapshot だけ返し、クライアントを会話画面(挨拶待ち表示)へ
+   *   即切替える。挨拶生成 AI(live で約10秒)の完了は**待たない**(探索画面での固着を防ぐ)。
+   * - 非同期: 挨拶生成の完了ハンドラ(サーバー直列チェーンの外で走る)で、まだ同一 NPC と会話中なら
+   *   options/提案を反映して interaction を再構築し、[snapshot, ai-utterance(speak)] を push する。
+   *   クールダウン定型挨拶・busy・フォールバックも同経路(displayText を speak として push する契約は共通)。
+   *
+   * 完了ハンドラは conversationEnd と同流儀で **await を挟まず同期のみ**・例外は握る:
+   * - 世代印(gameGeneration)が変わっていたら全破棄(リセット/ロード後の別ゲームを汚さない)
+   * - 承認 effect(挨拶ターンの好感度+1等)は AI ターンとして成立=会話が既に閉じられていても適用する
+   * - まだ同一 NPC と会話中のときのみ push する(待たずに立ち去っていたら発話は破棄)
+   */
+  private openConversation(npcId: NpcId): ServerMessage[] {
+    const gk = this.requireGatekeeper();
+    const npc = this.requireState().npcs[npcId];
+    // 完了時にゲームがリセット/ロードされていたら書き戻さないための世代印
+    const generation = this.gameGeneration;
+
+    // 挨拶生成 AI は await せずに開始する(話しかけには即応答)。完了ハンドラは同期のみ・例外は握る
+    void gk
+      .openConversation({
+        npcId,
+        affinityAtOpen: npc.affinity,
+        persistent: this.buildPersistentContext(),
+        ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
+        ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {}),
+        speakStream: this.buildSpeakStreamSink(npcId, generation)
+      })
+      .then((result) => {
+        if (this.gameGeneration !== generation || this.state === null) return; // リセット/ロード後: 破棄
+        // 挨拶ターンの承認 effect(Mock 通常は +1 好感度)を適用しカウンタを閉じる(会話終了後でも成立)
+        this.applyApprovedEffects(result.approvedEffects);
+        // まだ同一 NPC と会話中のときのみ options/提案を反映して再構築し、発話を push する
+        if (this.activeInteraction?.kind === "conversation" && this.activeInteraction.npcId === npcId) {
+          this.activeInteraction = this.buildConversationInteraction(npcId);
+          this.push([this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)]);
+        }
+      })
+      .catch(() => {
+        // 挨拶生成時の例外は握って無害化(プロセスを落とさない)。ただしストリーム済みの
+        // 未検証テキストを画面に残さないため、まだ同一NPCと会話中なら定型文で必ず置換する
+        // (guardrails第4層の例外規定・必須条件(2): 最終表示は常に検証済み全文または定型文)
+        if (this.gameGeneration !== generation || this.state === null) return;
+        if (this.activeInteraction?.kind === "conversation" && this.activeInteraction.npcId === npcId) {
+          this.push([this.aiUtteranceMsg("speak", fallbackTextForFlow("conversation"), npcId)]);
+        }
+      });
+
+    // 即時: 会話画面へ切替え(挨拶待ち表示)。挨拶は上の完了ハンドラが届き次第 push する
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg()];
+  }
+
+  /** 自由入力の送信 → NPC 応答。承認 effect を適用し、往復を(マスクして)会話記憶へ記録する */
+  private async conversationSend(rawText: string): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const gk = this.requireGatekeeper();
+    const npcId = this.activeInteraction.npcId;
+    // 完了(sendConversation の await)後にゲームがリセット/ロードされていても sink が誤爆しないための世代印
+    const generation = this.gameGeneration;
+    const utterance = sanitizePlayerInput(rawText, this.playerInputMaxLength);
+    const npc = this.requireState().npcs[npcId];
+    const result = await gk.sendConversation({
+      npcId,
+      utterance,
+      persistent: this.buildPersistentContext(),
+      ...(npc.topic.length > 0 ? { topic: npc.topic } : {}),
+      ...(npc.memory.summary.length > 0 ? { memorySummary: npc.memory.summary } : {}),
+      speakStream: this.buildSpeakStreamSink(npcId, generation)
+    });
+    // 承認 effect(give_item/adjust_affinity 等)を GameState へ適用(永続カウンタを閉じる)
+    this.applyApprovedEffects(result.approvedEffects);
+    // 実ターン(AI 応答)のみ会話記憶へ往復を記録する。プレイヤー入力はマスクして保存(第5層)
+    if (result.outcome === "ai") {
+      const memory = this.requireState().npcs[npcId].memory;
+      const updated = appendMaskedExchange(memory, { player: utterance, npc: result.displayText }, this.maskEnv);
+      this.setNpcMemory(npcId, updated);
+    }
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
+  }
+
+  /** 提案の受諾/辞退(AI を呼ばないゲーム操作) */
+  private conversationChoose(choice: "accept" | "decline"): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const gk = this.requireGatekeeper();
+    const npcId = this.activeInteraction.npcId;
+    const session = gk.getSession();
+    const proposal = session?.getPendingProposal() ?? null;
+    if (proposal === null) {
+      this.activeInteraction = this.buildConversationInteraction(npcId);
+      return [this.snapshotMsg()];
+    }
+    if (choice === "decline") {
+      session?.clearPendingProposal();
+      this.activeInteraction = this.buildConversationInteraction(npcId);
+      return [
+        this.snapshotMsg(),
+        this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「そうかい。気が向いたら、また声をかけておくれ」")
+      ];
+    }
+    // accept: 受諾して subQuests へ。未受諾提案スロットは常にクリアする
+    const state = this.requireState();
+    const res = acceptProposal(proposal, state.subQuests);
+    session?.clearPendingProposal();
+    if (!res.ok) {
+      this.activeInteraction = this.buildConversationInteraction(npcId);
+      return [
+        this.snapshotMsg(),
+        this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「あんたはもう手一杯のようだね。今の依頼を片付けてから、また来ておくれ」")
+      ];
+    }
+    let next: GameState = { ...state, subQuests: res.quests };
+    const dialogs: ServerMessage[] = [
+      this.dialogMsg(NPC_DISPLAY_NAMES[npcId], "「恩に着るよ。……無理だけはしないようにね」")
+    ];
+    // deliver は受諾時に預かり品を別枠へ受領する(所持上限対象外=満杯でも受領可: ai-integration.md「5b」)
+    if (proposal.type === "deliver") {
+      next = { ...next, inventory: receiveQuestParcel(proposal, next.inventory) };
+      dialogs.push(this.dialogMsg(null, `${ITEMS[proposal.parcelId].name}を預かった。`));
+    }
+    this.state = next;
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), ...dialogs];
+  }
+
+  /**
+   * 会話終了 → 要約フロー(非同期化)。要約 AI(live で数秒〜数十秒)の完了を**待たず**に
+   * 即座に snapshot を返し、クライアントの awaiting をすぐ解除する(立ち去り直後の移動固着を防ぐ)。
+   *
+   * 要約は fire-and-forget で開始し、完了ハンドラ(サーバーの直列処理チェーンの外で走る)で
+   * memory を更新する。ハンドラは **await を挟まず同期のみ** で状態を読み書きし、次の点を守る:
+   * - 要約成功(summaryText != null)時のみ、**完了時点の**最新 memory の summary を差し替え、
+   *   要約に渡した先頭 N 往復(N=開始時スナップショットの件数)だけを除去する。要約中に積まれた
+   *   新しい往復は失わない(通常は空。同一NPC再会話は gatekeeper が要約完了まで待つため実際上0件)
+   * - 失敗(summaryText === null)なら memory 不変(既存仕様)
+   * - 立ち去り→即タイトル→ロード等でゲームがリセット/ロードされていたら世代印で破棄(別ゲームを汚さない)
+   * - 例外は握って無害化(unhandled rejection でプロセスを落とさない)
+   */
+  private conversationEnd(): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const gk = this.requireGatekeeper();
+    const npcId = this.activeInteraction.npcId;
+    const memory = this.requireState().npcs[npcId].memory;
+    // 要約入力のスナップショット(配列コピー)。要約に渡す往復数 N を控える
+    const exchangesSnapshot = [...memory.recentExchanges];
+    const summarizedCount = exchangesSnapshot.length;
+    const existingSummary = memory.summary;
+    const persistent = this.buildPersistentContext();
+    // 完了時にゲームがリセット/ロードされていたら書き戻さないための世代印
+    const generation = this.gameGeneration;
+
+    // 要約 AI は await せずに開始する(立ち去りには即応答)。完了ハンドラは同期のみ・例外は握る
+    void gk
+      .summarizeConversation({ npcId, persistent, existingSummary, exchanges: exchangesSnapshot })
+      .then((result) => {
+        if (result.summaryText === null) return; // 要約失敗/スキップ: memory 不変
+        const state = this.state;
+        if (this.gameGeneration !== generation || state === null) return; // リセット/ロード後: 破棄
+        const current = state.npcs[npcId].memory;
+        this.setNpcMemory(npcId, {
+          summary: maskSummaryForStorage(result.summaryText, this.maskEnv),
+          // 要約に渡した先頭 N 往復のみ除去(要約中に積まれた新しい往復は残す。通常は空になる)
+          recentExchanges: current.recentExchanges.slice(summarizedCount)
+        });
+      })
+      .catch(() => {
+        // 要約実行時の例外は握って無害化(プロセスを落とさない・unhandled rejection にしない)
+      });
+
+    gk.closeConversation();
+    this.activeInteraction = null;
+    return [this.snapshotMsg()];
+  }
+
+  /** 情報屋への「仕事はある?」→ サブクエスト生成。承認提案は pendingProposal に反映される */
+  private async questRequest(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    if (this.activeInteraction?.kind !== "conversation") {
+      return this.errorMsgs("not-in-conversation", "今は誰とも言葉を交わしていない。");
+    }
+    const npcId = this.activeInteraction.npcId;
+    if (npcId !== "informant") {
+      return this.errorMsgs("no-quests-here", "その相手に頼める仕事はなさそうだ。");
+    }
+    const gk = this.requireGatekeeper();
+    // 完了(generateQuest の await)後にゲームがリセット/ロードされていても sink が誤爆しないための世代印
+    const generation = this.gameGeneration;
+    const topic = this.requireState().npcs.informant.topic;
+    const result = await gk.generateQuest({
+      npcId,
+      persistent: this.buildPersistentContext(),
+      ...(topic.length > 0 ? { topic } : {}),
+      speakStream: this.buildSpeakStreamSink(npcId, generation)
+    });
+    // propose_quest の承認で aiDaily の発行数カウンタを閉じる(提案自体はセッションが保持)
+    this.applyApprovedEffects(result.approvedEffects);
+    this.advanceQuestSeqIfProposed();
+    this.activeInteraction = this.buildConversationInteraction(npcId);
+    return [this.snapshotMsg(), this.aiUtteranceMsg("speak", result.displayText, npcId)];
+  }
+
+  /**
+   * サブクエストの放棄(クエストジャーナルからの操作。game-design.md「メインクエスト」放棄規定)。
+   * 未納品の預かり品(deliver active)は abandonQuest の前に reclaimQuestParcel で別枠から回収(消滅)する
+   * (escort/survey・納品済みは副作用なし)。即時に受注枠を解放しペナルティなし。
+   * 副作用の順序(回収→除去)は shared 純関数の合成として server が担う(ai-integration.md「5b」放棄時)。
+   * ※クライアントの放棄操作(ジャーナルのボタン)は M19-4(UI)で配線する。本ハンドラは server 側の合成のみ。
+   */
+  private abandonSubQuest(questId: string): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    const quest = state.subQuests.find((q) => q.id === questId);
+    if (quest === undefined) return this.errorMsgs("no-such-quest", "その依頼は、もう手元にない。");
+    const inventory = reclaimQuestParcel(quest, state.inventory);
+    const subQuests = abandonQuest(state.subQuests, questId);
+    this.state = { ...state, inventory, subQuests };
+    return [this.snapshotMsg(), this.dialogMsg(null, `依頼「${quest.title}」を諦めた。`)];
+  }
+
+  /**
+   * サブクエストの報告(達成→報酬付与。ai-integration.md「達成の意味論」。報告先は情報屋カイ)。
+   * reportQuest が達成判定・fetch のみ納品削除・報酬(gold+任意 rewardItem)付与・満杯時の受領保留を担う
+   * (deliver/escort/survey は報告時のインベントリ削除を伴わない=納品/到達/調べで達成済み)。
+   * 成功したら removeQuestFromList で受注リストから外す(reported は subQuests に永続化しない)。
+   * ※報告の起点(カイの窓口 UI)は M19-4。本ハンドラは questId を受けて server 側の合成のみを行う
+   *   (窓口=カイの提示・場所制約は UI 側の責務。裁量: JOURNAL 記録)。
+   */
+  private reportSubQuest(questId: string): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    const quest = state.subQuests.find((q) => q.id === questId);
+    if (quest === undefined) return this.errorMsgs("no-such-quest", "その依頼は、もう手元にない。");
+    const result = reportQuest(quest, state.inventory);
+    if (!result.ok) {
+      if (result.reason === "inventory_full") {
+        return this.errorMsgs("inventory-full", "褒美を受け取る手が塞がっている。荷を空けてから、また来るといい。");
+      }
+      return this.errorMsgs("quest-not-ready", "まだ、報告できる首尾ではないようだ。");
+    }
+    this.state = {
+      ...state,
+      subQuests: removeQuestFromList(state.subQuests, questId),
+      inventory: result.inventory,
+      player: { ...state.player, gold: state.player.gold + result.goldGained }
+    };
+    // 実績イベント(M24): サブクエスト報告完了の成立(first-errand)。評価はここでは行わず、
+    // 直後の snapshot 構築時の単一チョークポイント(settleAchievements)が消費する
+    this.pendingAchievementEvents.push("sub-quest-reported");
+    const dialogs: ServerMessage[] = [
+      this.dialogMsg(
+        NPC_DISPLAY_NAMES.informant,
+        `「よくやってくれた。約束の${result.goldGained}ゴールドだ。……恩に着るよ」`
+      )
+    ];
+    if (result.rewardItemGranted && quest.rewardItemId !== undefined) {
+      dialogs.push(this.dialogMsg(null, `${ITEMS[quest.rewardItemId].name}を受け取った。`));
+    }
+    return [this.snapshotMsg(), ...dialogs];
+  }
+
+  /**
+   * エンディング視聴の確認(クライアントがエンディング演出を見せ終えた合図)。
+   * dream-eater-defeated → epilogue へ進めてセーブに永続化する。それ以外の段階では冪等に無視する。
+   * プレイヤーは動かさない(段階を進めて保存するだけ。M6-B のエンディング契約の締め)。
+   */
+  private async acknowledgeEnding(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (state.mainQuestStage !== "dream-eater-defeated") {
+      return [this.snapshotMsg()];
+    }
+    this.state = { ...state, mainQuestStage: "epilogue" };
+    this.accruePlaytime();
+    await this.saveStore.save(this.requireState());
+    return [this.snapshotMsg()];
+  }
+
+  private async interactObject(object: MapObject): Promise<ServerMessage[]> {
+    const state = this.requireState();
+    switch (object.kind) {
+      case "sign": {
+        // 灯還りの坑「導管の間」の導管は第2章の起点/結び(調べイベント)。それ以外の看板は既存どおり。
+        if (object.id === CONDUIT_OBJECT_ID) return this.interactConduit(object.message);
+        // 調査(survey)の達成判定。既存の調べメッセージは維持したまま、達成時のみ通知+snapshot を足す
+        const survey = this.recordSurveyHere(object.id);
+        if (survey.length === 0) return [this.dialogMsg(null, object.message)];
+        return [this.snapshotMsg(), this.dialogMsg(null, object.message), ...survey];
+      }
+      case "chest": {
+        if (state.gimmicks.includes(object.id)) {
+          return [this.dialogMsg(null, "空っぽの箱だ。もう何も残っていない。")];
+        }
+        return this.collectLoot(lootForChest(object.id), () => {
+          state.gimmicks.push(object.id);
+        });
+      }
+      case "gather": {
+        if (this.gatheredThisVisit.has(object.id)) {
+          return [this.dialogMsg(null, "もう摘み尽くしてしまった。")];
+        }
+        return this.collectLoot(lootForGather(object.id), () => {
+          this.gatheredThisVisit.add(object.id);
+        });
+      }
+    }
+  }
+
+  /**
+   * 導管の間の導管(d4-conduit)を調べた時の第2章進行(決定論。段階で分岐):
+   * - epilogue      : 【第2章開始】ch2-stirring へ進め、脈打つ導管への気づきを dialog 列で返す(snapshot 先出し)
+   * - ch2-stirring  : トワの唄待ち(段階不変)。トワへ促す1行を返す
+   * - ch2-vigil-song: 【第2章クリア】ch2-beyond へ進め、確証の結びを返す+即時セーブ(acknowledgeEnding の先例)
+   * - ch2-beyond    : クリア後の余韻1行(段階不変・章は再発しない=BOSS_DEFEATED_LINE と同運用)
+   * - それ以前(arrival/rift-revealed/dream-eater-defeated): 既存の定型文(map の message)のまま(第2章は始まらない)
+   */
+  private async interactConduit(defaultMessage: string): Promise<ServerMessage[]> {
+    const state = this.requireState();
+    switch (state.mainQuestStage) {
+      case "epilogue":
+        this.state = { ...state, mainQuestStage: "ch2-stirring" };
+        return [
+          this.snapshotMsg(),
+          ...CONDUIT_STIRRING_LINES.map((line) => this.dialogMsg(null, line))
+        ];
+      case "ch2-stirring":
+        return [this.dialogMsg(null, CONDUIT_AWAIT_SONG_LINE)];
+      case "ch2-vigil-song":
+        this.state = { ...state, mainQuestStage: "ch2-beyond" };
+        // 第2章クリアは即時セーブでフリープレイへ確定する(acknowledgeEnding と同じ締め方)
+        this.accruePlaytime();
+        await this.saveStore.save(this.requireState());
+        return [
+          this.snapshotMsg(),
+          ...CONDUIT_BEYOND_LINES.map((line) => this.dialogMsg(null, line))
+        ];
+      case "ch2-beyond":
+        return [this.dialogMsg(null, CONDUIT_AFTERGLOW_LINE)];
+      default:
+        // arrival / rift-revealed / dream-eater-defeated: 既存の定型文のまま(第2章は始まらない)
+        return [this.dialogMsg(null, defaultMessage)];
+    }
+  }
+
+  /**
+   * マップ上の取得(宝箱・採取)。満杯なら取得せず対象を残す(破棄しない: game-design.md)。
+   * markResolved は取得成立時のみ呼ぶ(宝箱=永続開封 / 採取=今回訪問で消費)。
+   */
+  private collectLoot(contents: readonly LootEntry[], markResolved: () => void): ServerMessage[] {
+    const state = this.requireState();
+    if (contents.length === 0) {
+      markResolved();
+      return [this.snapshotMsg(), this.dialogMsg(null, "だが、中には何も残っていなかった。")];
+    }
+    // 通常アイテムに必要な空き枠(クエスト用アイテムは別枠で常に入る)
+    const neededNormal = contents
+      .filter((c) => !ITEMS[c.itemId].questItem)
+      .reduce((sum, c) => sum + c.count, 0);
+    if (freeSpace(state.inventory) < neededNormal) {
+      return [this.dialogMsg(null, "持ちきれない。今は手が塞がっている。")];
+    }
+    const names: string[] = [];
+    for (const entry of contents) {
+      const added = addItem(state.inventory, entry.itemId, entry.count);
+      state.inventory = added.inventory;
+      names.push(entry.count > 1 ? `${ITEMS[entry.itemId].name}×${entry.count}` : ITEMS[entry.itemId].name);
+    }
+    markResolved();
+    return [this.snapshotMsg(), this.dialogMsg(null, `${names.join("、")}を手に入れた。`)];
+  }
+
+  // =========================================================================
+  // アイテム使用・破棄(探索中)
+  // =========================================================================
+
+  private useItem(itemId: ItemId): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (countOf(state.inventory, itemId) <= 0) return this.errorMsgs("not-owned", "それは持っていない。");
+    const effect = ITEMS[itemId].battleEffect;
+    if (!effect || effect.kind !== "heal-hp") {
+      return this.errorMsgs("unusable-here", "それは今、使っても意味がない。");
+    }
+    // HP 回復の上限に使うのは maxHP のみ。装備は maxHP に影響しないため基礎値(statsForLevel)で正しい
+    // (effectiveStats を使っても maxHP は同値)。
+    const stats = statsForLevel(state.player.level);
+    if (state.player.hp >= stats.maxHP) return this.errorMsgs("hp-full", "これ以上、癒せる傷はない。");
+    state.player.hp = Math.min(stats.maxHP, state.player.hp + effect.amount);
+    state.inventory = removeItem(state.inventory, itemId, 1).inventory;
+    return [this.snapshotMsg(), this.dialogMsg(null, `${ITEMS[itemId].name}を使った。傷が少し癒えた。`)];
+  }
+
+  private discardItem(itemId: ItemId, quantity: number): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (ITEMS[itemId].questItem) {
+      return this.errorMsgs("not-discardable", "それは、手放してはいけない気がする。");
+    }
+    if (countOf(state.inventory, itemId) < quantity) {
+      return this.errorMsgs("not-owned", "そんなには持っていない。");
+    }
+    state.inventory = removeItem(state.inventory, itemId, quantity).inventory;
+    const label = quantity > 1 ? `${ITEMS[itemId].name}×${quantity}` : ITEMS[itemId].name;
+    return [this.snapshotMsg(), this.dialogMsg(null, `${label}を手放した。`)];
+  }
+
+  // =========================================================================
+  // 装備・解除(探索中。game-design.md「装備(拡張: M8)」)
+  // =========================================================================
+
+  /**
+   * 装備品をスロットへ装備する(探索中のみ)。shared の純ロジック equipItem を使い、
+   * 成功時は inventory/equipment を差し替えてスナップショットを返す。
+   * 失敗(未所持)は shopBuy のブロック流儀に合わせて error+code を返す
+   * (itemId は zod で装備可能 ID に限定済みなので、失敗は未所持のみ)。
+   */
+  private equip(itemId: EquipmentItemId): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    const result = equipItem(state.inventory, state.equipment, itemId);
+    if (!result.ok) {
+      // 装備不可 ID は zod で弾かれるため、ここに来る失敗は未所持のみ
+      return this.errorMsgs("not-owned", "それは持っていない。");
+    }
+    state.inventory = result.inventory;
+    state.equipment = result.equipment;
+    return [this.snapshotMsg()];
+  }
+
+  /**
+   * スロットの装備を解除してインベントリへ戻す(探索中のみ)。
+   * 失敗は 2 種を区別して error+code を返す:
+   * - 空スロット: not-equipped(何も帯びていない)
+   * - インベントリ満杯で戻せない: inventory-full(shopBuy と同じ流儀・文言)
+   */
+  private unequip(slot: EquipmentSlot): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (state.equipment[slot] === null) {
+      return this.errorMsgs("not-equipped", "そこには、何も帯びていない。");
+    }
+    const result = unequipItem(state.inventory, state.equipment, slot);
+    if (!result.ok) {
+      // 空スロットは上で弾いているため、ここに来る失敗は満杯で戻せない場合のみ
+      return this.errorMsgs("inventory-full", "そんなに持ちきれない。");
+    }
+    state.inventory = result.inventory;
+    state.equipment = result.equipment;
+    return [this.snapshotMsg()];
+  }
+
+  // =========================================================================
+  // 店(購入・売却)
+  // =========================================================================
+
+  private shopBuy(itemId: ItemId, quantity: number): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
+    // 品揃えはこの店(店主 NPC)のものに限る。表示されていない品(別の店の在庫)は買えない
+    if (!isInShopStock(this.activeInteraction.npcId, itemId)) {
+      return this.errorMsgs("not-sold", "それは、この店では扱っていない。");
+    }
+    // 店主(商人)の好感度による段階割引 + 当日の market_shift 倍率を適用(0-49・market_shift 無しは
+    // 従来価格と完全同値。stock の表示価格(shopStockEntries)と同じ関数・同じ引数で計算するため
+    // 表示と請求は常に一致する)
+    const cost =
+      discountedBuyPrice(
+        itemId,
+        state.npcs[this.activeInteraction.npcId].affinity,
+        state.world.marketShift
+      ) * quantity;
+    if (state.player.gold < cost) return this.errorMsgs("not-enough-gold", "持ち合わせが足りない。");
+    // 事前に容量チェックし、不足なら購入をブロック(game-design.md「成長・経済」)
+    if (freeSpace(state.inventory) < quantity) return this.errorMsgs("inventory-full", "そんなに持ちきれない。");
+    state.player.gold -= cost;
+    state.inventory = addItem(state.inventory, itemId, quantity).inventory;
+    return [this.snapshotMsg()]; // 店は開いたまま
+  }
+
+  private shopSell(itemId: ItemId, quantity: number): ServerMessage[] {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (this.activeInteraction?.kind !== "shop") return this.errorMsgs("not-in-shop", "ここには店がない。");
+    if (ITEMS[itemId].questItem) return this.errorMsgs("not-sellable", "これは、売れるものではない。");
+    if (countOf(state.inventory, itemId) < quantity) return this.errorMsgs("not-owned", "そんなには持っていない。");
+    // 売値の段階増し(信頼のみ+5%)。買い戻し増殖防止クランプは当日の market_shift 適用後の
+    // 実効買値に対して効かせる(surplus でも売値 ≤ 実効買値=往復で増殖しない。M20)
+    const gain =
+      adjustedSellPrice(
+        itemId,
+        state.npcs[this.activeInteraction.npcId].affinity,
+        state.world.marketShift
+      ) * quantity;
+    state.inventory = removeItem(state.inventory, itemId, quantity).inventory;
+    state.player.gold += gain;
+    return [this.snapshotMsg()];
+  }
+
+  // =========================================================================
+  // 宿泊(game-design.md「宿泊の処理順序」)
+  // =========================================================================
+
+  private async rest(): Promise<ServerMessage[]> {
+    const guard = this.requireExploration();
+    if (guard) return guard;
+    const state = this.requireState();
+    if (this.activeInteraction?.kind !== "inn") return this.errorMsgs("not-at-inn", "ここは宿ではない。");
+
+    // 宿NPC(灯宿=オルガ / 寄り屋=イルマ)。宿代・締めの台詞は NPC 別、それ以外の処理順序は共通
+    const innNpcId = this.activeInteraction.npcId;
+    const fee = this.activeInteraction.costGold; // 宿代(innFeeFor: 灯宿10G・寄り屋5G)
+
+    // 手順0: 宿泊費の徴収(不足でも拒否しない=無料で泊める)
+    const cost = state.player.gold >= fee ? fee : 0;
+    const wasFree = cost === 0; // 宿泊費不足 → 夢シーンは定型文・世界変化なし(コスト保護)
+    state.player.gold -= cost;
+
+    // 手順1: HP/MP全回復
+    const stats = statsForLevel(state.player.level);
+    state.player.hp = stats.maxHP;
+    state.player.mp = stats.maxMP;
+
+    // 手順2: 日送り(日付+1・aiDaily/話題/street_event リセット)
+    this.state = advanceDay(this.requireState());
+    // 手順2直後: 宿泊の日送り=翌朝。時間帯を昼へ戻す(M23。夢シーン・セーブの前後を問わず朝から)
+    this.resetTimeOfDay();
+    // 手順2直後: 縮退解除フック(通常縮退のみ解除。セッション上限縮退は残す)
+    this.gatekeeper?.onDayAdvanced();
+
+    // 宿の overlay を閉じ、締めの台詞(宿NPC別: 灯宿=オルガ / 寄り屋=イルマ)を組む。
+    // 2フェーズ時(下記)は入眠の合図とともに夢の顕現より先に届ける
+    // (innNpcId は宿NPC=innkeeper|caretaker のいずれかで必ず lines を持つ。?? は型・スキーマ保険の非空文字列)
+    this.activeInteraction = null;
+    const lines = INN_REST_LINES[innNpcId];
+    const body = wasFree
+      ? (lines?.free ?? "旅人は泥のように眠り、気づけば朝だった。")
+      : (lines?.paid ?? "旅人は目を閉じ、機関に一日を手渡した。");
+    const closingMsgs: ServerMessage[] = [
+      this.snapshotMsg(),
+      this.dialogMsg(NPC_DISPLAY_NAMES[innNpcId], body)
+    ];
+
+    // 手順3-4(単相): AI無効・宿泊費不足(wasFree)は夢のAI待ちが無い=従来どおり一括返却。
+    // wasFree は AI を呼ばず定型・世界変化なし(コスト保護)
+    if (this.gatekeeper === null || wasFree) {
+      const dreamMsgs: ServerMessage[] =
+        this.gatekeeper === null ? [] : [this.aiUtteranceMsg("narrate", DREAM_FALLBACK_TEXT)];
+      // 手順4後・手順5前: 実績の評価(M24)。解除がそのまま当該セーブに載る
+      this.settleAchievements();
+      // 手順5: セーブ。日付は必ず進む
+      this.accruePlaytime();
+      await this.saveStore.save(this.requireState());
+      return [...closingMsgs, ...dreamMsgs];
+    }
+
+    // 手順3-4(2フェーズ=M26-3): 入眠の合図を先に届け、夢シーン生成(最も遅いAI呼び出し)の
+    // await をクライアントの入眠演出と重ねる(呼び出しは従来と同一の1回=コスト中立。
+    // 徴収・日送り済みで夢の消費が確定した後にのみ発火=空撃ちなし)。
+    // <recent_play>/<world_state> は従来どおり日送り後に構築する(バイト一致)。
+    // クールダウン・縮退・失敗フォールバックは dreamScene 内で従来どおり働く。
+    // 直列チェーンは本ハンドラの解決まで次のクライアント操作を処理しないため、
+    // 入眠中に別操作が状態を書き換えることはない(適用順序 手順3→4→5 は不変)
+    this.push([...closingMsgs, { type: "sleep-start" }]);
+    let dreamText = DREAM_FALLBACK_TEXT;
+    try {
+      const result = await this.gatekeeper.dreamScene({
+        persistent: this.buildPersistentContext(),
+        recentPlay: this.buildRecentPlay(),
+        world: this.requireState().world
+      });
+      // 実績イベント(M24): 世界変化が1件以上承認・適用されるか(woven-morning)。
+      // 適用前の world との比較が要るため applyApprovedEffects の前に判定して積む
+      if (this.hasAppliedWorldEvents(result.approvedEffects)) {
+        this.pendingAchievementEvents.push("world-event-applied");
+      }
+      // 世界変化(dream_world_events)を GameState へ適用(承認分のみ)
+      this.applyApprovedEffects(result.approvedEffects);
+      dreamText = result.displayText;
+    } catch {
+      // dreamScene は失敗時もフォールバック解決する契約だが、万一の例外でも
+      // 夢の顕現(入眠演出の解除)とセーブ(手順5)は必ず成立させる(定型の夢へ縮退)
+    }
+
+    // 手順4後・手順5前: 実績の評価(M24)。woven-morning 等の解除がそのまま当該セーブに載る
+    // (game-design.md「判定・解除フロー」宿泊時の順序。「宿泊の処理順序」自体は不変)
+    this.settleAchievements();
+
+    // 手順5: セーブ(夢・世界変化を含む状態を保存)。AI 失敗時もここは必ず成立し日付は進む
+    this.accruePlaytime();
+    await this.saveStore.save(this.requireState());
+
+    // フェーズ2: 夢の顕現(世界変化を含む snapshot+検証済みの夢の情景)
+    return [this.snapshotMsg(), this.aiUtteranceMsg("narrate", dreamText)];
+  }
+
+  // =========================================================================
+  // プレイ時間
+  // =========================================================================
+
+  private currentPlaytimeSeconds(): number {
+    if (this.state === null) return 0;
+    const delta = Math.max(0, Math.floor((this.clock() - this.activeSince) / 1000));
+    return this.state.playtimeSeconds + delta;
+  }
+
+  private accruePlaytime(): void {
+    if (this.state === null) return;
+    this.state.playtimeSeconds = this.currentPlaytimeSeconds();
+    this.activeSince = this.clock();
+  }
+
+  // =========================================================================
+  // 実績「夢の欠片」(M24。単一チョークポイント評価)
+  // =========================================================================
+
+  /**
+   * 実績の単一チョークポイント評価(M24。game-design.md「判定・解除フロー」)。
+   * 各クライアント操作の処理で GameState/ランタイムが変化した直後・スナップショット構築の前に
+   * snapshotMsg が必ず呼ぶ(操作→view 送信の共通経路への一点差し込み。移動・戦闘・装備等への
+   * フック散在はしない)。宿泊(rest)のみ、手順4(世界変化適用)の後・手順5(セーブ)の前にも
+   * 明示的に呼ぶ(解除がそのまま当該セーブに載る)。同一操作内の再評価は冪等
+   * (∪ 単調更新+イベントは消費済み)。評価は shared の純関数で**乱数を消費しない**
+   * (シード列・エンカウント・ドロップに影響しない)。解除しても dialog・専用メッセージは
+   * 送らない(通知はクライアントの view 差分トースト=M24-3)。
+   */
+  private settleAchievements(): void {
+    if (this.state === null) return;
+    const state = this.state;
+    const satisfied = evaluateAchievements({
+      state,
+      timeOfDay: this.timeOfDay,
+      events: this.pendingAchievementEvents
+    });
+    // 評価へ渡したイベントは消費する(同一操作内で snapshot が複数回組まれても二重計上しない)
+    this.pendingAchievementEvents.length = 0;
+    const merged = mergeUnlockedAchievements(state.unlockedAchievements, satisfied);
+    if (merged !== state.unlockedAchievements) {
+      this.state = { ...state, unlockedAchievements: merged };
+    }
+  }
+
+  /**
+   * 承認 effect に「1件以上の世界変化の承認・適用」が含まれるか(M24 woven-morning の決定論判定。
+   * AI 応答の内容は条件にしない=事実の有無のみ)。非累積イベント(weather/street_event/
+   * npc_rumor/market_shift/npc_absence)は解決済み `events` に現れるため件数で判定し、
+   * 累積系(dungeon_shift/dream_erosion)は `events` に現れないため適用**前**の world の
+   * 現在値との差で判定する(値が変わらない承認は「適用」に数えない)。
+   */
+  private hasAppliedWorldEvents(effects: readonly StateChangeEffect[]): boolean {
+    const world = this.requireState().world;
+    return effects.some((effect) => {
+      if (effect.kind !== "dream_world_events") return false;
+      if (effect.events.length > 0) return true;
+      if (effect.dreamErosion !== world.dreamErosion) return true;
+      const counts = effect.dungeonSymbolCounts;
+      return (
+        counts[1] !== world.dungeonSymbolCounts[1] ||
+        counts[2] !== world.dungeonSymbolCounts[2] ||
+        counts[3] !== world.dungeonSymbolCounts[3]
+      );
+    });
+  }
+
+  // =========================================================================
+  // ビュー構築・メッセージヘルパー
+  // =========================================================================
+
+  private snapshotMsg(): ServerMessage {
+    // 実績の単一チョークポイント評価(M24)。スナップショット構築の前に解除集合を単調更新する
+    this.settleAchievements();
+    return { type: "snapshot", view: this.buildView() };
+  }
+
+  private dialogMsg(speaker: string | null, body: string): ServerMessage {
+    return { type: "dialog", speaker, body };
+  }
+
+  private errorMsgs(code: string, message: string): ServerMessage[] {
+    return [{ type: "error", message, code }];
+  }
+
+  // =========================================================================
+  // AIフロー配線ヘルパー(gatekeeper 注入時)
+  // =========================================================================
+
+  private requireGatekeeper(): AiFlowGatekeeper {
+    if (this.gatekeeper === null) {
+      throw new Error("AIゲートキーパーが注入されていない(会話フローには必須。内部不変条件違反)");
+    }
+    return this.gatekeeper;
+  }
+
+  /** 検証層/フロー制御へ渡す永続スナップショット(GameState 由来。読み取り専用) */
+  private buildPersistentContext(): PersistentStateContext {
+    const state = this.requireState();
+    return {
+      aiDaily: state.aiDaily,
+      affinityByNpc: {
+        innkeeper: state.npcs.innkeeper.affinity,
+        merchant: state.npcs.merchant.affinity,
+        informant: state.npcs.informant.affinity,
+        priest: state.npcs.priest.affinity,
+        caretaker: state.npcs.caretaker.affinity,
+        artisan: state.npcs.artisan.affinity,
+        warden: state.npcs.warden.affinity
+      },
+      inventory: state.inventory,
+      subQuests: state.subQuests,
+      dungeonSymbolCounts: state.world.dungeonSymbolCounts,
+      dreamErosion: state.world.dreamErosion,
+      nextQuestId: this.peekQuestId()
+    };
+  }
+
+  /** 承認済み状態変更 effect を GameState へ適用する(永続カウンタの書き戻しループを閉じる) */
+  private applyApprovedEffects(effects: readonly StateChangeEffect[]): void {
+    if (effects.length === 0) return;
+    let state = this.requireState();
+    for (const effect of effects) state = applyStateChangeEffect(state, effect);
+    this.state = state;
+  }
+
+  /** 1 NPC の会話記憶を差し替える(往復記録・要約更新に使う) */
+  private setNpcMemory(npcId: NpcId, memory: NpcMemory): void {
+    const state = this.requireState();
+    const npcs = { ...state.npcs };
+    npcs[npcId] = { ...npcs[npcId], memory };
+    this.state = { ...state, npcs };
+  }
+
+  /** 会話 ActiveInteraction を組む(pendingProposal と取りうる options を現状から算出) */
+  private buildConversationInteraction(npcId: NpcId): ActiveInteraction {
+    const proposal = this.gatekeeper?.getSession()?.getPendingProposal() ?? null;
+    const options: ConversationAction[] = ["send", "end"];
+    if (npcId === "informant") options.push("quest-request");
+    if (proposal !== null) options.push("accept", "decline");
+    return {
+      kind: "conversation",
+      npcId,
+      npcName: NPC_DISPLAY_NAMES[npcId],
+      // 関係性の暗示表示用の段階(M11-3)。snapshot 毎に組み直されるため、
+      // 会話中の adjust_affinity で段階が変われば表示も追従する(数値は送らない)
+      affinityTier: affinityTier(this.requireState().npcs[npcId].affinity),
+      options,
+      ...(proposal !== null ? { pendingProposal: this.pendingProposalView(proposal) } : {})
+    };
+  }
+
+  /** 提案中サブクエストの表示情報を組む */
+  private pendingProposalView(quest: SubQuest): PendingProposalView {
+    return {
+      type: quest.type,
+      title: quest.title,
+      description: quest.description,
+      count: quest.count,
+      rewardGold: quest.rewardGold,
+      ...(quest.rewardItemId !== undefined
+        ? { rewardItem: { itemId: quest.rewardItemId, name: ITEMS[quest.rewardItemId].name } }
+        : {})
+    };
+  }
+
+  /** 検証済み AI 発話/ナレーションのメッセージを組む */
+  private aiUtteranceMsg(channel: "speak" | "narrate", text: string, npcId?: NpcId): ServerMessage {
+    return npcId === undefined
+      ? { type: "ai-utterance", channel, text }
+      : { type: "ai-utterance", channel, npcId, text };
+  }
+
+  /**
+   * 対話ストリーミングの sink を組む(オーナー指示 2026-07-12。設計書
+   * docs/superpowers/specs/2026-07-12-dialog-streaming-design.md)。
+   * 未検証増分の**画面表示専用**の先行 push。世代印・同一NPC会話継続のガードを通る間だけ送る。
+   * 最終正文/定型文は従来どおり ai-utterance が運ぶ(ストリームの end/abort を兼ねる)。
+   * ai-stream-start は各試行の最初のデルタ直前に届く(turn-executor が制御)=
+   * リトライ時はクライアントが表示バッファをクリアして再開する。
+   */
+  private buildSpeakStreamSink(npcId: NpcId, generation: number): SpeakStreamSink {
+    const inConversation = (): boolean =>
+      this.gameGeneration === generation &&
+      this.state !== null &&
+      this.activeInteraction?.kind === "conversation" &&
+      this.activeInteraction.npcId === npcId;
+    return {
+      onAttemptStart: (): void => {
+        if (inConversation()) this.push([{ type: "ai-stream-start", npcId }]);
+      },
+      onDelta: (delta): void => {
+        if (inConversation()) this.push([{ type: "ai-stream-delta", text: delta }]);
+      }
+    };
+  }
+
+  /** 対話を解除する。会話中なら gatekeeper のセッションも破棄する(要約はしない=歩き去り等) */
+  private clearInteraction(): void {
+    if (this.activeInteraction?.kind === "conversation") {
+      this.gatekeeper?.closeConversation();
+    }
+    this.activeInteraction = null;
+  }
+
+  /** 提案サブクエスト id の次候補(採番は承認確定時に advanceQuestSeqIfProposed で進める) */
+  private peekQuestId(): string {
+    return `pq-${this.aiQuestSeq}`;
+  }
+
+  /** 直近のフローで新規提案が採用されていれば採番カウンタを進める(id 衝突回避) */
+  private advanceQuestSeqIfProposed(): void {
+    const proposal = this.gatekeeper?.getSession()?.getPendingProposal() ?? null;
+    if (proposal !== null && proposal.id === this.peekQuestId()) {
+      this.aiQuestSeq += 1;
+    }
+  }
+
+  /** ロード/新規時に既存 subQuest の pq-<n> id を跨いで採番カウンタを補正する(衝突回避) */
+  private syncQuestSeq(): void {
+    if (this.state === null) return;
+    let max = -1;
+    for (const quest of this.state.subQuests) {
+      const matched = /^pq-(\d+)$/.exec(quest.id);
+      if (matched !== null && matched[1] !== undefined) max = Math.max(max, Number(matched[1]));
+    }
+    this.aiQuestSeq = max + 1;
+  }
+
+  /** 夢シーンの <recent_play> 用の当日サマリ(Live prompt が使う。Mock は内容非依存) */
+  private buildRecentPlay(): string {
+    const state = this.requireState();
+    return `旅人は${Math.max(1, state.day - 1)}日目の探索を終え、灯町の宿で一日を手放した。`;
+  }
+
+  private buildView(): SnapshotView {
+    const state = this.requireState();
+    const stats = statsForLevel(state.player.level);
+    // 実効ステータス(装備込み)。maxHP/maxMP は装備の影響を受けないため、下の player.maxHp/maxMp は
+    // 基礎値(stats)のままで正しい(effectiveStats の maxHP/maxMP と同値。基礎値であることを明示する)。
+    const effective = effectiveStats(state.player.level, state.equipment);
+    const equipmentSlotView = (slot: EquipmentSlot): ViewEquipmentSlot | null => {
+      const id = state.equipment[slot];
+      if (id === null) return null;
+      const def = ITEMS[id];
+      const bonus = slot === "weapon" ? def.atkBonus ?? 0 : def.defBonus ?? 0;
+      return { itemId: id, name: def.name, bonus };
+    };
+    const toView = (s: { itemId: ItemId; count: number }): ViewItemStack => ({
+      itemId: s.itemId,
+      name: ITEMS[s.itemId].name,
+      count: s.count,
+      questItem: ITEMS[s.itemId].questItem
+    });
+
+    const base: SnapshotView = {
+      mode: this.mode,
+      mainQuestStage: state.mainQuestStage,
+      player: {
+        level: state.player.level,
+        xp: state.player.xp,
+        xpToNext: xpToNext(state.player.level),
+        hp: state.player.hp,
+        maxHp: stats.maxHP,
+        mp: state.player.mp,
+        maxMp: stats.maxMP,
+        gold: state.player.gold,
+        equipment: {
+          weapon: equipmentSlotView("weapon"),
+          armor: equipmentSlotView("armor")
+        },
+        effectiveAttack: effective.attack,
+        effectiveDefense: effective.defense
+      },
+      day: state.day,
+      // 時間帯(昼/夜。M23)。クライアントは描画(夜の帳・HUD)と NPC 配置
+      // (npcPlacementsForTime=サーバーの衝突判定と同一の純関数)に使う
+      timeOfDay: this.timeOfDay,
+      playtimeSeconds: this.currentPlaytimeSeconds(),
+      location: {
+        mapId: state.location.mapId,
+        position: { ...state.location.position },
+        facing: state.location.facing
+      },
+      inventory: state.inventory.items.map(toView),
+      questItems: state.inventory.questItems.map(toView),
+      inventoryCapacity: INVENTORY_CAPACITY,
+      inventoryUsed: usedSpace(state.inventory),
+      symbols: this.symbols.map((s) => ({ position: { ...s.position }, enemyId: s.enemyId, facing: s.facing })),
+      resolvedObjectIds: this.resolvedObjectIdsForCurrentMap(),
+      subQuests: this.buildSubQuestViews(),
+      // 世界状態の表示情報(M20-3)。市場の一言・不在NPCの非表示・侵食度tintに使う最小限のみ
+      world: {
+        marketShift: state.world.marketShift,
+        absentNpc: state.world.absentNpc,
+        dreamErosion: state.world.dreamErosion
+      },
+      // 訪問済みマップ(M22。「夢の地図」用)。接続グラフ・displayName はクライアントが MAPS から引く
+      visitedMaps: [...state.visitedMaps],
+      // 解除済み実績(M24。「夢の欠片」)。表示名・フレーバー・総数はクライアントが ACHIEVEMENTS から引く
+      unlockedAchievements: [...state.unlockedAchievements],
+      // 難易度(M25)。表示名はクライアントが DIFFICULTY_DISPLAY_NAMES から引く。E2E は data-difficulty で観測
+      difficulty: state.difficulty
+    };
+
+    return {
+      ...base,
+      ...(this.activeInteraction ? { interaction: this.activeInteraction } : {}),
+      ...(this.mode === "battle" && this.battle ? { battle: this.buildBattleView(this.battle) } : {})
+    };
+  }
+
+  private buildBattleView(battle: BattleState): ViewBattle {
+    return {
+      enemyId: battle.enemy.enemyId,
+      enemyName: ENEMY_DISPLAY_NAMES[battle.enemy.enemyId],
+      isBoss: battle.isBoss,
+      turn: battle.turn,
+      outcome: battle.outcome,
+      player: {
+        level: battle.player.level,
+        hp: battle.player.hp,
+        maxHp: battle.player.maxHP,
+        mp: battle.player.mp,
+        maxMp: battle.player.maxMP,
+        statuses: battle.player.statuses.map((s) => ({ ...s }))
+      },
+      enemy: {
+        hp: battle.enemy.hp,
+        maxHp: battle.enemy.maxHP,
+        statuses: battle.enemy.statuses.map((s) => ({ ...s }))
+      }
+    };
+  }
+
+  /** 受注中サブクエストの表示情報(クエストジャーナル)。target は type 別の表示名で解決する */
+  private buildSubQuestViews(): SnapshotView["subQuests"] {
+    const state = this.requireState();
+    return state.subQuests.map((q) => ({
+      id: q.id,
+      type: q.type,
+      targetName: subQuestTargetLabel(q),
+      progress: q.progress,
+      count: q.count,
+      rewardGold: q.rewardGold,
+      ...(q.rewardItemId !== undefined
+        ? { rewardItem: { itemId: q.rewardItemId, name: ITEMS[q.rewardItemId].name } }
+        : {}),
+      title: q.title,
+      description: q.description,
+      status: q.status,
+      // いま情報屋へ報告できるか(isReportReady が正)。ジャーナルの報告操作の可否表示に使う(M19-4)
+      reportReady: isReportReady(q, state.inventory)
+    }));
+  }
+
+  /** 現マップで解決/消費済みのオブジェクト id(開封済み宝箱 + 今回訪問の採取済み) */
+  private resolvedObjectIdsForCurrentMap(): string[] {
+    const state = this.requireState();
+    const map = MAPS[state.location.mapId];
+    const ids: string[] = [];
+    for (const object of map.objects) {
+      if (object.kind === "chest" && state.gimmicks.includes(object.id)) ids.push(object.id);
+      else if (object.kind === "gather" && this.gatheredThisVisit.has(object.id)) ids.push(object.id);
+    }
+    // 中ボス撃破フラグも載せる(クライアントが中ボスマーカーを非表示にするため。M10)
+    if (map.midBoss && state.gimmicks.includes(midBossDefeatFlag(map.midBoss.enemyId))) {
+      ids.push(midBossDefeatFlag(map.midBoss.enemyId));
+    }
+    return ids;
+  }
+
+  // =========================================================================
+  // ガード
+  // =========================================================================
+
+  /** state 非 null を保証(呼び出し側でガード済みの箇所用。内部不変条件) */
+  private requireState(): GameState {
+    if (this.state === null) throw new Error("GameState が初期化されていない(内部不変条件違反)");
+    return this.state;
+  }
+
+  /** 探索中のゲームがあるか。無ければ error 列を返す(呼び出し側は非 null なら早期 return) */
+  private requireExploration(): ServerMessage[] | null {
+    if (this.state === null) return this.errorMsgs("no-active-game", "まだ物語は始まっていない。");
+    if (this.mode !== "exploration") return this.errorMsgs("invalid-mode", "今はそれをする時ではない。");
+    return null;
+  }
+
+  // --- テスト用アクセサ(読み取り専用スナップショット取得) ---
+
+  /** 現在の権威スナップショットビューを取得する(テスト・デバッグ用) */
+  public getView(): SnapshotView | null {
+    return this.state === null ? null : this.buildView();
+  }
+
+  /** 現在の GameState(セーブ形)を取得する(テスト用。undefined なら未開始) */
+  public getState(): GameState | null {
+    return this.state;
+  }
+
+  /**
+   * 現在の戦闘状態を取得する(テスト用。非戦闘中は null)。
+   * 状態異常(竦み等)を差し込んで層跨ぎのガード(どうぐ消費の不発時非減算)を検証するのに使う。
+   */
+  public getBattleForTest(): BattleState | null {
+    return this.battle;
+  }
+
+  /**
+   * その日の移動成立歩数を取得する(テスト用。M23)。
+   * 「衝突・戦闘開始の踏み込みでは加算しない」「リセットで 0 に戻る」の検証に使う
+   * (timeOfDay 自体は view に露出するが、閾値未満の歩数は view から観測できないため)。
+   */
+  public getDayStepsForTest(): number {
+    return this.daySteps;
+  }
+}
